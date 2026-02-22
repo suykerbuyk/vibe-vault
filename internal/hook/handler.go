@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/johns/sesscap/internal/config"
-	"github.com/johns/sesscap/internal/session"
+	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/session"
 )
 
 // Input is the JSON object Claude Code sends to hooks via stdin.
@@ -96,10 +96,10 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 	}
 
 	if result.Skipped {
-		fmt.Fprintf(os.Stderr, "sesscap: skipped (%s)\n", result.Reason)
+		fmt.Fprintf(os.Stderr, "vv: skipped (%s)\n", result.Reason)
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "sesscap: %s → %s\n", result.Project, result.NotePath)
+	fmt.Fprintf(os.Stderr, "vv: %s → %s\n", result.Project, result.NotePath)
 	return nil
 }

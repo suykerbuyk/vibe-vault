@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/johns/sesscap/internal/config"
-	"github.com/johns/sesscap/internal/index"
-	"github.com/johns/sesscap/internal/render"
-	"github.com/johns/sesscap/internal/transcript"
+	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/index"
+	"github.com/johns/vibe-vault/internal/render"
+	"github.com/johns/vibe-vault/internal/transcript"
 )
 
 // CaptureResult holds the output of a capture operation.

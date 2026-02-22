@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/johns/sesscap/internal/config"
-	"github.com/johns/sesscap/internal/hook"
-	"github.com/johns/sesscap/internal/session"
+	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/hook"
+	"github.com/johns/vibe-vault/internal/session"
 )
 
 const version = "0.1.0"
@@ -31,7 +31,7 @@ func main() {
 
 	case "process":
 		if len(os.Args) < 3 {
-			fatal("usage: sesscap process <transcript.jsonl>")
+			fatal("usage: vv process <transcript.jsonl>")
 		}
 		path := os.Args[2]
 		result, err := session.Capture(path, "", "", cfg)
@@ -45,7 +45,7 @@ func main() {
 		}
 
 	case "version":
-		fmt.Printf("sesscap v%s\n", version)
+		fmt.Printf("vv v%s (vibe-vault)\n", version)
 
 	case "help", "--help", "-h":
 		usage()
@@ -58,18 +58,18 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `sesscap v%s — Claude Code session capture
+	fmt.Fprintf(os.Stderr, `vv v%s — vibe-vault session capture
 
 Usage:
-  sesscap hook [--event <name>]    Hook mode (reads stdin from Claude Code)
-  sesscap process <file.jsonl>     Process a single transcript file
-  sesscap version                  Print version
-  sesscap help                     Show this help
+  vv hook [--event <name>]    Hook mode (reads stdin from Claude Code)
+  vv process <file.jsonl>     Process a single transcript file
+  vv version                  Print version
+  vv help                     Show this help
 
 Hook integration (settings.json):
-  {"type": "command", "command": "sesscap hook"}
+  {"type": "command", "command": "vv hook"}
 
-Configuration: ~/.config/sesscap/config.toml
+Configuration: ~/.config/vibe-vault/config.toml
 `, version)
 }
 
@@ -83,6 +83,6 @@ func flagValue(args []string, flag string) string {
 }
 
 func fatal(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "sesscap: "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "vv: "+format+"\n", args...)
 	os.Exit(1)
 }

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johns/sesscap/internal/transcript"
+	"github.com/johns/vibe-vault/internal/transcript"
 )
 
 // NoteData holds everything needed to render a session note.
@@ -97,7 +97,7 @@ func SessionNote(d NoteData) string {
 
 	// Footer
 	b.WriteString("---\n")
-	b.WriteString("*sesscap v0.1.0*\n")
+	b.WriteString("*vv v0.1.0*\n")
 
 	return b.String()
 }

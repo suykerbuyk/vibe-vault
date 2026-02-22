@@ -9,7 +9,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Config holds all sesscap configuration.
+// Config holds all vibe-vault configuration.
 type Config struct {
 	VaultPath string `toml:"vault_path"`
 
@@ -87,12 +87,12 @@ func configPaths() []string {
 	var paths []string
 
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		paths = append(paths, filepath.Join(xdg, "sesscap", "config.toml"))
+		paths = append(paths, filepath.Join(xdg, "vibe-vault", "config.toml"))
 	}
 
 	home, _ := os.UserHomeDir()
 	if home != "" {
-		paths = append(paths, filepath.Join(home, ".config", "sesscap", "config.toml"))
+		paths = append(paths, filepath.Join(home, ".config", "vibe-vault", "config.toml"))
 	}
 
 	return paths
@@ -114,7 +114,7 @@ func (c Config) SessionsDir() string {
 	return filepath.Join(c.VaultPath, "Sessions")
 }
 
-// StateDir returns the .sesscap state directory inside the vault.
+// StateDir returns the .vibe-vault state directory inside the vault.
 func (c Config) StateDir() string {
-	return filepath.Join(c.VaultPath, ".sesscap")
+	return filepath.Join(c.VaultPath, ".vibe-vault")
 }

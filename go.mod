@@ -1,4 +1,4 @@
-module github.com/johns/sesscap
+module github.com/johns/vibe-vault
 
 go 1.25.0
 

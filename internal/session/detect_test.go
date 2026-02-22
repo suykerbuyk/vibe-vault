@@ -3,7 +3,7 @@ package session
 import (
 	"testing"
 
-	"github.com/johns/sesscap/internal/config"
+	"github.com/johns/vibe-vault/internal/config"
 )
 
 func TestDetectProject(t *testing.T) {
@@ -12,7 +12,7 @@ func TestDetectProject(t *testing.T) {
 		want string
 	}{
 		{"/home/user/work/my-api", "my-api"},
-		{"/home/user/personal/sesscap", "sesscap"},
+		{"/home/user/personal/vibe-vault", "vibe-vault"},
 		{"/home/user/obsidian/ObsMeetings", "ObsMeetings"},
 		{"", "_unknown"},
 		{"/", "_unknown"},
@@ -40,7 +40,7 @@ func TestDetectDomain(t *testing.T) {
 		want string
 	}{
 		{"/home/user/work/my-api", "work"},
-		{"/home/user/personal/sesscap", "personal"},
+		{"/home/user/personal/vibe-vault", "personal"},
 		{"/home/user/opensource/linux", "opensource"},
 		{"/home/user/random/project", "personal"}, // default
 		{"", "personal"},

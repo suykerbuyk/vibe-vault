@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/johns/sesscap/internal/config"
+	"github.com/johns/vibe-vault/internal/config"
 )
 
 // Info holds detected session metadata.
