@@ -1,0 +1,200 @@
+package render
+
+import (
+	"fmt"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/johns/sesscap/internal/transcript"
+)
+
+// NoteData holds everything needed to render a session note.
+type NoteData struct {
+	Date         string // YYYY-MM-DD
+	Project      string
+	Branch       string
+	Domain       string
+	Model        string
+	SessionID    string
+	Iteration    int
+	Duration     int // minutes
+	Messages     int // user + assistant
+	InputTokens  int
+	OutputTokens int
+	Title        string
+	Summary      string
+	PreviousNote string // wikilink target, e.g. "2026-02-21-03"
+	FilesChanged []string
+	Decisions    []string // placeholder for enrichment
+	OpenThreads  []string // placeholder for enrichment
+}
+
+// SessionNote renders a full Obsidian markdown note from NoteData.
+func SessionNote(d NoteData) string {
+	var b strings.Builder
+
+	// Frontmatter
+	b.WriteString("---\n")
+	b.WriteString(fmt.Sprintf("date: %s\n", d.Date))
+	b.WriteString("type: session\n")
+	b.WriteString(fmt.Sprintf("project: %s\n", d.Project))
+	if d.Branch != "" {
+		b.WriteString(fmt.Sprintf("branch: %s\n", d.Branch))
+	}
+	b.WriteString(fmt.Sprintf("domain: %s\n", d.Domain))
+	if d.Model != "" {
+		b.WriteString(fmt.Sprintf("model: %s\n", d.Model))
+	}
+	b.WriteString(fmt.Sprintf("session_id: \"%s\"\n", d.SessionID))
+	b.WriteString(fmt.Sprintf("iteration: %d\n", d.Iteration))
+	b.WriteString(fmt.Sprintf("duration_minutes: %d\n", d.Duration))
+	b.WriteString(fmt.Sprintf("messages: %d\n", d.Messages))
+	b.WriteString(fmt.Sprintf("tokens_in: %d\n", d.InputTokens))
+	b.WriteString(fmt.Sprintf("tokens_out: %d\n", d.OutputTokens))
+	b.WriteString("status: completed\n")
+	b.WriteString("tags: [cortana-session]\n")
+	b.WriteString(fmt.Sprintf("summary: \"%s\"\n", escapeYAML(d.Summary)))
+	if d.PreviousNote != "" {
+		b.WriteString(fmt.Sprintf("previous: \"[[%s]]\"\n", d.PreviousNote))
+	}
+	b.WriteString("---\n\n")
+
+	// Title
+	b.WriteString(fmt.Sprintf("# %s\n\n", d.Title))
+
+	// What Happened
+	b.WriteString("## What Happened\n\n")
+	b.WriteString(fmt.Sprintf("%s\n\n", d.Summary))
+
+	// What Changed
+	if len(d.FilesChanged) > 0 {
+		b.WriteString("## What Changed\n\n")
+		for _, f := range d.FilesChanged {
+			b.WriteString(fmt.Sprintf("- `%s`\n", f))
+		}
+		b.WriteString("\n")
+	}
+
+	// Key Decisions (placeholder for enrichment)
+	if len(d.Decisions) > 0 {
+		b.WriteString("## Key Decisions\n\n")
+		for _, d := range d.Decisions {
+			b.WriteString(fmt.Sprintf("- %s\n", d))
+		}
+		b.WriteString("\n")
+	}
+
+	// Open Threads (placeholder for enrichment)
+	if len(d.OpenThreads) > 0 {
+		b.WriteString("## Open Threads\n\n")
+		for _, t := range d.OpenThreads {
+			b.WriteString(fmt.Sprintf("- [ ] %s\n", t))
+		}
+		b.WriteString("\n")
+	}
+
+	// Footer
+	b.WriteString("---\n")
+	b.WriteString("*sesscap v0.1.0*\n")
+
+	return b.String()
+}
+
+// NoteDataFromTranscript builds NoteData from parsed transcript data and session metadata.
+func NoteDataFromTranscript(t *transcript.Transcript, project, domain, branch, sessionID string, iteration int, previous string) NoteData {
+	s := t.Stats
+
+	date := s.StartTime.Format("2006-01-02")
+	if date == "0001-01-01" {
+		date = time.Now().Format("2006-01-02")
+	}
+
+	firstMsg := transcript.FirstUserMessage(t)
+	title := titleFromFirstMessage(firstMsg)
+	summary := title
+	if summary == "Session" {
+		summary = "Claude Code session"
+	}
+
+	// Total input tokens = direct + cache reads + cache writes
+	totalInput := s.InputTokens + s.CacheReads + s.CacheWrites
+
+	// Collect changed files (written/edited), strip common prefix
+	var filesChanged []string
+	for f := range s.FilesWritten {
+		filesChanged = append(filesChanged, shortenPath(f, s.CWD))
+	}
+	sort.Strings(filesChanged)
+
+	return NoteData{
+		Date:         date,
+		Project:      project,
+		Branch:       branch,
+		Domain:       domain,
+		Model:        s.Model,
+		SessionID:    sessionID,
+		Iteration:    iteration,
+		Duration:     int(s.Duration.Minutes()),
+		Messages:     s.UserMessages + s.AssistantMessages,
+		InputTokens:  totalInput,
+		OutputTokens: s.OutputTokens,
+		Title:        title,
+		Summary:      summary,
+		PreviousNote: previous,
+		FilesChanged: filesChanged,
+	}
+}
+
+// NoteFilename returns the filename for a session note: YYYY-MM-DD-NN.md
+func NoteFilename(date string, iteration int) string {
+	return fmt.Sprintf("%s-%02d.md", date, iteration)
+}
+
+// NoteRelPath returns the relative path within the vault for a session note.
+func NoteRelPath(project, date string, iteration int) string {
+	return filepath.Join("Sessions", project, NoteFilename(date, iteration))
+}
+
+func titleFromFirstMessage(msg string) string {
+	if msg == "" {
+		return "Session"
+	}
+
+	msg = strings.TrimSpace(msg)
+
+	// Take first line
+	if idx := strings.IndexByte(msg, '\n'); idx > 0 {
+		msg = msg[:idx]
+	}
+
+	// Skip trivials
+	lower := strings.ToLower(msg)
+	trivials := []string{"hi", "hello", "hey", "ok", "okay", "yes", "no", "thanks", "thank you", "y", "n"}
+	for _, t := range trivials {
+		if lower == t {
+			return "Session"
+		}
+	}
+
+	// Truncate
+	if len(msg) > 80 {
+		msg = msg[:77] + "..."
+	}
+
+	return msg
+}
+
+func escapeYAML(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	return s
+}
+
+func shortenPath(path, cwd string) string {
+	if cwd != "" && strings.HasPrefix(path, cwd+"/") {
+		return path[len(cwd)+1:]
+	}
+	return path
+}
