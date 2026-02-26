@@ -40,7 +40,7 @@ type ArchiveConfig struct {
 // DefaultConfig returns config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		VaultPath: "~/obsidian/ObsMeetings",
+		VaultPath: "~/obsidian/vibe-vault",
 		Domains: DomainsConfig{
 			Work:       "~/work",
 			Personal:   "~/personal",

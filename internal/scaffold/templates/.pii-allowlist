@@ -1,0 +1,6 @@
+# Files excluded from PII scanning (glob patterns, one per line)
+# These paths may intentionally contain PII-like examples or patterns.
+docs/examples/*
+scripts/pii-check.sh
+.pii-patterns
+.pii-allowlist

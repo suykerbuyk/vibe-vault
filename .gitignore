@@ -1,2 +1,8 @@
 /vv
 *.test
+CLAUDE.md
+RESUME.md
+HISTORY.md
+commit.msg
+tasks/
+.claude/

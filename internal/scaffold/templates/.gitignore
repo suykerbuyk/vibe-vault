@@ -1,0 +1,21 @@
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/graph.json
+.trash/
+.DS_Store
+.hotreload/
+
+# vibe-vault tool state
+.vibe-vault/
+
+# Plugin bundles — install via Obsidian, don't redistribute
+.obsidian/plugins/*/main.js
+.obsidian/plugins/*/styles.css
+
+# Personal vault content — keep locally, never push
+Sessions/*/
+Knowledge/decisions/20*.md
+Knowledge/learnings/20*.md
+Knowledge/patterns/20*.md
+Projects/*.md
+!Projects/README.md
