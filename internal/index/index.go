@@ -26,8 +26,11 @@ type SessionEntry struct {
 	OpenThreads []string `json:"open_threads,omitempty"`
 	Tag         string   `json:"tag,omitempty"`
 	FilesChanged []string `json:"files_changed,omitempty"`
-	Branch         string   `json:"branch,omitempty"`
-	TranscriptPath string   `json:"transcript_path,omitempty"`
+	Branch         string         `json:"branch,omitempty"`
+	TranscriptPath string         `json:"transcript_path,omitempty"`
+	Checkpoint     bool           `json:"checkpoint,omitempty"`
+	ToolCounts     map[string]int `json:"tool_counts,omitempty"`
+	ToolUses       int            `json:"tool_uses,omitempty"`
 }
 
 // Index manages the session-index.json file.

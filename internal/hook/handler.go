@@ -47,8 +47,7 @@ func handleInput(input *Input, event string, cfg config.Config) error {
 	case "SessionEnd", "":
 		return handleSessionEnd(input, cfg)
 	case "Stop":
-		// Phase 2: learning capture
-		return nil
+		return handleStop(input, cfg)
 	default:
 		return fmt.Errorf("unknown hook event: %s", input.HookEventName)
 	}
@@ -87,6 +86,34 @@ func readStdin() (*Input, error) {
 	}
 
 	return &input, nil
+}
+
+func handleStop(input *Input, cfg config.Config) error {
+	if input.TranscriptPath == "" {
+		return nil
+	}
+
+	if _, err := os.Stat(input.TranscriptPath); os.IsNotExist(err) {
+		return nil
+	}
+
+	result, err := session.Capture(session.CaptureOpts{
+		TranscriptPath: input.TranscriptPath,
+		CWD:            input.CWD,
+		SessionID:      input.SessionID,
+		Checkpoint:     true,
+		SkipEnrichment: true,
+	}, cfg)
+	if err != nil {
+		return fmt.Errorf("capture checkpoint: %w", err)
+	}
+
+	if result.Skipped {
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "vv: checkpoint %s → %s\n", result.Project, result.NotePath)
+	return nil
 }
 
 func handleSessionEnd(input *Input, cfg config.Config) error {

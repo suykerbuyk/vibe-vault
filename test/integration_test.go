@@ -166,6 +166,28 @@ func assertNotContains(t *testing.T, s, substr, msg string) {
 	}
 }
 
+func runVVWithStdin(t *testing.T, env []string, stdin string, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	cmd := exec.Command(vvBinary, args...)
+	cmd.Env = env
+	cmd.Stdin = strings.NewReader(stdin)
+	var outBuf, errBuf strings.Builder
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	err = cmd.Run()
+	return outBuf.String(), errBuf.String(), err
+}
+
+// fixtureStopSession: session with tool usage for Stop/checkpoint testing.
+// 3 user + 3 assistant, 2 tool uses (Write, Edit), sessionId session-stop-001
+const fixtureStopSession = `{"type":"user","uuid":"u1","sessionId":"session-stop-001","timestamp":"2027-07-01T10:00:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/stop","message":{"role":"user","content":"Implement the stop hook feature"}}
+{"type":"assistant","uuid":"a1","sessionId":"session-stop-001","timestamp":"2027-07-01T10:01:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/stop","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll implement the stop hook."},{"type":"tool_use","id":"tu1","name":"Write","input":{"file_path":"/home/dev/myproject/handler.go","content":"// stop handler"}}],"usage":{"input_tokens":500,"output_tokens":200,"cache_creation_input_tokens":100,"cache_read_input_tokens":50}}}
+{"type":"user","uuid":"u2","sessionId":"session-stop-001","timestamp":"2027-07-01T10:02:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/stop","message":{"role":"user","content":"Add checkpoint capture logic"}}
+{"type":"assistant","uuid":"a2","sessionId":"session-stop-001","timestamp":"2027-07-01T10:03:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/stop","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Adding checkpoint capture."},{"type":"tool_use","id":"tu2","name":"Edit","input":{"file_path":"/home/dev/myproject/capture.go","old_string":"// TODO","new_string":"captureCheckpoint()"}}],"usage":{"input_tokens":400,"output_tokens":150,"cache_creation_input_tokens":0,"cache_read_input_tokens":200}}}
+{"type":"user","uuid":"u3","sessionId":"session-stop-001","timestamp":"2027-07-01T10:04:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/stop","message":{"role":"user","content":"Great, that looks good"}}
+{"type":"assistant","uuid":"a3","sessionId":"session-stop-001","timestamp":"2027-07-01T10:05:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/stop","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Done! The stop hook feature is complete."}],"usage":{"input_tokens":300,"output_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":100}}}
+`
+
 // --- Integration Test ---
 
 func TestIntegration(t *testing.T) {
@@ -396,7 +418,88 @@ func TestIntegration(t *testing.T) {
 		}
 	})
 
-	// 9. reprocess
+	// 9. stop_checkpoint_then_session_end
+	t.Run("stop_checkpoint_then_session_end", func(t *testing.T) {
+		stopTranscriptPath := writeFixture(t, fixtureDir, "session-stop-001.jsonl", fixtureStopSession)
+
+		// Build hook JSON for Stop event
+		stopJSON, _ := json.Marshal(map[string]string{
+			"session_id":      "session-stop-001",
+			"transcript_path": stopTranscriptPath,
+			"hook_event_name": "Stop",
+			"cwd":             "/home/dev/myproject",
+		})
+
+		// Fire Stop event
+		_, stopStderr, err := runVVWithStdin(t, env, string(stopJSON), "hook", "--event", "Stop")
+		if err != nil {
+			t.Fatalf("Stop hook failed: %v\nstderr: %s", err, stopStderr)
+		}
+
+		// Verify checkpoint note exists with status: checkpoint
+		notePath := filepath.Join(vaultPath, "Sessions", "myproject", "2027-07-01-01.md")
+		if !fileExists(notePath) {
+			t.Fatalf("checkpoint note not created at %s", notePath)
+		}
+
+		checkpointNote := readFile(t, notePath)
+		assertContains(t, checkpointNote, "status: checkpoint", "checkpoint status")
+		assertContains(t, checkpointNote, "## Tool Usage", "tool usage section")
+		assertContains(t, checkpointNote, "tool_uses:", "tool_uses frontmatter")
+
+		// Verify index has checkpoint flag
+		idx := readIndex(t, stateDir)
+		stopEntry, ok := idx["session-stop-001"]
+		if !ok {
+			t.Fatal("session-stop-001 not in index after Stop")
+		}
+		if checkpoint, ok := stopEntry["checkpoint"].(bool); !ok || !checkpoint {
+			t.Errorf("expected checkpoint=true in index, got %v", stopEntry["checkpoint"])
+		}
+
+		// Fire SessionEnd event (should finalize)
+		endJSON, _ := json.Marshal(map[string]string{
+			"session_id":      "session-stop-001",
+			"transcript_path": stopTranscriptPath,
+			"hook_event_name": "SessionEnd",
+			"cwd":             "/home/dev/myproject",
+		})
+
+		_, endStderr, err := runVVWithStdin(t, env, string(endJSON), "hook", "--event", "SessionEnd")
+		if err != nil {
+			t.Fatalf("SessionEnd hook failed: %v\nstderr: %s", err, endStderr)
+		}
+
+		// Verify note is now finalized
+		finalizedNote := readFile(t, notePath)
+		assertContains(t, finalizedNote, "status: completed", "finalized status")
+		assertNotContains(t, finalizedNote, "status: checkpoint", "no checkpoint in finalized")
+
+		// Verify index no longer has checkpoint flag
+		idx = readIndex(t, stateDir)
+		finalEntry, ok := idx["session-stop-001"]
+		if !ok {
+			t.Fatal("session-stop-001 not in index after SessionEnd")
+		}
+		if checkpoint, ok := finalEntry["checkpoint"].(bool); ok && checkpoint {
+			t.Error("checkpoint should be false after SessionEnd finalization")
+		}
+
+		// Verify only one note file for this session (not two)
+		projectDir := filepath.Join(vaultPath, "Sessions", "myproject")
+		entries, _ := os.ReadDir(projectDir)
+		stopNotes := 0
+		for _, e := range entries {
+			if strings.Contains(e.Name(), "2027-07-01") {
+				stopNotes++
+			}
+		}
+		if stopNotes != 1 {
+			t.Errorf("expected 1 note file for 2027-07-01, got %d", stopNotes)
+		}
+	})
+
+	// 10. reprocess
 	t.Run("reprocess", func(t *testing.T) {
 		stdout := mustRunVV(t, env, "reprocess")
 		assertContains(t, stdout, "reprocessed:", "reprocess stdout")

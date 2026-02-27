@@ -142,6 +142,75 @@ func TestIndexTranscriptPathRoundTrip(t *testing.T) {
 	}
 }
 
+func TestIndexCheckpointRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	idx, _ := Load(dir)
+
+	entry := SessionEntry{
+		SessionID:  "sess-ckpt",
+		NotePath:   "Sessions/proj/2026-02-27-01.md",
+		Project:    "proj",
+		Date:       "2026-02-27",
+		Iteration:  1,
+		Checkpoint: true,
+	}
+
+	idx.Add(entry)
+	if err := idx.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	idx2, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	e := idx2.Entries["sess-ckpt"]
+	if !e.Checkpoint {
+		t.Error("Checkpoint should be true after round-trip")
+	}
+}
+
+func TestIndexToolCountsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	idx, _ := Load(dir)
+
+	entry := SessionEntry{
+		SessionID: "sess-tools",
+		NotePath:  "Sessions/proj/2026-02-27-01.md",
+		Project:   "proj",
+		Date:      "2026-02-27",
+		Iteration: 1,
+		ToolCounts: map[string]int{
+			"Bash":  12,
+			"Read":  15,
+			"Write": 8,
+		},
+		ToolUses: 35,
+	}
+
+	idx.Add(entry)
+	if err := idx.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	idx2, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	e := idx2.Entries["sess-tools"]
+	if e.ToolUses != 35 {
+		t.Errorf("ToolUses = %d, want 35", e.ToolUses)
+	}
+	if len(e.ToolCounts) != 3 {
+		t.Errorf("ToolCounts len = %d, want 3", len(e.ToolCounts))
+	}
+	if e.ToolCounts["Bash"] != 12 {
+		t.Errorf("ToolCounts[Bash] = %d, want 12", e.ToolCounts["Bash"])
+	}
+}
+
 // --- Rebuild tests ---
 
 func writeNote(t *testing.T, dir, project, filename, content string) {

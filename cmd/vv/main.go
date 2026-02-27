@@ -121,8 +121,11 @@ Examples:
 	fmt.Println("\nDone! Next steps:")
 	fmt.Printf("  1. Open %s in Obsidian\n", absTarget)
 	fmt.Println("  2. Install community plugins: Dataview, Templater")
-	fmt.Println("  3. Add hook to ~/.claude/settings.json:")
-	fmt.Println(`     {"hooks": {"SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}]}}`)
+	fmt.Println("  3. Add hooks to ~/.claude/settings.json:")
+	fmt.Println(`     {"hooks": {`)
+	fmt.Println(`       "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}],`)
+	fmt.Println(`       "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}]`)
+	fmt.Println(`     }}`)
 	fmt.Printf("\nConfig written to %s\n", cfgPath)
 }
 
@@ -136,15 +139,22 @@ Flags:
   --event <name>   Override the hook event type (default: read from stdin)
 
 Reads a JSON payload from stdin as delivered by Claude Code's hook
-system. On SessionEnd events, parses the transcript and writes a
-session note. Other events (Stop, clear) are silently ignored.
+system. Handles two event types:
+
+  SessionEnd — parses transcript, writes a finalized session note
+  Stop       — captures a mid-session checkpoint (no LLM enrichment)
+
+Checkpoint notes are provisional: a subsequent Stop overwrites the
+previous checkpoint, and SessionEnd finalizes it. Clear events and
+unknown events are silently ignored.
 
 This command is meant to be called by Claude Code, not directly.
 
 Hook integration (add to ~/.claude/settings.json):
-  {"hooks": {"SessionEnd": [{"matcher": "", "hooks": [
-    {"type": "command", "command": "vv hook"}
-  ]}]}}
+  {"hooks": {
+    "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}],
+    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}]
+  }}
 `)
 		return
 	}

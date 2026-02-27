@@ -114,9 +114,24 @@ func Rebuild(sessionsDir, stateDir string) (*Index, int, error) {
 			}
 		}
 
-		// Preserve TranscriptPath from old index (not stored in notes)
-		if old, ok := oldIdx.Entries[note.SessionID]; ok && old.TranscriptPath != "" {
-			entry.TranscriptPath = old.TranscriptPath
+		// Parse tool_uses from frontmatter
+		if tu, ok := note.Frontmatter["tool_uses"]; ok {
+			entry.ToolUses, _ = strconv.Atoi(tu)
+		}
+
+		// Parse status: checkpoint flag
+		if status, ok := note.Frontmatter["status"]; ok && status == "checkpoint" {
+			entry.Checkpoint = true
+		}
+
+		// Preserve fields from old index that aren't stored in notes
+		if old, ok := oldIdx.Entries[note.SessionID]; ok {
+			if old.TranscriptPath != "" {
+				entry.TranscriptPath = old.TranscriptPath
+			}
+			if len(old.ToolCounts) > 0 {
+				entry.ToolCounts = old.ToolCounts
+			}
 		}
 
 		idx.Entries[note.SessionID] = entry

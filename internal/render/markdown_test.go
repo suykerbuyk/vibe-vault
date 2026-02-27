@@ -267,6 +267,67 @@ func TestNoteRelPath(t *testing.T) {
 	}
 }
 
+func TestSessionNote_ToolUsage(t *testing.T) {
+	d := NoteData{
+		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",
+		ToolCounts: map[string]int{"Bash": 12, "Read": 15, "Write": 8},
+		TotalTools: 35,
+	}
+	out := SessionNote(d)
+
+	// Frontmatter
+	if !strings.Contains(out, "tool_uses: 35") {
+		t.Error("missing tool_uses in frontmatter")
+	}
+	if !strings.Contains(out, "tools: [Bash, Read, Write]") {
+		t.Errorf("missing/wrong tools in frontmatter, got: %s", extractLine(out, "tools:"))
+	}
+
+	// Body section
+	if !strings.Contains(out, "## Tool Usage") {
+		t.Error("missing ## Tool Usage section")
+	}
+	if !strings.Contains(out, "**Total: 35 tool calls**") {
+		t.Error("missing total tool calls line")
+	}
+	if !strings.Contains(out, "| Bash | 12 |") {
+		t.Error("missing Bash row in tool table")
+	}
+	if !strings.Contains(out, "| Read | 15 |") {
+		t.Error("missing Read row in tool table")
+	}
+	if !strings.Contains(out, "| Write | 8 |") {
+		t.Error("missing Write row in tool table")
+	}
+}
+
+func TestSessionNote_CheckpointStatus(t *testing.T) {
+	d := NoteData{
+		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",
+		Status: "checkpoint",
+	}
+	out := SessionNote(d)
+	if !strings.Contains(out, "status: checkpoint") {
+		t.Error("missing status: checkpoint in frontmatter")
+	}
+	if strings.Contains(out, "status: completed") {
+		t.Error("should not have status: completed when checkpoint")
+	}
+}
+
+func TestSessionNote_NoTools(t *testing.T) {
+	d := NoteData{
+		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",
+	}
+	out := SessionNote(d)
+	if strings.Contains(out, "## Tool Usage") {
+		t.Error("should not have Tool Usage section when TotalTools == 0")
+	}
+	if strings.Contains(out, "tool_uses:") {
+		t.Error("should not have tool_uses in frontmatter when TotalTools == 0")
+	}
+}
+
 // extractLine finds the first line containing substr for error messages.
 func extractLine(text, substr string) string {
 	for _, line := range strings.Split(text, "\n") {

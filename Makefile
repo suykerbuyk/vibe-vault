@@ -2,7 +2,7 @@ BINARY := vv
 VERSION := 0.1.0
 GOFLAGS := -trimpath -ldflags="-s -w"
 
-.PHONY: build install test integration clean
+.PHONY: build install test integration check clean
 
 build:
 	go build $(GOFLAGS) -o $(BINARY) ./cmd/vv
@@ -14,6 +14,10 @@ test:
 	go test -short ./...
 
 integration:
+	go test -run TestIntegration -timeout 60s -count=1 ./test/
+
+check:
+	go test -count=1 ./internal/...
 	go test -run TestIntegration -timeout 60s -count=1 ./test/
 
 clean:

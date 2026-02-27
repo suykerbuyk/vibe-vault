@@ -23,6 +23,8 @@ type CaptureOpts struct {
 	CWD            string
 	SessionID      string
 	Force          bool // skip dedup, overwrite existing note
+	Checkpoint     bool // provisional capture (Stop hook)
+	SkipEnrichment bool // skip LLM enrichment
 }
 
 // CaptureResult holds the output of a capture operation.
@@ -53,6 +55,11 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		return &CaptureResult{Skipped: true, Reason: "trivial session (< 2 messages)"}, nil
 	}
 
+	// Checkpoint-specific trivial filter: skip if no substantive work yet
+	if opts.Checkpoint && t.Stats.ToolUses == 0 && t.Stats.AssistantMessages < 3 {
+		return &CaptureResult{Skipped: true, Reason: "checkpoint: no substantive work yet"}, nil
+	}
+
 	// Use transcript CWD if hook didn't provide one
 	if cwd == "" {
 		cwd = t.Stats.CWD
@@ -71,8 +78,9 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		idx = &index.Index{Entries: make(map[string]index.SessionEntry)}
 	}
 
-	// Skip if already processed (unless Force)
-	if !opts.Force && idx.Has(sessionID) {
+	// Dedup: check existing entry
+	existing, exists := idx.Entries[sessionID]
+	if !opts.Force && exists && !existing.Checkpoint {
 		return &CaptureResult{Skipped: true, Reason: "already processed"}, nil
 	}
 
@@ -82,10 +90,10 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		date = time.Now().Format("2006-01-02")
 	}
 
-	// Reuse existing iteration when force-reprocessing to avoid duplicates
+	// Reuse existing iteration when overwriting to avoid duplicate note files
 	var iteration int
-	if opts.Force {
-		if existing, ok := idx.Entries[sessionID]; ok {
+	if opts.Force || exists {
+		if exists {
 			iteration = existing.Iteration
 			// Clean up old note if path will change (e.g., project reassignment)
 			oldPath := filepath.Join(cfg.VaultPath, existing.NotePath)
@@ -110,42 +118,49 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	// Build note data
 	noteData := render.NoteDataFromTranscript(t, info.Project, info.Domain, info.Branch, sessionID, iteration, previousNote)
 
+	// Mark checkpoint status
+	if opts.Checkpoint {
+		noteData.Status = "checkpoint"
+	}
+
 	// LLM enrichment (graceful: skip on error or if disabled)
-	var filesChanged []string
-	for f := range t.Stats.FilesWritten {
-		filesChanged = append(filesChanged, f)
-	}
-	sort.Strings(filesChanged)
-
-	enrichInput := enrichment.PromptInput{
-		UserText:     transcript.UserText(t),
-		AssistantText: transcript.AssistantText(t),
-		FilesChanged:  filesChanged,
-		ToolCounts:    t.Stats.ToolCounts,
-		Duration:      int(t.Stats.Duration.Minutes()),
-		UserMessages:  t.Stats.UserMessages,
-		AsstMessages:  t.Stats.AssistantMessages,
-	}
-
-	timeout := time.Duration(cfg.Enrichment.TimeoutSeconds) * time.Second
-	if timeout == 0 {
-		timeout = 10 * time.Second
-	}
-	enrichCtx, enrichCancel := context.WithTimeout(context.Background(), timeout)
-	defer enrichCancel()
-
-	enrichResult, enrichErr := enrichment.Generate(enrichCtx, cfg.Enrichment, enrichInput)
-	if enrichErr != nil {
-		log.Printf("warning: enrichment failed: %v", enrichErr)
-	}
-	if enrichResult != nil {
-		if enrichResult.Summary != "" {
-			noteData.Summary = enrichResult.Summary
+	if !opts.SkipEnrichment {
+		var filesChanged []string
+		for f := range t.Stats.FilesWritten {
+			filesChanged = append(filesChanged, f)
 		}
-		noteData.Decisions = enrichResult.Decisions
-		noteData.OpenThreads = enrichResult.OpenThreads
-		noteData.Tag = enrichResult.Tag
-		noteData.EnrichedBy = cfg.Enrichment.Model
+		sort.Strings(filesChanged)
+
+		enrichInput := enrichment.PromptInput{
+			UserText:      transcript.UserText(t),
+			AssistantText: transcript.AssistantText(t),
+			FilesChanged:  filesChanged,
+			ToolCounts:    t.Stats.ToolCounts,
+			Duration:      int(t.Stats.Duration.Minutes()),
+			UserMessages:  t.Stats.UserMessages,
+			AsstMessages:  t.Stats.AssistantMessages,
+		}
+
+		timeout := time.Duration(cfg.Enrichment.TimeoutSeconds) * time.Second
+		if timeout == 0 {
+			timeout = 10 * time.Second
+		}
+		enrichCtx, enrichCancel := context.WithTimeout(context.Background(), timeout)
+		defer enrichCancel()
+
+		enrichResult, enrichErr := enrichment.Generate(enrichCtx, cfg.Enrichment, enrichInput)
+		if enrichErr != nil {
+			log.Printf("warning: enrichment failed: %v", enrichErr)
+		}
+		if enrichResult != nil {
+			if enrichResult.Summary != "" {
+				noteData.Summary = enrichResult.Summary
+			}
+			noteData.Decisions = enrichResult.Decisions
+			noteData.OpenThreads = enrichResult.OpenThreads
+			noteData.Tag = enrichResult.Tag
+			noteData.EnrichedBy = cfg.Enrichment.Model
+		}
 	}
 
 	// Compute related sessions
@@ -212,6 +227,9 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		FilesChanged:   noteData.FilesChanged,
 		Branch:         info.Branch,
 		TranscriptPath: transcriptPath,
+		Checkpoint:     opts.Checkpoint,
+		ToolCounts:     t.Stats.ToolCounts,
+		ToolUses:       t.Stats.ToolUses,
 	})
 
 	if err := idx.Save(); err != nil {

@@ -38,6 +38,9 @@ type NoteData struct {
 	EnrichedBy   string // model name, e.g. "grok-3-mini-fast"
 	Tag          string // activity tag, e.g. "implementation"
 	RelatedNotes []RelatedNote
+	ToolCounts   map[string]int
+	TotalTools   int
+	Status       string // "completed" or "checkpoint"
 }
 
 // SessionNote renders a full Obsidian markdown note from NoteData.
@@ -62,7 +65,20 @@ func SessionNote(d NoteData) string {
 	b.WriteString(fmt.Sprintf("messages: %d\n", d.Messages))
 	b.WriteString(fmt.Sprintf("tokens_in: %d\n", d.InputTokens))
 	b.WriteString(fmt.Sprintf("tokens_out: %d\n", d.OutputTokens))
-	b.WriteString("status: completed\n")
+	if d.TotalTools > 0 {
+		b.WriteString(fmt.Sprintf("tool_uses: %d\n", d.TotalTools))
+		var toolNames []string
+		for name := range d.ToolCounts {
+			toolNames = append(toolNames, name)
+		}
+		sort.Strings(toolNames)
+		b.WriteString(fmt.Sprintf("tools: [%s]\n", strings.Join(toolNames, ", ")))
+	}
+	status := d.Status
+	if status == "" {
+		status = "completed"
+	}
+	b.WriteString(fmt.Sprintf("status: %s\n", status))
 	if d.Tag != "" {
 		b.WriteString(fmt.Sprintf("tags: [cortana-session, %s]\n", d.Tag))
 	} else {
@@ -96,6 +112,23 @@ func SessionNote(d NoteData) string {
 		b.WriteString("## What Changed\n\n")
 		for _, f := range d.FilesChanged {
 			b.WriteString(fmt.Sprintf("- `%s`\n", f))
+		}
+		b.WriteString("\n")
+	}
+
+	// Tool Usage
+	if d.TotalTools > 0 {
+		b.WriteString("## Tool Usage\n\n")
+		b.WriteString(fmt.Sprintf("**Total: %d tool calls**\n\n", d.TotalTools))
+		b.WriteString("| Tool | Count |\n")
+		b.WriteString("|------|-------|\n")
+		var toolNames []string
+		for name := range d.ToolCounts {
+			toolNames = append(toolNames, name)
+		}
+		sort.Strings(toolNames)
+		for _, name := range toolNames {
+			b.WriteString(fmt.Sprintf("| %s | %d |\n", name, d.ToolCounts[name]))
 		}
 		b.WriteString("\n")
 	}
@@ -180,6 +213,8 @@ func NoteDataFromTranscript(t *transcript.Transcript, project, domain, branch, s
 		Summary:      summary,
 		PreviousNote: previous,
 		FilesChanged: filesChanged,
+		ToolCounts:   s.ToolCounts,
+		TotalTools:   s.ToolUses,
 	}
 }
 
