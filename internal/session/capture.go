@@ -1,13 +1,16 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/enrichment"
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/render"
 	"github.com/johns/vibe-vault/internal/transcript"
@@ -76,6 +79,44 @@ func Capture(transcriptPath string, cwd string, sessionID string, cfg config.Con
 
 	// Build note data
 	noteData := render.NoteDataFromTranscript(t, info.Project, info.Domain, info.Branch, sessionID, iteration, previousNote)
+
+	// LLM enrichment (graceful: skip on error or if disabled)
+	var filesChanged []string
+	for f := range t.Stats.FilesWritten {
+		filesChanged = append(filesChanged, f)
+	}
+	sort.Strings(filesChanged)
+
+	enrichInput := enrichment.PromptInput{
+		UserText:     transcript.UserText(t),
+		AssistantText: transcript.AssistantText(t),
+		FilesChanged:  filesChanged,
+		ToolCounts:    t.Stats.ToolCounts,
+		Duration:      int(t.Stats.Duration.Minutes()),
+		UserMessages:  t.Stats.UserMessages,
+		AsstMessages:  t.Stats.AssistantMessages,
+	}
+
+	timeout := time.Duration(cfg.Enrichment.TimeoutSeconds) * time.Second
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
+	enrichCtx, enrichCancel := context.WithTimeout(context.Background(), timeout)
+	defer enrichCancel()
+
+	enrichResult, enrichErr := enrichment.Generate(enrichCtx, cfg.Enrichment, enrichInput)
+	if enrichErr != nil {
+		log.Printf("warning: enrichment failed: %v", enrichErr)
+	}
+	if enrichResult != nil {
+		if enrichResult.Summary != "" {
+			noteData.Summary = enrichResult.Summary
+		}
+		noteData.Decisions = enrichResult.Decisions
+		noteData.OpenThreads = enrichResult.OpenThreads
+		noteData.Tag = enrichResult.Tag
+		noteData.EnrichedBy = cfg.Enrichment.Model
+	}
 
 	// Render markdown
 	markdown := render.SessionNote(noteData)

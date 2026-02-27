@@ -27,8 +27,10 @@ type NoteData struct {
 	Summary      string
 	PreviousNote string // wikilink target, e.g. "2026-02-21-03"
 	FilesChanged []string
-	Decisions    []string // placeholder for enrichment
-	OpenThreads  []string // placeholder for enrichment
+	Decisions    []string
+	OpenThreads  []string
+	EnrichedBy   string // model name, e.g. "grok-3-mini-fast"
+	Tag          string // activity tag, e.g. "implementation"
 }
 
 // SessionNote renders a full Obsidian markdown note from NoteData.
@@ -54,7 +56,11 @@ func SessionNote(d NoteData) string {
 	b.WriteString(fmt.Sprintf("tokens_in: %d\n", d.InputTokens))
 	b.WriteString(fmt.Sprintf("tokens_out: %d\n", d.OutputTokens))
 	b.WriteString("status: completed\n")
-	b.WriteString("tags: [cortana-session]\n")
+	if d.Tag != "" {
+		b.WriteString(fmt.Sprintf("tags: [cortana-session, %s]\n", d.Tag))
+	} else {
+		b.WriteString("tags: [cortana-session]\n")
+	}
 	b.WriteString(fmt.Sprintf("summary: \"%s\"\n", escapeYAML(d.Summary)))
 	if d.PreviousNote != "" {
 		b.WriteString(fmt.Sprintf("previous: \"[[%s]]\"\n", d.PreviousNote))
@@ -77,7 +83,7 @@ func SessionNote(d NoteData) string {
 		b.WriteString("\n")
 	}
 
-	// Key Decisions (placeholder for enrichment)
+	// Key Decisions
 	if len(d.Decisions) > 0 {
 		b.WriteString("## Key Decisions\n\n")
 		for _, d := range d.Decisions {
@@ -86,7 +92,7 @@ func SessionNote(d NoteData) string {
 		b.WriteString("\n")
 	}
 
-	// Open Threads (placeholder for enrichment)
+	// Open Threads
 	if len(d.OpenThreads) > 0 {
 		b.WriteString("## Open Threads\n\n")
 		for _, t := range d.OpenThreads {
@@ -97,7 +103,11 @@ func SessionNote(d NoteData) string {
 
 	// Footer
 	b.WriteString("---\n")
-	b.WriteString("*vv v0.1.0*\n")
+	if d.EnrichedBy != "" {
+		b.WriteString(fmt.Sprintf("*vv v0.1.0 | enriched by %s*\n", d.EnrichedBy))
+	} else {
+		b.WriteString("*vv v0.1.0*\n")
+	}
 
 	return b.String()
 }
