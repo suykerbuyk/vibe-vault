@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/johns/vibe-vault/internal/archive"
 	"github.com/johns/vibe-vault/internal/check"
@@ -29,27 +30,10 @@ func main() {
 		runInit()
 
 	case "hook":
-		cfg := mustLoadConfig()
-		event := flagValue(os.Args[2:], "--event")
-		if err := hook.Handle(cfg, event); err != nil {
-			fatal("%v", err)
-		}
+		runHook()
 
 	case "process":
-		cfg := mustLoadConfig()
-		if len(os.Args) < 3 {
-			fatal("usage: vv process <transcript.jsonl>")
-		}
-		path := os.Args[2]
-		result, err := session.Capture(session.CaptureOpts{TranscriptPath: path}, cfg)
-		if err != nil {
-			fatal("process: %v", err)
-		}
-		if result.Skipped {
-			fmt.Printf("skipped: %s\n", result.Reason)
-		} else {
-			fmt.Printf("created: %s (%s)\n", result.NotePath, result.Title)
-		}
+		runProcess()
 
 	case "index":
 		runIndex()
@@ -64,17 +48,12 @@ func main() {
 		runReprocess()
 
 	case "check":
-		cfg := mustLoadConfig()
-		report := check.Run(cfg)
-		fmt.Print(report.Format())
-		if report.HasFailures() {
-			os.Exit(1)
-		}
+		runCheck()
 
 	case "version":
 		fmt.Printf("vv v%s (vibe-vault)\n", version)
 
-	case "help", "--help", "-h":
+	case "help", "--help", "-help", "-h":
 		usage()
 
 	default:
@@ -86,10 +65,39 @@ func main() {
 
 func runInit() {
 	args := os.Args[2:]
+	if wantsHelp(args) {
+		fmt.Fprintf(os.Stderr, `vv init — create a new Obsidian vault for session notes
+
+Usage: vv init [path] [--git]
+
+Arguments:
+  path       Target directory (default: ./vibe-vault)
+
+Flags:
+  --git      Initialize a git repository in the new vault
+
+Creates a fully configured Obsidian vault with Dataview dashboards,
+Templater templates, and session capture infrastructure. Also writes
+a default config to ~/.config/vibe-vault/config.toml pointing at the
+new vault.
+
+Examples:
+  vv init                       Create ./vibe-vault
+  vv init ~/obsidian/my-vault   Create at a specific path
+  vv init --git                 Create with git repo initialized
+`)
+		return
+	}
+
 	gitInit := hasFlag(args, "--git")
 	args = removeFlag(args, "--git")
 
 	target := "./vibe-vault"
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			fatal("unknown flag: %s\nusage: vv init [path] [--git]", a)
+		}
+	}
 	if len(args) > 0 {
 		target = args[0]
 	}
@@ -118,7 +126,117 @@ func runInit() {
 	fmt.Printf("\nConfig written to %s\n", cfgPath)
 }
 
+func runHook() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprintf(os.Stderr, `vv hook — Claude Code hook handler
+
+Usage: vv hook [--event <name>]
+
+Flags:
+  --event <name>   Override the hook event type (default: read from stdin)
+
+Reads a JSON payload from stdin as delivered by Claude Code's hook
+system. On SessionEnd events, parses the transcript and writes a
+session note. Other events (Stop, clear) are silently ignored.
+
+This command is meant to be called by Claude Code, not directly.
+
+Hook integration (add to ~/.claude/settings.json):
+  {"hooks": {"SessionEnd": [{"matcher": "", "hooks": [
+    {"type": "command", "command": "vv hook"}
+  ]}]}}
+`)
+		return
+	}
+
+	cfg := mustLoadConfig()
+	event := flagValue(os.Args[2:], "--event")
+	if err := hook.Handle(cfg, event); err != nil {
+		fatal("%v", err)
+	}
+}
+
+func runProcess() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprintf(os.Stderr, `vv process — process a single transcript file
+
+Usage: vv process <transcript.jsonl>
+
+Arguments:
+  transcript.jsonl   Path to a Claude Code JSONL transcript
+
+Parses the transcript, detects the project from the session's working
+directory, and writes a session note to the vault. Skips trivial
+sessions (< 2 messages) and already-indexed sessions.
+
+Examples:
+  vv process ~/.claude/projects/-home-user-myproject/abc123.jsonl
+`)
+		return
+	}
+
+	cfg := mustLoadConfig()
+	if len(os.Args) < 3 {
+		fatal("usage: vv process <transcript.jsonl>")
+	}
+	path := os.Args[2]
+	result, err := session.Capture(session.CaptureOpts{TranscriptPath: path}, cfg)
+	if err != nil {
+		fatal("process: %v", err)
+	}
+	if result.Skipped {
+		fmt.Printf("skipped: %s\n", result.Reason)
+	} else {
+		fmt.Printf("created: %s (%s)\n", result.NotePath, result.Title)
+	}
+}
+
+func runCheck() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprintf(os.Stderr, `vv check — validate config, vault, and hook setup
+
+Usage: vv check
+
+Runs diagnostic checks and prints a pass/warn/FAIL report:
+  - Config file location and validity
+  - Vault directory exists
+  - Obsidian config present (.obsidian/)
+  - Sessions directory and note count
+  - State directory (.vibe-vault/)
+  - Session index validity and entry count
+  - Domain paths exist
+  - Enrichment config and API key
+  - Claude Code hook setup in ~/.claude/settings.json
+
+Exit code 0 if all checks pass or warn, 1 if any check fails.
+`)
+		return
+	}
+
+	cfg := mustLoadConfig()
+	report := check.Run(cfg)
+	fmt.Print(report.Format())
+	if report.HasFailures() {
+		os.Exit(1)
+	}
+}
+
 func runIndex() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprintf(os.Stderr, `vv index — rebuild session index from notes
+
+Usage: vv index
+
+Walks Sessions/**/*.md in the vault, parses frontmatter from each note,
+and rebuilds .vibe-vault/session-index.json. Preserves TranscriptPath
+values from the existing index. Generates a _context.md document for
+each project with timeline, decisions, open threads, and key files.
+
+Use this after manually editing or deleting session notes.
+`)
+		return
+	}
+
 	cfg := mustLoadConfig()
 
 	idx, count, err := index.Rebuild(cfg.SessionsDir(), cfg.StateDir())
@@ -159,6 +277,29 @@ func defaultTranscriptDir() string {
 }
 
 func runBackfill() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprintf(os.Stderr, `vv backfill — discover and process historical transcripts
+
+Usage: vv backfill [path]
+
+Arguments:
+  path   Directory to scan for transcripts (default: ~/.claude/projects/)
+
+Recursively discovers Claude Code JSONL transcripts by UUID filename
+pattern, skips already-indexed sessions, and processes the rest through
+the full capture pipeline. Also patches TranscriptPath on existing index
+entries that lack it.
+
+Subagent transcripts (in /subagents/ subdirectories) are automatically
+filtered out.
+
+Examples:
+  vv backfill                              Scan default Claude projects dir
+  vv backfill ~/.claude/projects/myproj    Scan a specific directory
+`)
+		return
+	}
+
 	cfg := mustLoadConfig()
 
 	basePath := defaultTranscriptDir()
@@ -235,6 +376,21 @@ func runBackfill() {
 }
 
 func runArchive() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprintf(os.Stderr, `vv archive — compress transcripts into vault archive
+
+Usage: vv archive
+
+Iterates all sessions in the index and compresses each transcript to
+.vibe-vault/archive/{session-id}.jsonl.zst using zstd compression
+(typically ~10:1 on JSONL). Skips already-archived and missing
+transcripts. Originals are not deleted.
+
+Reports total bytes before and after compression.
+`)
+		return
+	}
+
 	cfg := mustLoadConfig()
 	archiveDir := filepath.Join(cfg.StateDir(), "archive")
 
@@ -293,6 +449,31 @@ func runArchive() {
 }
 
 func runReprocess() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprintf(os.Stderr, `vv reprocess — re-generate notes from transcripts
+
+Usage: vv reprocess [--project <name>]
+
+Flags:
+  --project <name>   Only reprocess sessions for this project
+
+Re-runs the capture pipeline with Force mode for all (or filtered)
+sessions in the index. Locates transcripts via three-tier lookup:
+
+  1. Original path (TranscriptPath in index)
+  2. Archived copy (.vibe-vault/archive/)
+  3. Fallback discovery scan (~/.claude/projects/)
+
+Overwrites existing notes in place (preserves iteration numbers).
+Regenerates _context.md for each affected project.
+
+Examples:
+  vv reprocess                       Reprocess all sessions
+  vv reprocess --project myproject   Reprocess one project only
+`)
+		return
+	}
+
 	cfg := mustLoadConfig()
 	archiveDir := filepath.Join(cfg.StateDir(), "archive")
 	projectFilter := flagValue(os.Args[2:], "--project")
@@ -440,6 +621,15 @@ func mustLoadConfig() config.Config {
 		fatal("load config: %v", err)
 	}
 	return cfg
+}
+
+func wantsHelp(args []string) bool {
+	for _, a := range args {
+		if a == "--help" || a == "-help" || a == "-h" {
+			return true
+		}
+	}
+	return false
 }
 
 func flagValue(args []string, flag string) string {
