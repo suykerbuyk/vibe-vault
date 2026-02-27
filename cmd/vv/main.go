@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
 	"github.com/johns/vibe-vault/internal/config"
 	"github.com/johns/vibe-vault/internal/hook"
+	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/scaffold"
 	"github.com/johns/vibe-vault/internal/session"
 )
@@ -45,6 +47,9 @@ func main() {
 		} else {
 			fmt.Printf("created: %s (%s)\n", result.NotePath, result.Title)
 		}
+
+	case "index":
+		runIndex()
 
 	case "version":
 		fmt.Printf("vv v%s (vibe-vault)\n", version)
@@ -93,6 +98,38 @@ func runInit() {
 	fmt.Printf("\nConfig written to %s\n", cfgPath)
 }
 
+func runIndex() {
+	cfg := mustLoadConfig()
+
+	idx, count, err := index.Rebuild(cfg.SessionsDir(), cfg.StateDir())
+	if err != nil {
+		fatal("index: %v", err)
+	}
+
+	if err := idx.Save(); err != nil {
+		fatal("save index: %v", err)
+	}
+
+	fmt.Printf("indexed %d sessions\n", count)
+
+	// Generate per-project context documents
+	projects := idx.Projects()
+	for _, project := range projects {
+		doc := idx.ProjectContext(project)
+		dir := filepath.Join(cfg.SessionsDir(), project)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Printf("warning: create dir for %s: %v", project, err)
+			continue
+		}
+		path := filepath.Join(dir, "_context.md")
+		if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+			log.Printf("warning: write context for %s: %v", project, err)
+			continue
+		}
+		fmt.Printf("  context: %s\n", filepath.Join("Sessions", project, "_context.md"))
+	}
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, `vv v%s — vibe-vault session capture
 
@@ -100,6 +137,7 @@ Usage:
   vv init [path] [--git]     Create a new vault (default: ./vibe-vault)
   vv hook [--event <name>]   Hook mode (reads stdin from Claude Code)
   vv process <file.jsonl>    Process a single transcript file
+  vv index                   Rebuild session index from notes
   vv version                 Print version
   vv help                    Show this help
 

@@ -11,16 +11,22 @@ import (
 
 // SessionEntry represents one session in the index.
 type SessionEntry struct {
-	SessionID string    `json:"session_id"`
-	NotePath  string    `json:"note_path"`  // Relative to vault root
-	Project   string    `json:"project"`
-	Domain    string    `json:"domain"`
-	Date      string    `json:"date"`       // YYYY-MM-DD
-	Iteration int       `json:"iteration"`  // Day iteration counter
-	Title     string    `json:"title"`
-	Model     string    `json:"model,omitempty"`
-	Duration  int       `json:"duration_minutes,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	SessionID   string    `json:"session_id"`
+	NotePath    string    `json:"note_path"`              // Relative to vault root
+	Project     string    `json:"project"`
+	Domain      string    `json:"domain"`
+	Date        string    `json:"date"`                   // YYYY-MM-DD
+	Iteration   int       `json:"iteration"`              // Day iteration counter
+	Title       string    `json:"title"`
+	Model       string    `json:"model,omitempty"`
+	Duration    int       `json:"duration_minutes,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	Summary     string   `json:"summary,omitempty"`
+	Decisions   []string `json:"decisions,omitempty"`
+	OpenThreads []string `json:"open_threads,omitempty"`
+	Tag         string   `json:"tag,omitempty"`
+	FilesChanged []string `json:"files_changed,omitempty"`
+	Branch      string   `json:"branch,omitempty"`
 }
 
 // Index manages the session-index.json file.

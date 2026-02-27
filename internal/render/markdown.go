@@ -10,6 +10,12 @@ import (
 	"github.com/johns/vibe-vault/internal/transcript"
 )
 
+// RelatedNote holds a related session link and the reason for the relation.
+type RelatedNote struct {
+	Name   string // wikilink target, e.g. "2026-02-25-01"
+	Reason string // human-readable, e.g. "3 shared files, branch: feature/auth"
+}
+
 // NoteData holds everything needed to render a session note.
 type NoteData struct {
 	Date         string // YYYY-MM-DD
@@ -31,6 +37,7 @@ type NoteData struct {
 	OpenThreads  []string
 	EnrichedBy   string // model name, e.g. "grok-3-mini-fast"
 	Tag          string // activity tag, e.g. "implementation"
+	RelatedNotes []RelatedNote
 }
 
 // SessionNote renders a full Obsidian markdown note from NoteData.
@@ -65,6 +72,16 @@ func SessionNote(d NoteData) string {
 	if d.PreviousNote != "" {
 		b.WriteString(fmt.Sprintf("previous: \"[[%s]]\"\n", d.PreviousNote))
 	}
+	if len(d.RelatedNotes) > 0 {
+		b.WriteString("related: [")
+		for i, r := range d.RelatedNotes {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(fmt.Sprintf("\"[[%s]]\"", r.Name))
+		}
+		b.WriteString("]\n")
+	}
 	b.WriteString("---\n\n")
 
 	// Title
@@ -97,6 +114,15 @@ func SessionNote(d NoteData) string {
 		b.WriteString("## Open Threads\n\n")
 		for _, t := range d.OpenThreads {
 			b.WriteString(fmt.Sprintf("- [ ] %s\n", t))
+		}
+		b.WriteString("\n")
+	}
+
+	// Related Sessions
+	if len(d.RelatedNotes) > 0 {
+		b.WriteString("## Related Sessions\n\n")
+		for _, r := range d.RelatedNotes {
+			b.WriteString(fmt.Sprintf("- [[%s]] — %s\n", r.Name, r.Reason))
 		}
 		b.WriteString("\n")
 	}

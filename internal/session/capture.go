@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/johns/vibe-vault/internal/config"
@@ -118,11 +119,41 @@ func Capture(transcriptPath string, cwd string, sessionID string, cfg config.Con
 		noteData.EnrichedBy = cfg.Enrichment.Model
 	}
 
+	// Compute related sessions
+	relPath := render.NoteRelPath(info.Project, date, iteration)
+	candidateEntry := index.SessionEntry{
+		SessionID:    sessionID,
+		Project:      info.Project,
+		Domain:       info.Domain,
+		Date:         date,
+		Iteration:    iteration,
+		Title:        noteData.Title,
+		Summary:      noteData.Summary,
+		Decisions:    noteData.Decisions,
+		OpenThreads:  noteData.OpenThreads,
+		Tag:          noteData.Tag,
+		FilesChanged: noteData.FilesChanged,
+		Branch:       info.Branch,
+	}
+
+	var previousNotePath string
+	if prev := idx.PreviousSession(info.Project, t.Stats.StartTime); prev != nil {
+		previousNotePath = prev.NotePath
+	}
+
+	related := idx.RelatedSessions(candidateEntry, previousNotePath)
+	for _, r := range related {
+		noteName := filenameNoExt(r.Entry.NotePath)
+		noteData.RelatedNotes = append(noteData.RelatedNotes, render.RelatedNote{
+			Name:   noteName,
+			Reason: describeRelation(candidateEntry, r.Entry),
+		})
+	}
+
 	// Render markdown
 	markdown := render.SessionNote(noteData)
 
 	// Write note file
-	relPath := render.NoteRelPath(info.Project, date, iteration)
 	absPath := filepath.Join(cfg.VaultPath, relPath)
 
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
@@ -135,16 +166,22 @@ func Capture(transcriptPath string, cwd string, sessionID string, cfg config.Con
 
 	// Update index
 	idx.Add(index.SessionEntry{
-		SessionID: sessionID,
-		NotePath:  relPath,
-		Project:   info.Project,
-		Domain:    info.Domain,
-		Date:      date,
-		Iteration: iteration,
-		Title:     noteData.Title,
-		Model:     info.Model,
-		Duration:  int(t.Stats.Duration.Minutes()),
-		CreatedAt: time.Now(),
+		SessionID:    sessionID,
+		NotePath:     relPath,
+		Project:      info.Project,
+		Domain:       info.Domain,
+		Date:         date,
+		Iteration:    iteration,
+		Title:        noteData.Title,
+		Model:        info.Model,
+		Duration:     int(t.Stats.Duration.Minutes()),
+		CreatedAt:    time.Now(),
+		Summary:      noteData.Summary,
+		Decisions:    noteData.Decisions,
+		OpenThreads:  noteData.OpenThreads,
+		Tag:          noteData.Tag,
+		FilesChanged: noteData.FilesChanged,
+		Branch:       info.Branch,
 	})
 
 	if err := idx.Save(); err != nil {
@@ -158,6 +195,47 @@ func Capture(transcriptPath string, cwd string, sessionID string, cfg config.Con
 		Iteration: iteration,
 		Title:     noteData.Title,
 	}, nil
+}
+
+// describeRelation builds a human-readable reason for why two sessions are related.
+func describeRelation(a, b index.SessionEntry) string {
+	var parts []string
+
+	// Shared files
+	shared := sharedFiles(a.FilesChanged, b.FilesChanged)
+	if shared > 0 {
+		parts = append(parts, fmt.Sprintf("%d shared files", shared))
+	}
+
+	// Same branch
+	if a.Branch != "" && a.Branch == b.Branch && a.Branch != "main" && a.Branch != "master" {
+		parts = append(parts, fmt.Sprintf("branch: %s", a.Branch))
+	}
+
+	// Same tag
+	if a.Tag != "" && a.Tag == b.Tag {
+		parts = append(parts, fmt.Sprintf("tag: %s", a.Tag))
+	}
+
+	if len(parts) == 0 {
+		parts = append(parts, "related work")
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+func sharedFiles(a, b []string) int {
+	set := make(map[string]bool, len(a))
+	for _, f := range a {
+		set[f] = true
+	}
+	count := 0
+	for _, f := range b {
+		if set[f] {
+			count++
+		}
+	}
+	return count
 }
 
 func filenameNoExt(path string) string {
