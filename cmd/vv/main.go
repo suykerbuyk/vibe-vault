@@ -176,9 +176,16 @@ func runBackfill() {
 		fatal("load index: %v", err)
 	}
 
-	var processed, skipped, errors int
+	var processed, skipped, patched, errors int
 	for _, tf := range transcripts {
 		if idx.Has(tf.SessionID) {
+			// Backfill TranscriptPath on existing entries that lack it
+			entry := idx.Entries[tf.SessionID]
+			if entry.TranscriptPath == "" {
+				entry.TranscriptPath = tf.Path
+				idx.Entries[tf.SessionID] = entry
+				patched++
+			}
 			skipped++
 			continue
 		}
@@ -204,8 +211,18 @@ func runBackfill() {
 		idx, _ = index.Load(cfg.StateDir())
 	}
 
+	// Save index if we patched TranscriptPaths
+	if patched > 0 {
+		if err := idx.Save(); err != nil {
+			log.Printf("warning: could not save index: %v", err)
+		}
+	}
+
 	fmt.Printf("\nprocessed: %d, skipped: %d (already indexed or trivial), errors: %d\n",
 		processed, skipped, errors)
+	if patched > 0 {
+		fmt.Printf("patched: %d (added transcript paths to existing entries)\n", patched)
+	}
 }
 
 func runArchive() {

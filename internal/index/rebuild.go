@@ -16,6 +16,9 @@ import (
 // and builds an enriched index from scratch. It skips files prefixed with
 // underscore and logs malformed notes.
 func Rebuild(sessionsDir, stateDir string) (*Index, int, error) {
+	// Load existing index to preserve TranscriptPaths (not stored in notes)
+	oldIdx, _ := Load(stateDir)
+
 	idx := &Index{
 		path:    filepath.Join(stateDir, "session-index.json"),
 		Entries: make(map[string]SessionEntry),
@@ -109,6 +112,11 @@ func Rebuild(sessionsDir, stateDir string) (*Index, int, error) {
 			if err == nil {
 				entry.CreatedAt = t
 			}
+		}
+
+		// Preserve TranscriptPath from old index (not stored in notes)
+		if old, ok := oldIdx.Entries[note.SessionID]; ok && old.TranscriptPath != "" {
+			entry.TranscriptPath = old.TranscriptPath
 		}
 
 		idx.Entries[note.SessionID] = entry
