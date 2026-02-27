@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/johns/vibe-vault/internal/archive"
+	"github.com/johns/vibe-vault/internal/check"
 	"github.com/johns/vibe-vault/internal/config"
 	"github.com/johns/vibe-vault/internal/discover"
 	"github.com/johns/vibe-vault/internal/hook"
@@ -61,6 +62,14 @@ func main() {
 
 	case "reprocess":
 		runReprocess()
+
+	case "check":
+		cfg := mustLoadConfig()
+		report := check.Run(cfg)
+		fmt.Print(report.Format())
+		if report.HasFailures() {
+			os.Exit(1)
+		}
 
 	case "version":
 		fmt.Printf("vv v%s (vibe-vault)\n", version)
@@ -414,6 +423,7 @@ Usage:
   vv backfill [path]           Discover and process historical transcripts
   vv archive                   Compress transcripts into vault archive
   vv reprocess [--project X]   Re-generate notes from transcripts
+  vv check                     Validate config, vault, and hook setup
   vv version                   Print version
   vv help                      Show this help
 
