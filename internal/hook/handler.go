@@ -28,7 +28,11 @@ func Handle(cfg config.Config, event string) error {
 	if err != nil {
 		return fmt.Errorf("read stdin: %w", err)
 	}
+	return handleInput(input, event, cfg)
+}
 
+// handleInput contains all dispatch logic, separated from stdin reading for testability.
+func handleInput(input *Input, event string, cfg config.Config) error {
 	// Use event override if provided (e.g., --event stop)
 	if event != "" {
 		input.HookEventName = event
