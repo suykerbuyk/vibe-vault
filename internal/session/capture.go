@@ -81,7 +81,24 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	if date == "0001-01-01" {
 		date = time.Now().Format("2006-01-02")
 	}
-	iteration := idx.NextIteration(info.Project, date)
+
+	// Reuse existing iteration when force-reprocessing to avoid duplicates
+	var iteration int
+	if opts.Force {
+		if existing, ok := idx.Entries[sessionID]; ok {
+			iteration = existing.Iteration
+			// Clean up old note if path will change (e.g., project reassignment)
+			oldPath := filepath.Join(cfg.VaultPath, existing.NotePath)
+			newRelPath := render.NoteRelPath(info.Project, date, existing.Iteration)
+			newPath := filepath.Join(cfg.VaultPath, newRelPath)
+			if oldPath != newPath {
+				os.Remove(oldPath)
+			}
+		}
+	}
+	if iteration == 0 {
+		iteration = idx.NextIteration(info.Project, date)
+	}
 
 	// Find previous session for linking
 	var previousNote string
