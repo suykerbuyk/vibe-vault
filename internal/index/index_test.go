@@ -113,6 +113,35 @@ func TestIndexEnrichedRoundTrip(t *testing.T) {
 	}
 }
 
+func TestIndexTranscriptPathRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	idx, _ := Load(dir)
+
+	entry := SessionEntry{
+		SessionID:      "sess-tp",
+		NotePath:       "Sessions/proj/2026-02-27-01.md",
+		Project:        "proj",
+		Date:           "2026-02-27",
+		Iteration:      1,
+		TranscriptPath: "/home/user/.claude/projects/proj/abc-def.jsonl",
+	}
+
+	idx.Add(entry)
+	if err := idx.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	idx2, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	e := idx2.Entries["sess-tp"]
+	if e.TranscriptPath != "/home/user/.claude/projects/proj/abc-def.jsonl" {
+		t.Errorf("TranscriptPath = %q, want original path", e.TranscriptPath)
+	}
+}
+
 // --- Rebuild tests ---
 
 func writeNote(t *testing.T, dir, project, filename, content string) {

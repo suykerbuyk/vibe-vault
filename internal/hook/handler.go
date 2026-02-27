@@ -90,7 +90,11 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 		return fmt.Errorf("no transcript_path in hook input")
 	}
 
-	result, err := session.Capture(input.TranscriptPath, input.CWD, input.SessionID, cfg)
+	result, err := session.Capture(session.CaptureOpts{
+		TranscriptPath: input.TranscriptPath,
+		CWD:            input.CWD,
+		SessionID:      input.SessionID,
+	}, cfg)
 	if err != nil {
 		return fmt.Errorf("capture session: %w", err)
 	}

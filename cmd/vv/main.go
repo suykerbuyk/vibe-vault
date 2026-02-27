@@ -6,14 +6,16 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/johns/vibe-vault/internal/archive"
 	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/discover"
 	"github.com/johns/vibe-vault/internal/hook"
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/scaffold"
 	"github.com/johns/vibe-vault/internal/session"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -38,7 +40,7 @@ func main() {
 			fatal("usage: vv process <transcript.jsonl>")
 		}
 		path := os.Args[2]
-		result, err := session.Capture(path, "", "", cfg)
+		result, err := session.Capture(session.CaptureOpts{TranscriptPath: path}, cfg)
 		if err != nil {
 			fatal("process: %v", err)
 		}
@@ -50,6 +52,15 @@ func main() {
 
 	case "index":
 		runIndex()
+
+	case "backfill":
+		runBackfill()
+
+	case "archive":
+		runArchive()
+
+	case "reprocess":
+		runReprocess()
 
 	case "version":
 		fmt.Printf("vv v%s (vibe-vault)\n", version)
@@ -130,16 +141,264 @@ func runIndex() {
 	}
 }
 
+func defaultTranscriptDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".claude", "projects")
+}
+
+func runBackfill() {
+	cfg := mustLoadConfig()
+
+	basePath := defaultTranscriptDir()
+	args := os.Args[2:]
+	if len(args) > 0 && !hasFlag(args, "--") {
+		basePath = args[0]
+	}
+
+	if basePath == "" {
+		fatal("cannot determine transcript directory")
+	}
+
+	fmt.Printf("Discovering transcripts in %s\n", basePath)
+
+	transcripts, err := discover.Discover(basePath)
+	if err != nil {
+		fatal("discover: %v", err)
+	}
+
+	fmt.Printf("Found %d transcripts\n", len(transcripts))
+
+	idx, err := index.Load(cfg.StateDir())
+	if err != nil {
+		fatal("load index: %v", err)
+	}
+
+	var processed, skipped, errors int
+	for _, tf := range transcripts {
+		if idx.Has(tf.SessionID) {
+			skipped++
+			continue
+		}
+
+		result, err := session.Capture(session.CaptureOpts{
+			TranscriptPath: tf.Path,
+		}, cfg)
+		if err != nil {
+			log.Printf("error processing %s: %v", tf.SessionID, err)
+			errors++
+			continue
+		}
+
+		if result.Skipped {
+			skipped++
+			continue
+		}
+
+		processed++
+		fmt.Printf("  %s → %s\n", result.Project, result.NotePath)
+
+		// Reload index since Capture saved it
+		idx, _ = index.Load(cfg.StateDir())
+	}
+
+	fmt.Printf("\nprocessed: %d, skipped: %d (already indexed or trivial), errors: %d\n",
+		processed, skipped, errors)
+}
+
+func runArchive() {
+	cfg := mustLoadConfig()
+	archiveDir := filepath.Join(cfg.StateDir(), "archive")
+
+	idx, err := index.Load(cfg.StateDir())
+	if err != nil {
+		fatal("load index: %v", err)
+	}
+
+	var archived, skipped int
+	var totalSrc, totalArch int64
+
+	for _, entry := range idx.Entries {
+		transcriptPath := entry.TranscriptPath
+
+		// Fallback: try to discover if no TranscriptPath stored
+		if transcriptPath == "" {
+			defaultDir := defaultTranscriptDir()
+			if defaultDir != "" {
+				found, err := discover.FindBySessionID(defaultDir, entry.SessionID)
+				if err == nil {
+					transcriptPath = found
+				}
+			}
+		}
+
+		if transcriptPath == "" {
+			skipped++
+			continue
+		}
+
+		if archive.IsArchived(entry.SessionID, archiveDir) {
+			skipped++
+			continue
+		}
+
+		srcInfo, err := os.Stat(transcriptPath)
+		if err != nil {
+			skipped++
+			continue
+		}
+
+		archPath, err := archive.Archive(transcriptPath, archiveDir)
+		if err != nil {
+			log.Printf("error archiving %s: %v", entry.SessionID, err)
+			continue
+		}
+
+		archInfo, _ := os.Stat(archPath)
+		totalSrc += srcInfo.Size()
+		totalArch += archInfo.Size()
+		archived++
+	}
+
+	fmt.Printf("archived: %d (%s → %s), skipped: %d\n",
+		archived, humanBytes(totalSrc), humanBytes(totalArch), skipped)
+}
+
+func runReprocess() {
+	cfg := mustLoadConfig()
+	archiveDir := filepath.Join(cfg.StateDir(), "archive")
+	projectFilter := flagValue(os.Args[2:], "--project")
+
+	idx, err := index.Load(cfg.StateDir())
+	if err != nil {
+		fatal("load index: %v", err)
+	}
+
+	var processed, skipped, errors int
+	affectedProjects := make(map[string]bool)
+
+	for _, entry := range idx.Entries {
+		if projectFilter != "" && entry.Project != projectFilter {
+			continue
+		}
+
+		// Locate transcript (try in order)
+		transcriptPath := ""
+		var cleanup func()
+
+		// 1. Original location
+		if entry.TranscriptPath != "" {
+			if _, err := os.Stat(entry.TranscriptPath); err == nil {
+				transcriptPath = entry.TranscriptPath
+			}
+		}
+
+		// 2. Archive
+		if transcriptPath == "" {
+			ap := archive.ArchivePath(entry.SessionID, archiveDir)
+			if _, err := os.Stat(ap); err == nil {
+				tmpPath, tmpCleanup, err := archive.Decompress(ap)
+				if err == nil {
+					transcriptPath = tmpPath
+					cleanup = tmpCleanup
+				}
+			}
+		}
+
+		// 3. Fallback scan
+		if transcriptPath == "" {
+			defaultDir := defaultTranscriptDir()
+			if defaultDir != "" {
+				found, err := discover.FindBySessionID(defaultDir, entry.SessionID)
+				if err == nil {
+					transcriptPath = found
+				}
+			}
+		}
+
+		if transcriptPath == "" {
+			log.Printf("warning: transcript not found for %s", entry.SessionID)
+			skipped++
+			continue
+		}
+
+		result, err := session.Capture(session.CaptureOpts{
+			TranscriptPath: transcriptPath,
+			Force:          true,
+		}, cfg)
+
+		if cleanup != nil {
+			cleanup()
+		}
+
+		if err != nil {
+			log.Printf("error reprocessing %s: %v", entry.SessionID, err)
+			errors++
+			continue
+		}
+
+		if result.Skipped {
+			skipped++
+			continue
+		}
+
+		processed++
+		affectedProjects[result.Project] = true
+		fmt.Printf("  %s → %s\n", result.Project, result.NotePath)
+	}
+
+	// Regenerate context docs for affected projects
+	if len(affectedProjects) > 0 {
+		idx, _ = index.Load(cfg.StateDir())
+		for project := range affectedProjects {
+			doc := idx.ProjectContext(project)
+			dir := filepath.Join(cfg.SessionsDir(), project)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				log.Printf("warning: create dir for %s: %v", project, err)
+				continue
+			}
+			path := filepath.Join(dir, "_context.md")
+			if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+				log.Printf("warning: write context for %s: %v", project, err)
+				continue
+			}
+			fmt.Printf("  context: %s\n", filepath.Join("Sessions", project, "_context.md"))
+		}
+	}
+
+	fmt.Printf("\nreprocessed: %d, skipped: %d, errors: %d\n", processed, skipped, errors)
+}
+
+func humanBytes(b int64) string {
+	const (
+		KB = 1024
+		MB = 1024 * KB
+	)
+	switch {
+	case b >= MB:
+		return fmt.Sprintf("%.1f MB", float64(b)/float64(MB))
+	case b >= KB:
+		return fmt.Sprintf("%.1f KB", float64(b)/float64(KB))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, `vv v%s — vibe-vault session capture
 
 Usage:
-  vv init [path] [--git]     Create a new vault (default: ./vibe-vault)
-  vv hook [--event <name>]   Hook mode (reads stdin from Claude Code)
-  vv process <file.jsonl>    Process a single transcript file
-  vv index                   Rebuild session index from notes
-  vv version                 Print version
-  vv help                    Show this help
+  vv init [path] [--git]       Create a new vault (default: ./vibe-vault)
+  vv hook [--event <name>]     Hook mode (reads stdin from Claude Code)
+  vv process <file.jsonl>      Process a single transcript file
+  vv index                     Rebuild session index from notes
+  vv backfill [path]           Discover and process historical transcripts
+  vv archive                   Compress transcripts into vault archive
+  vv reprocess [--project X]   Re-generate notes from transcripts
+  vv version                   Print version
+  vv help                      Show this help
 
 Hook integration (settings.json):
   {"type": "command", "command": "vv hook"}

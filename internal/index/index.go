@@ -26,7 +26,8 @@ type SessionEntry struct {
 	OpenThreads []string `json:"open_threads,omitempty"`
 	Tag         string   `json:"tag,omitempty"`
 	FilesChanged []string `json:"files_changed,omitempty"`
-	Branch      string   `json:"branch,omitempty"`
+	Branch         string   `json:"branch,omitempty"`
+	TranscriptPath string   `json:"transcript_path,omitempty"`
 }
 
 // Index manages the session-index.json file.

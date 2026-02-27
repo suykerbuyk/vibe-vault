@@ -17,6 +17,14 @@ import (
 	"github.com/johns/vibe-vault/internal/transcript"
 )
 
+// CaptureOpts configures a Capture invocation.
+type CaptureOpts struct {
+	TranscriptPath string
+	CWD            string
+	SessionID      string
+	Force          bool // skip dedup, overwrite existing note
+}
+
 // CaptureResult holds the output of a capture operation.
 type CaptureResult struct {
 	NotePath  string
@@ -29,7 +37,11 @@ type CaptureResult struct {
 }
 
 // Capture processes a transcript and writes a session note.
-func Capture(transcriptPath string, cwd string, sessionID string, cfg config.Config) (*CaptureResult, error) {
+func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
+	transcriptPath := opts.TranscriptPath
+	cwd := opts.CWD
+	sessionID := opts.SessionID
+
 	// Parse transcript
 	t, err := transcript.ParseFile(transcriptPath)
 	if err != nil {
@@ -59,8 +71,8 @@ func Capture(transcriptPath string, cwd string, sessionID string, cfg config.Con
 		idx = &index.Index{Entries: make(map[string]index.SessionEntry)}
 	}
 
-	// Skip if already processed
-	if idx.Has(sessionID) {
+	// Skip if already processed (unless Force)
+	if !opts.Force && idx.Has(sessionID) {
 		return &CaptureResult{Skipped: true, Reason: "already processed"}, nil
 	}
 
@@ -166,22 +178,23 @@ func Capture(transcriptPath string, cwd string, sessionID string, cfg config.Con
 
 	// Update index
 	idx.Add(index.SessionEntry{
-		SessionID:    sessionID,
-		NotePath:     relPath,
-		Project:      info.Project,
-		Domain:       info.Domain,
-		Date:         date,
-		Iteration:    iteration,
-		Title:        noteData.Title,
-		Model:        info.Model,
-		Duration:     int(t.Stats.Duration.Minutes()),
-		CreatedAt:    time.Now(),
-		Summary:      noteData.Summary,
-		Decisions:    noteData.Decisions,
-		OpenThreads:  noteData.OpenThreads,
-		Tag:          noteData.Tag,
-		FilesChanged: noteData.FilesChanged,
-		Branch:       info.Branch,
+		SessionID:      sessionID,
+		NotePath:       relPath,
+		Project:        info.Project,
+		Domain:         info.Domain,
+		Date:           date,
+		Iteration:      iteration,
+		Title:          noteData.Title,
+		Model:          info.Model,
+		Duration:       int(t.Stats.Duration.Minutes()),
+		CreatedAt:      time.Now(),
+		Summary:        noteData.Summary,
+		Decisions:      noteData.Decisions,
+		OpenThreads:    noteData.OpenThreads,
+		Tag:            noteData.Tag,
+		FilesChanged:   noteData.FilesChanged,
+		Branch:         info.Branch,
+		TranscriptPath: transcriptPath,
 	})
 
 	if err := idx.Save(); err != nil {
