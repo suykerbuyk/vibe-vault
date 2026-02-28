@@ -1,7 +1,8 @@
 package help
 
-// Version is the current vv release version.
-const Version = "0.3.0"
+// Version is the vv release version, set at build time via -ldflags.
+// Defaults to "dev" when built without version injection (e.g. `go run`).
+var Version = "dev"
 
 // Flag describes a command-line flag.
 type Flag struct {

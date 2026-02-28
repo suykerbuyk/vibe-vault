@@ -1,6 +1,7 @@
 BINARY  := vv
-VERSION := 0.3.0
-GOFLAGS := -trimpath -ldflags="-s -w"
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -s -w -X github.com/johns/vibe-vault/internal/help.Version=$(VERSION)
+GOFLAGS := -trimpath -ldflags="$(LDFLAGS)"
 MANDIR  := man
 MANPREFIX := $(HOME)/.local/share/man
 
