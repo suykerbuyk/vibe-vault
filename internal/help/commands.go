@@ -267,6 +267,37 @@ friction data if none is available.`,
 	SeeAlso: []string{"vv(1)", "vv-stats(1)", "vv-reprocess(1)"},
 }
 
+var CmdTrends = Command{
+	Name:       "trends",
+	Synopsis:   "show metric trends over time",
+	Brief:      "Show metric trends over time",
+	Usage:      "vv trends [--project <name>] [--weeks <n>]",
+	TableUsage: "vv trends [--project X]",
+	Flags: []Flag{
+		{Name: "--project <name>", Desc: "Show trends for a specific project only"},
+		{Name: "--weeks <n>", Desc: "Number of weeks to display (default: 12)"},
+	},
+	Description: `Analyzes metric trends from the session index over time using weekly
+buckets with 4-week rolling averages. Shows direction (improving,
+worsening, stable) by comparing the most recent 4 weeks against the
+previous 4 weeks.
+
+Tracks four metrics:
+  - Friction score (average per week)
+  - Tokens per file (total tokens / files changed)
+  - Corrections per session
+  - Session duration
+
+Weeks where a metric deviates more than 1.5 standard deviations from
+its rolling average are flagged as anomalies (spikes or dips).`,
+	Examples: []string{
+		"vv trends                       Show global trends (last 12 weeks)",
+		"vv trends --weeks 24            Show last 24 weeks",
+		"vv trends --project myproject   Show trends for one project",
+	},
+	SeeAlso: []string{"vv(1)", "vv-stats(1)", "vv-friction(1)"},
+}
+
 var CmdVersion = Command{
 	Name:     "version",
 	Synopsis: "print version",
@@ -326,5 +357,6 @@ var Subcommands = []Command{
 	CmdCheck,
 	CmdStats,
 	CmdFriction,
+	CmdTrends,
 	CmdVersion,
 }

@@ -40,8 +40,9 @@ func FormatTerminal(c Command) string {
 		s := "Arguments:\n"
 		for _, a := range c.Args {
 			gap := col - 2 - len(a.Name)
-			s += fmt.Sprintf("  %s%s%s", a.Name, strings.Repeat(" ", gap), a.Desc)
+			s += fmt.Sprintf("  %s%s%s\n", a.Name, strings.Repeat(" ", gap), a.Desc)
 		}
+		s = strings.TrimRight(s, "\n")
 		sections = append(sections, s)
 	}
 
@@ -50,8 +51,9 @@ func FormatTerminal(c Command) string {
 		s := "Flags:\n"
 		for _, f := range c.Flags {
 			gap := col - 2 - len(f.Name)
-			s += fmt.Sprintf("  %s%s%s", f.Name, strings.Repeat(" ", gap), f.Desc)
+			s += fmt.Sprintf("  %s%s%s\n", f.Name, strings.Repeat(" ", gap), f.Desc)
 		}
+		s = strings.TrimRight(s, "\n")
 		sections = append(sections, s)
 	}
 

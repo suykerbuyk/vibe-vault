@@ -185,6 +185,33 @@ var expectedTerminal = map[string]string{
 		"  vv friction                       Show global friction analysis\n" +
 		"  vv friction --project myproject   Show friction for one project\n",
 
+	"trends": "vv trends \u2014 show metric trends over time\n" +
+		"\n" +
+		"Usage: vv trends [--project <name>] [--weeks <n>]\n" +
+		"\n" +
+		"Flags:\n" +
+		"  --project <name>   Show trends for a specific project only\n" +
+		"  --weeks <n>        Number of weeks to display (default: 12)\n" +
+		"\n" +
+		"Analyzes metric trends from the session index over time using weekly\n" +
+		"buckets with 4-week rolling averages. Shows direction (improving,\n" +
+		"worsening, stable) by comparing the most recent 4 weeks against the\n" +
+		"previous 4 weeks.\n" +
+		"\n" +
+		"Tracks four metrics:\n" +
+		"  - Friction score (average per week)\n" +
+		"  - Tokens per file (total tokens / files changed)\n" +
+		"  - Corrections per session\n" +
+		"  - Session duration\n" +
+		"\n" +
+		"Weeks where a metric deviates more than 1.5 standard deviations from\n" +
+		"its rolling average are flagged as anomalies (spikes or dips).\n" +
+		"\n" +
+		"Examples:\n" +
+		"  vv trends                       Show global trends (last 12 weeks)\n" +
+		"  vv trends --weeks 24            Show last 24 weeks\n" +
+		"  vv trends --project myproject   Show trends for one project\n",
+
 	"version": "vv version \u2014 print version\n" +
 		"\n" +
 		"Usage: vv version\n",
@@ -220,6 +247,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv check                     Validate config, vault, and hook setup\n" +
 		"  vv stats [--project X]       Show session analytics and metrics\n" +
 		"  vv friction [--project X]    Show friction analysis and correction patterns\n" +
+		"  vv trends [--project X]      Show metric trends over time\n" +
 		"  vv version                   Print version\n" +
 		"  vv help                      Show this help\n" +
 		"\n" +
@@ -238,7 +266,7 @@ func TestFormatUsage(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))

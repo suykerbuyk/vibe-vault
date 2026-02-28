@@ -1,0 +1,36 @@
+.TH VV-TRENDS 1 "2026-02-28" "vv v0.3.0-10-g531cd81-dirty" "Vibe-Vault Manual"
+.SH NAME
+vv-trends \- show metric trends over time
+.SH SYNOPSIS
+.B vv trends [\-\-project <name>] [\-\-weeks <n>]
+.SH DESCRIPTION
+Analyzes metric trends from the session index over time using weekly
+buckets with 4\-week rolling averages. Shows direction (improving,
+worsening, stable) by comparing the most recent 4 weeks against the
+previous 4 weeks.
+.PP
+Tracks four metrics:
+  \- Friction score (average per week)
+  \- Tokens per file (total tokens / files changed)
+  \- Corrections per session
+  \- Session duration
+.PP
+Weeks where a metric deviates more than 1.5 standard deviations from
+its rolling average are flagged as anomalies (spikes or dips).
+.SH OPTIONS
+.TP
+.B \-\-project <name>
+Show trends for a specific project only
+.TP
+.B \-\-weeks <n>
+Number of weeks to display (default: 12)
+.SH EXAMPLES
+.nf
+vv trends                       Show global trends (last 12 weeks)
+vv trends \-\-weeks 24            Show last 24 weeks
+vv trends \-\-project myproject   Show trends for one project
+.fi
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-stats (1),
+.BR vv\-friction (1)

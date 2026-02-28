@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/johns/vibe-vault/internal/archive"
@@ -18,6 +19,7 @@ import (
 	"github.com/johns/vibe-vault/internal/scaffold"
 	"github.com/johns/vibe-vault/internal/session"
 	"github.com/johns/vibe-vault/internal/stats"
+	"github.com/johns/vibe-vault/internal/trends"
 )
 
 func main() {
@@ -56,6 +58,9 @@ func main() {
 
 	case "friction":
 		runFriction()
+
+	case "trends":
+		runTrends()
 
 	case "version":
 		if wantsHelp(os.Args[2:]) {
@@ -234,6 +239,33 @@ func runFriction() {
 
 	projects := friction.ComputeProjectFriction(idx.Entries, project)
 	fmt.Print(friction.Format(projects, len(idx.Entries), project))
+}
+
+func runTrends() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdTrends))
+		return
+	}
+
+	cfg := mustLoadConfig()
+	project := flagValue(os.Args[2:], "--project")
+
+	weeks := 12
+	if w := flagValue(os.Args[2:], "--weeks"); w != "" {
+		n, err := strconv.Atoi(w)
+		if err != nil || n < 1 {
+			fatal("--weeks must be a positive integer")
+		}
+		weeks = n
+	}
+
+	idx, err := index.Load(cfg.StateDir())
+	if err != nil {
+		fatal("load index: %v", err)
+	}
+
+	result := trends.Compute(idx.Entries, project, weeks)
+	fmt.Print(trends.Format(result))
 }
 
 func runIndex() {

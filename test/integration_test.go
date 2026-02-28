@@ -690,6 +690,28 @@ func TestIntegration(t *testing.T) {
 		assertContains(t, helpStderr, "friction", "friction help text")
 	})
 
+	// 10c. trends
+	t.Run("trends", func(t *testing.T) {
+		stdout := mustRunVV(t, env, "trends")
+
+		// Should contain expected sections
+		assertContains(t, stdout, "Overview", "trends overview section")
+		assertContains(t, stdout, "sessions", "trends sessions label")
+		assertContains(t, stdout, "weeks", "trends weeks label")
+
+		// Project filter
+		projStdout := mustRunVV(t, env, "trends", "--project", "myproject")
+		assertContains(t, projStdout, "myproject", "project filter in header")
+
+		// Weeks flag
+		weeksStdout := mustRunVV(t, env, "trends", "--weeks", "4")
+		assertContains(t, weeksStdout, "Overview", "trends with --weeks has overview")
+
+		// Help flag
+		_, helpStderr, _ := runVV(t, env, "trends", "--help")
+		assertContains(t, helpStderr, "trends", "trends help text")
+	})
+
 	// 11. reprocess
 	t.Run("reprocess", func(t *testing.T) {
 		stdout := mustRunVV(t, env, "reprocess")
