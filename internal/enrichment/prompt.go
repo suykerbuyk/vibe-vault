@@ -20,6 +20,11 @@ type PromptInput struct {
 	Duration      int // minutes
 	UserMessages  int
 	AsstMessages  int
+
+	// Narrative context (optional, from heuristic extraction)
+	NarrativeSummary string   // Heuristic summary for LLM to refine
+	NarrativeTag     string   // Heuristic tag
+	Activities       []string // Activity descriptions for context
 }
 
 const systemPrompt = `You analyze Claude Code session transcripts and produce structured JSON summaries.
@@ -73,6 +78,31 @@ func buildUserPrompt(input PromptInput) string {
 		b.WriteString("\n## Files Changed\n")
 		for _, f := range input.FilesChanged {
 			b.WriteString(fmt.Sprintf("- %s\n", f))
+		}
+	}
+
+	// Heuristic analysis (from narrative extraction)
+	if input.NarrativeSummary != "" || input.NarrativeTag != "" || len(input.Activities) > 0 {
+		b.WriteString("\n## Heuristic Analysis\n")
+		b.WriteString("The following was extracted heuristically. Refine rather than replace.\n")
+		if input.NarrativeSummary != "" {
+			b.WriteString(fmt.Sprintf("- Summary: %s\n", input.NarrativeSummary))
+		}
+		if input.NarrativeTag != "" {
+			b.WriteString(fmt.Sprintf("- Tag: %s\n", input.NarrativeTag))
+		}
+		if len(input.Activities) > 0 {
+			b.WriteString("- Activities:\n")
+			max := len(input.Activities)
+			if max > 20 {
+				max = 20
+			}
+			for _, a := range input.Activities[:max] {
+				b.WriteString(fmt.Sprintf("  - %s\n", a))
+			}
+			if len(input.Activities) > 20 {
+				b.WriteString(fmt.Sprintf("  - ... and %d more\n", len(input.Activities)-20))
+			}
 		}
 	}
 

@@ -188,6 +188,19 @@ const fixtureStopSession = `{"type":"user","uuid":"u1","sessionId":"session-stop
 {"type":"assistant","uuid":"a3","sessionId":"session-stop-001","timestamp":"2027-07-01T10:05:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/stop","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Done! The stop hook feature is complete."}],"usage":{"input_tokens":300,"output_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":100}}}
 `
 
+// fixtureNarrativeSession: session with Write, Bash test, and Bash git commit tool calls
+// for testing narrative extraction. Includes tool results. sessionId session-narr-001
+const fixtureNarrativeSession = `{"type":"user","uuid":"u1","sessionId":"session-narr-001","timestamp":"2027-08-10T09:00:00Z","cwd":"/home/dev/narr-project","gitBranch":"feat/auth","message":{"role":"user","content":"Add JWT authentication to the API"}}
+{"type":"assistant","uuid":"a1","sessionId":"session-narr-001","timestamp":"2027-08-10T09:01:00Z","cwd":"/home/dev/narr-project","gitBranch":"feat/auth","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll create the JWT handler."},{"type":"tool_use","id":"ntu1","name":"Write","input":{"file_path":"/home/dev/narr-project/internal/auth/handler.go","content":"package auth\n\nfunc Handler() {}"}}],"usage":{"input_tokens":500,"output_tokens":200,"cache_creation_input_tokens":100,"cache_read_input_tokens":50}}}
+{"type":"user","uuid":"u1r","sessionId":"session-narr-001","timestamp":"2027-08-10T09:01:30Z","cwd":"/home/dev/narr-project","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ntu1","content":"File created successfully"}]}}
+{"type":"assistant","uuid":"a2","sessionId":"session-narr-001","timestamp":"2027-08-10T09:02:00Z","cwd":"/home/dev/narr-project","gitBranch":"feat/auth","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Now let me run the tests."},{"type":"tool_use","id":"ntu2","name":"Bash","input":{"command":"go test ./..."}}],"usage":{"input_tokens":400,"output_tokens":150,"cache_creation_input_tokens":0,"cache_read_input_tokens":200}}}
+{"type":"user","uuid":"u2r","sessionId":"session-narr-001","timestamp":"2027-08-10T09:02:30Z","cwd":"/home/dev/narr-project","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ntu2","content":"ok  \tgithub.com/dev/narr-project\t0.5s\nPASS"}]}}
+{"type":"user","uuid":"u2","sessionId":"session-narr-001","timestamp":"2027-08-10T09:03:00Z","cwd":"/home/dev/narr-project","gitBranch":"feat/auth","message":{"role":"user","content":"Great, now commit the changes"}}
+{"type":"assistant","uuid":"a3","sessionId":"session-narr-001","timestamp":"2027-08-10T09:04:00Z","cwd":"/home/dev/narr-project","gitBranch":"feat/auth","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Committing the changes."},{"type":"tool_use","id":"ntu3","name":"Bash","input":{"command":"git commit -m \"feat: add JWT authentication\""}}],"usage":{"input_tokens":300,"output_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":100}}}
+{"type":"user","uuid":"u3r","sessionId":"session-narr-001","timestamp":"2027-08-10T09:04:30Z","cwd":"/home/dev/narr-project","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ntu3","content":"[feat/auth abc1234] feat: add JWT authentication\n 1 file changed"}]}}
+{"type":"assistant","uuid":"a4","sessionId":"session-narr-001","timestamp":"2027-08-10T09:05:00Z","cwd":"/home/dev/narr-project","gitBranch":"feat/auth","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Done! JWT authentication has been added and committed."}],"usage":{"input_tokens":200,"output_tokens":80,"cache_creation_input_tokens":0,"cache_read_input_tokens":50}}}
+`
+
 // --- Integration Test ---
 
 func TestIntegration(t *testing.T) {
@@ -208,6 +221,7 @@ func TestIntegration(t *testing.T) {
 	a2Path := writeFixture(t, fixtureDir, "session-aaa-002.jsonl", fixtureSessionA2)
 	trivialPath := writeFixture(t, fixtureDir, "session-trivial-001.jsonl", fixtureTrivial)
 	bPath := writeFixture(t, fixtureDir, "session-bbb-001.jsonl", fixtureSessionB)
+	narrPath := writeFixture(t, fixtureDir, "session-narr-001.jsonl", fixtureNarrativeSession)
 
 	// 1. init
 	t.Run("init", func(t *testing.T) {
@@ -360,24 +374,65 @@ func TestIntegration(t *testing.T) {
 		}
 	})
 
-	// 6. index rebuild
+	// 6. process narrative session (with tool calls + results)
+	t.Run("process_narrative_session", func(t *testing.T) {
+		stdout := mustRunVV(t, env, "process", narrPath)
+		assertContains(t, stdout, "created:", "process stdout")
+
+		notePath := filepath.Join(vaultPath, "Sessions", "narr-project", "2027-08-10-01.md")
+		if !fileExists(notePath) {
+			t.Fatalf("note not created at %s", notePath)
+		}
+
+		note := readFile(t, notePath)
+
+		// Work Performed section present
+		assertContains(t, note, "## Work Performed", "work performed section")
+
+		// File creation activity
+		assertContains(t, note, "Created `internal/auth/handler.go`", "file create activity")
+
+		// Test activity
+		assertContains(t, note, "Ran tests", "test activity")
+
+		// Commit activity
+		assertContains(t, note, "Committed:", "commit activity")
+		assertContains(t, note, "feat: add JWT authentication", "commit message")
+
+		// Tag inferred
+		assertContains(t, note, "implementation", "inferred tag")
+
+		// Better title than raw first message prefix
+		assertContains(t, note, "Add JWT authentication to the API", "narrative title")
+
+		// Narrative summary has file info
+		assertContains(t, note, "Created", "summary mentions creation")
+
+		// Index entry
+		idx := readIndex(t, stateDir)
+		if _, ok := idx["session-narr-001"]; !ok {
+			t.Error("session-narr-001 not in index")
+		}
+	})
+
+	// 7. index rebuild
 	t.Run("index_rebuild", func(t *testing.T) {
 		stdout := mustRunVV(t, env, "index")
-		assertContains(t, stdout, "indexed 3 sessions", "index stdout")
+		assertContains(t, stdout, "indexed 4 sessions", "index stdout")
 
-		// Rebuilt index still has all 3
+		// Rebuilt index still has all 4
 		idx := readIndex(t, stateDir)
-		if len(idx) != 3 {
-			t.Errorf("rebuilt index entries: got %d, want 3", len(idx))
+		if len(idx) != 4 {
+			t.Errorf("rebuilt index entries: got %d, want 4", len(idx))
 		}
-		for _, sid := range []string{"session-aaa-001", "session-aaa-002", "session-bbb-001"} {
+		for _, sid := range []string{"session-aaa-001", "session-aaa-002", "session-bbb-001", "session-narr-001"} {
 			if _, ok := idx[sid]; !ok {
 				t.Errorf("rebuilt index missing %s", sid)
 			}
 		}
 
 		// _context.md generated per project
-		for _, project := range []string{"myproject", "other-project"} {
+		for _, project := range []string{"myproject", "other-project", "narr-project"} {
 			ctxPath := filepath.Join(vaultPath, "Sessions", project, "_context.md")
 			if !fileExists(ctxPath) {
 				t.Errorf("_context.md not created for %s", project)
@@ -400,10 +455,10 @@ func TestIntegration(t *testing.T) {
 		assertContains(t, stdout, "Found", "backfill found")
 		assertContains(t, stdout, "processed:", "backfill processed")
 
-		// Index now has 4 entries
+		// Index now has 5 entries (3 original + 1 narrative + 1 backfill)
 		idx := readIndex(t, stateDir)
-		if len(idx) != 4 {
-			t.Errorf("index entries after backfill: got %d, want 4", len(idx))
+		if len(idx) != 5 {
+			t.Errorf("index entries after backfill: got %d, want 5", len(idx))
 		}
 		if _, ok := idx["abcdef01-2345-6789-abcd-ef0123456789"]; !ok {
 			t.Error("backfill session not in index")

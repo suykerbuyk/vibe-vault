@@ -38,9 +38,10 @@ type NoteData struct {
 	EnrichedBy   string // model name, e.g. "grok-3-mini-fast"
 	Tag          string // activity tag, e.g. "implementation"
 	RelatedNotes []RelatedNote
-	ToolCounts   map[string]int
-	TotalTools   int
-	Status       string // "completed" or "checkpoint"
+	ToolCounts    map[string]int
+	TotalTools    int
+	Status        string // "completed" or "checkpoint"
+	WorkPerformed string // Rendered markdown for Work Performed section
 }
 
 // SessionNote renders a full Obsidian markdown note from NoteData.
@@ -113,6 +114,13 @@ func SessionNote(d NoteData) string {
 		for _, f := range d.FilesChanged {
 			b.WriteString(fmt.Sprintf("- `%s`\n", f))
 		}
+		b.WriteString("\n")
+	}
+
+	// Work Performed
+	if d.WorkPerformed != "" {
+		b.WriteString("## Work Performed\n\n")
+		b.WriteString(d.WorkPerformed)
 		b.WriteString("\n")
 	}
 

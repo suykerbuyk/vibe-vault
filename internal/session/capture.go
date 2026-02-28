@@ -13,6 +13,7 @@ import (
 	"github.com/johns/vibe-vault/internal/config"
 	"github.com/johns/vibe-vault/internal/enrichment"
 	"github.com/johns/vibe-vault/internal/index"
+	"github.com/johns/vibe-vault/internal/narrative"
 	"github.com/johns/vibe-vault/internal/render"
 	"github.com/johns/vibe-vault/internal/transcript"
 )
@@ -118,6 +119,23 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	// Build note data
 	noteData := render.NoteDataFromTranscript(t, info.Project, info.Domain, info.Branch, sessionID, iteration, previousNote)
 
+	// Narrative extraction (heuristic enrichment from tool calls)
+	narr := narrative.Extract(t, cwd)
+	if narr != nil {
+		if narr.Title != "" && narr.Title != "Session" {
+			noteData.Title = narr.Title
+		}
+		if narr.Summary != "" {
+			noteData.Summary = narr.Summary
+		}
+		if narr.Tag != "" {
+			noteData.Tag = narr.Tag
+		}
+		noteData.Decisions = narr.Decisions
+		noteData.OpenThreads = narr.OpenThreads
+		noteData.WorkPerformed = narr.WorkPerformed
+	}
+
 	// Mark checkpoint status
 	if opts.Checkpoint {
 		noteData.Status = "checkpoint"
@@ -139,6 +157,17 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 			Duration:      int(t.Stats.Duration.Minutes()),
 			UserMessages:  t.Stats.UserMessages,
 			AsstMessages:  t.Stats.AssistantMessages,
+		}
+
+		// Pass narrative context to enrichment for refinement
+		if narr != nil {
+			enrichInput.NarrativeSummary = narr.Summary
+			enrichInput.NarrativeTag = narr.Tag
+			for _, seg := range narr.Segments {
+				for _, a := range seg.Activities {
+					enrichInput.Activities = append(enrichInput.Activities, a.Description)
+				}
+			}
 		}
 
 		timeout := time.Duration(cfg.Enrichment.TimeoutSeconds) * time.Second

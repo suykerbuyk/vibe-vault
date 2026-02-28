@@ -20,6 +20,10 @@ type Entry struct {
 	// Present on system messages
 	Subtype string `json:"subtype,omitempty"`
 
+	// IsMeta marks system-injected messages (e.g., CLAUDE.md, context reminders)
+	// that should be skipped when extracting user requests for titles.
+	IsMeta bool `json:"-"`
+
 	// Present on tool result entries (type=user with tool results)
 	ToolUseResult        *ToolUseResult `json:"toolUseResult,omitempty"`
 	SourceToolAssistantUUID string      `json:"sourceToolAssistantUUID,omitempty"`
