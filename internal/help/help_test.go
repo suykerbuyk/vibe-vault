@@ -31,7 +31,7 @@ var expectedTerminal = map[string]string{
 
 	"hook": "vv hook \u2014 Claude Code hook handler\n" +
 		"\n" +
-		"Usage: vv hook [--event <name>]\n" +
+		"Usage: vv hook [install | uninstall | --event <name>]\n" +
 		"\n" +
 		"Flags:\n" +
 		"  --event <name>   Override the hook event type (default: read from stdin)\n" +
@@ -48,11 +48,9 @@ var expectedTerminal = map[string]string{
 		"\n" +
 		"This command is meant to be called by Claude Code, not directly.\n" +
 		"\n" +
-		"Hook integration (add to ~/.claude/settings.json):\n" +
-		"  {\"hooks\": {\n" +
-		"    \"SessionEnd\": [{\"matcher\": \"\", \"hooks\": [{\"type\": \"command\", \"command\": \"vv hook\"}]}],\n" +
-		"    \"Stop\": [{\"matcher\": \"\", \"hooks\": [{\"type\": \"command\", \"command\": \"vv hook\"}]}]\n" +
-		"  }}\n",
+		"Subcommands:\n" +
+		"  vv hook install     Add vv hooks to ~/.claude/settings.json\n" +
+		"  vv hook uninstall   Remove vv hooks from ~/.claude/settings.json\n",
 
 	"process": "vv process \u2014 process a single transcript file\n" +
 		"\n" +
@@ -173,7 +171,7 @@ func TestFormatUsage(t *testing.T) {
 		"\n" +
 		"Usage:\n" +
 		"  vv init [path] [--git]       Create a new vault (default: ./vibe-vault)\n" +
-		"  vv hook [--event <name>]     Hook mode (reads stdin from Claude Code)\n" +
+		"  vv hook [install | ...]      Hook mode (reads stdin from Claude Code)\n" +
 		"  vv process <file.jsonl>      Process a single transcript file\n" +
 		"  vv index                     Rebuild session index from notes\n" +
 		"  vv backfill [path]           Discover and process historical transcripts\n" +
@@ -227,6 +225,7 @@ func TestManName(t *testing.T) {
 		{"", "vv"},
 		{"init", "vv-init"},
 		{"hook", "vv-hook"},
+		{"hook install", "vv-hook-install"},
 	}
 	for _, tt := range tests {
 		c := Command{Name: tt.name}
@@ -261,8 +260,9 @@ func TestEscapeRoff(t *testing.T) {
 func TestFormatRoffStructure(t *testing.T) {
 	fixedDate := "2026-02-27"
 
+	allCmds := append(Subcommands, HookSubcommands...)
 	// Test each subcommand has required sections
-	for _, cmd := range Subcommands {
+	for _, cmd := range allCmds {
 		t.Run(cmd.Name, func(t *testing.T) {
 			out := FormatRoff(cmd, fixedDate)
 
@@ -336,6 +336,27 @@ func TestFormatRoffEscapesDescription(t *testing.T) {
 // quote shows a string with escape sequences visible.
 func quote(s string) string {
 	return fmt.Sprintf("%q", s)
+}
+
+func TestFormatTerminal_HookSubcommands(t *testing.T) {
+	for _, cmd := range HookSubcommands {
+		t.Run(cmd.Name, func(t *testing.T) {
+			out := FormatTerminal(cmd)
+			// Verify header format
+			prefix := fmt.Sprintf("vv %s \u2014 %s\n", cmd.Name, cmd.Synopsis)
+			if !strings.HasPrefix(out, prefix) {
+				t.Errorf("FormatTerminal(%q) header mismatch.\nwant prefix: %q\ngot:         %q", cmd.Name, prefix, out[:min(len(out), len(prefix)+20)])
+			}
+			// Verify usage line present
+			if !strings.Contains(out, "Usage: "+cmd.Usage) {
+				t.Errorf("FormatTerminal(%q) missing usage line", cmd.Name)
+			}
+			// Verify description present
+			if cmd.Description != "" && !strings.Contains(out, cmd.Description) {
+				t.Errorf("FormatTerminal(%q) missing description", cmd.Name)
+			}
+		})
+	}
 }
 
 // diff shows a line-by-line comparison highlighting the first difference.

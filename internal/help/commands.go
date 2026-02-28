@@ -1,5 +1,7 @@
 package help
 
+import "strings"
+
 // Version is the vv release version, set at build time via -ldflags.
 // Defaults to "dev" when built without version injection (e.g. `go run`).
 var Version = "dev"
@@ -40,11 +42,12 @@ func (c Command) tableUsage() string {
 }
 
 // ManName returns the man page name: "vv" for top-level, "vv-<name>" for subs.
+// Spaces in Name are replaced with hyphens (e.g. "hook install" → "vv-hook-install").
 func (c Command) ManName() string {
 	if c.Name == "" {
 		return "vv"
 	}
-	return "vv-" + c.Name
+	return "vv-" + strings.ReplaceAll(c.Name, " ", "-")
 }
 
 // TopLevel is the top-level vv command (used by FormatUsage).
@@ -80,7 +83,8 @@ var CmdHook = Command{
 	Name:     "hook",
 	Synopsis: "Claude Code hook handler",
 	Brief:    "Hook mode (reads stdin from Claude Code)",
-	Usage:    "vv hook [--event <name>]",
+	Usage:      "vv hook [install | uninstall | --event <name>]",
+	TableUsage: "vv hook [install | ...]",
 	Flags: []Flag{
 		{Name: "--event <name>", Desc: "Override the hook event type (default: read from stdin)"},
 	},
@@ -96,12 +100,10 @@ unknown events are silently ignored.
 
 This command is meant to be called by Claude Code, not directly.
 
-Hook integration (add to ~/.claude/settings.json):
-  {"hooks": {
-    "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}],
-    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}]
-  }}`,
-	SeeAlso: []string{"vv(1)", "vv-process(1)"},
+Subcommands:
+  vv hook install     Add vv hooks to ~/.claude/settings.json
+  vv hook uninstall   Remove vv hooks from ~/.claude/settings.json`,
+	SeeAlso: []string{"vv(1)", "vv-process(1)", "vv-hook-install(1)", "vv-hook-uninstall(1)"},
 }
 
 var CmdProcess = Command{
@@ -223,6 +225,45 @@ var CmdVersion = Command{
 	Brief:    "Print version",
 	Usage:    "vv version",
 	SeeAlso:  []string{"vv(1)"},
+}
+
+var CmdHookInstall = Command{
+	Name:     "hook install",
+	Synopsis: "add vv hooks to Claude Code settings",
+	Brief:    "Add vv hooks to settings.json",
+	Usage:    "vv hook install",
+	Description: `Adds SessionEnd and Stop hook entries to ~/.claude/settings.json so
+that Claude Code automatically calls vv after each session.
+
+Creates the settings file and parent directory if they don't exist.
+Preserves all existing settings and hooks. A backup is saved to
+settings.json.vv.bak before any modification.
+
+This command is idempotent: running it when hooks are already
+configured prints an informational message and exits successfully.`,
+	SeeAlso: []string{"vv(1)", "vv-hook(1)", "vv-hook-uninstall(1)", "vv-check(1)"},
+}
+
+var CmdHookUninstall = Command{
+	Name:     "hook uninstall",
+	Synopsis: "remove vv hooks from Claude Code settings",
+	Brief:    "Remove vv hooks from settings.json",
+	Usage:    "vv hook uninstall",
+	Description: `Removes SessionEnd and Stop hook entries containing "vv hook" from
+~/.claude/settings.json. Preserves all other settings and hooks.
+A backup is saved to settings.json.vv.bak before any modification.
+
+Cleans up empty hook arrays and the hooks map when no hooks remain.
+
+This command is idempotent: running it when hooks are not present
+prints an informational message and exits successfully.`,
+	SeeAlso: []string{"vv(1)", "vv-hook(1)", "vv-hook-install(1)"},
+}
+
+// HookSubcommands is the ordered list of hook sub-subcommands.
+var HookSubcommands = []Command{
+	CmdHookInstall,
+	CmdHookUninstall,
 }
 
 // Subcommands is the ordered list of all subcommands.

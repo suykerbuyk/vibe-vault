@@ -1,0 +1,18 @@
+.TH VV-HOOK-UNINSTALL 1 "2026-02-27" "vv v0.3.0-dirty" "Vibe-Vault Manual"
+.SH NAME
+vv-hook-uninstall \- remove vv hooks from Claude Code settings
+.SH SYNOPSIS
+.B vv hook uninstall
+.SH DESCRIPTION
+Removes SessionEnd and Stop hook entries containing "vv hook" from
+~/.claude/settings.json. Preserves all other settings and hooks.
+A backup is saved to settings.json.vv.bak before any modification.
+.PP
+Cleans up empty hook arrays and the hooks map when no hooks remain.
+.PP
+This command is idempotent: running it when hooks are not present
+prints an informational message and exits successfully.
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-hook (1),
+.BR vv\-hook\-install (1)

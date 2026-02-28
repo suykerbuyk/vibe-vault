@@ -13,7 +13,7 @@ build:
 	go build $(GOFLAGS) -o $(BINARY) ./cmd/vv
 
 man:
-	go run ./cmd/gen-man $(MANDIR)
+	go run -ldflags="-X github.com/johns/vibe-vault/internal/help.Version=$(VERSION)" ./cmd/gen-man $(MANDIR)
 
 install: build man
 	cp $(BINARY) $(HOME)/.local/bin/$(BINARY)

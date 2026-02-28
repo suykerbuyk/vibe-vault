@@ -105,22 +105,44 @@ func runInit() {
 	fmt.Println("\nDone! Next steps:")
 	fmt.Printf("  1. Open %s in Obsidian\n", absTarget)
 	fmt.Println("  2. Install community plugins: Dataview, Templater")
-	fmt.Println("  3. Add hooks to ~/.claude/settings.json:")
-	fmt.Println(`     {"hooks": {`)
-	fmt.Println(`       "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}],`)
-	fmt.Println(`       "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}]`)
-	fmt.Println(`     }}`)
+	fmt.Println("  3. Run: vv hook install")
 	fmt.Printf("\nConfig written to %s\n", cfgPath)
 }
 
 func runHook() {
-	if wantsHelp(os.Args[2:]) {
+	args := os.Args[2:]
+
+	// Route sub-subcommands before falling through to stdin handler
+	if len(args) > 0 {
+		switch args[0] {
+		case "install":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdHookInstall))
+				return
+			}
+			if err := hook.Install(); err != nil {
+				fatal("%v", err)
+			}
+			return
+		case "uninstall":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdHookUninstall))
+				return
+			}
+			if err := hook.Uninstall(); err != nil {
+				fatal("%v", err)
+			}
+			return
+		}
+	}
+
+	if wantsHelp(args) {
 		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdHook))
 		return
 	}
 
 	cfg := mustLoadConfig()
-	event := flagValue(os.Args[2:], "--event")
+	event := flagValue(args, "--event")
 	if err := hook.Handle(cfg, event); err != nil {
 		fatal("%v", err)
 	}

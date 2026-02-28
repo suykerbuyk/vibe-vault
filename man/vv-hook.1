@@ -1,8 +1,8 @@
-.TH VV-HOOK 1 "2026-02-27" "vv 0.3.0" "Vibe-Vault Manual"
+.TH VV-HOOK 1 "2026-02-27" "vv v0.3.0-dirty" "Vibe-Vault Manual"
 .SH NAME
 vv-hook \- Claude Code hook handler
 .SH SYNOPSIS
-.B vv hook [\-\-event <name>]
+.B vv hook [install | uninstall | \-\-event <name>]
 .SH DESCRIPTION
 Reads a JSON payload from stdin as delivered by Claude Code's hook
 system. Handles two event types:
@@ -16,15 +16,15 @@ unknown events are silently ignored.
 .PP
 This command is meant to be called by Claude Code, not directly.
 .PP
-Hook integration (add to ~/.claude/settings.json):
-  {"hooks": {
-    "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}],
-    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}]
-  }}
+Subcommands:
+  vv hook install     Add vv hooks to ~/.claude/settings.json
+  vv hook uninstall   Remove vv hooks from ~/.claude/settings.json
 .SH OPTIONS
 .TP
 .B \-\-event <name>
 Override the hook event type (default: read from stdin)
 .SH SEE ALSO
 .BR vv (1),
-.BR vv\-process (1)
+.BR vv\-process (1),
+.BR vv\-hook\-install (1),
+.BR vv\-hook\-uninstall (1)

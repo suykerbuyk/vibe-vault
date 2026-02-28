@@ -36,6 +36,15 @@ func main() {
 			os.Exit(1)
 		}
 	}
+
+	// Hook sub-subcommand man pages
+	for _, cmd := range help.HookSubcommands {
+		filename := cmd.ManName() + ".1"
+		if err := write(dir, filename, help.FormatRoff(cmd, date)); err != nil {
+			fmt.Fprintf(os.Stderr, "gen-man: %v\n", err)
+			os.Exit(1)
+		}
+	}
 }
 
 func write(dir, name, content string) error {

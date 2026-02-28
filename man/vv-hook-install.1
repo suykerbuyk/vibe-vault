@@ -1,0 +1,20 @@
+.TH VV-HOOK-INSTALL 1 "2026-02-27" "vv v0.3.0-dirty" "Vibe-Vault Manual"
+.SH NAME
+vv-hook-install \- add vv hooks to Claude Code settings
+.SH SYNOPSIS
+.B vv hook install
+.SH DESCRIPTION
+Adds SessionEnd and Stop hook entries to ~/.claude/settings.json so
+that Claude Code automatically calls vv after each session.
+.PP
+Creates the settings file and parent directory if they don't exist.
+Preserves all existing settings and hooks. A backup is saved to
+settings.json.vv.bak before any modification.
+.PP
+This command is idempotent: running it when hooks are already
+configured prints an informational message and exits successfully.
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-hook (1),
+.BR vv\-hook\-uninstall (1),
+.BR vv\-check (1)
