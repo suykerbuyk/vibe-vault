@@ -109,9 +109,9 @@ func expandHome(path string) string {
 	return filepath.Join(home, path[2:])
 }
 
-// SessionsDir returns the vault's Sessions directory.
-func (c Config) SessionsDir() string {
-	return filepath.Join(c.VaultPath, "Sessions")
+// ProjectsDir returns the vault's Projects directory.
+func (c Config) ProjectsDir() string {
+	return filepath.Join(c.VaultPath, "Projects")
 }
 
 // StateDir returns the .vibe-vault state directory inside the vault.

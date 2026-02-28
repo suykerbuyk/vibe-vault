@@ -30,7 +30,7 @@ jobs:
         run: |
           errors=0
           shopt -s globstar nullglob
-          for file in Sessions/**/*.md; do
+          for file in Projects/**/sessions/*.md; do
             [ -f "$file" ] || continue
             frontmatter=$(awk '
               /^---$/ { c++; if (c==1) next; if (c==2) exit }
@@ -59,11 +59,11 @@ jobs:
         run: |
           orphans=0
           shopt -s globstar nullglob
-          for file in Knowledge/**/*.md Sessions/**/*.md; do
+          for file in Knowledge/**/*.md Projects/**/sessions/*.md; do
             [ -f "$file" ] || continue
             basename_no_ext=$(basename "$file" .md)
             # Check if any other file links to this one
-            if ! grep -rl "\[\[$basename_no_ext" . --include="*.md" | grep -v "$file" > /dev/null 2>&1; then
+            if ! grep -rl "\[\[$basename_no_ext" Projects/ Knowledge/ --include="*.md" | grep -v "$file" > /dev/null 2>&1; then
               echo "ORPHAN: $file"
               orphans=$((orphans + 1))
             fi
@@ -81,7 +81,7 @@ jobs:
           allowed="cortana-session knowledge decision pattern learning research implementation debugging review planning exploration"
           violations=0
           shopt -s globstar nullglob
-          for file in Sessions/**/*.md Knowledge/**/*.md; do
+          for file in Projects/**/sessions/*.md Knowledge/**/*.md; do
             [ -f "$file" ] || continue
             # Extract tags from YAML frontmatter (lines starting with "  - " between --- markers)
             in_frontmatter=false
@@ -123,7 +123,7 @@ jobs:
           cutoff=$(date -d '90 days ago' +%Y-%m-%d 2>/dev/null || date -v-90d +%Y-%m-%d)
           candidates=0
           shopt -s globstar nullglob
-          for file in Sessions/**/*.md; do
+          for file in Projects/**/sessions/*.md; do
             [ -f "$file" ] || continue
             file_date=$(grep "^date:" "$file" | head -1 | sed 's/^date: *//' | tr -d '"')
             file_status=$(grep "^status:" "$file" | head -1 | sed 's/^status: *//' | tr -d '"')
@@ -141,13 +141,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Count and report vault metrics
         run: |
-          sessions=$(find Sessions -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+          sessions=$(find Projects -path '*/sessions/*.md' 2>/dev/null | wc -l | tr -d ' ')
           knowledge=$(find Knowledge -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
           projects=$(find Projects -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
 
-          work=$(grep -rl "domain: work" Sessions/ Knowledge/ 2>/dev/null | wc -l | tr -d ' ')
-          personal=$(grep -rl "domain: personal" Sessions/ Knowledge/ 2>/dev/null | wc -l | tr -d ' ')
-          opensource=$(grep -rl "domain: opensource" Sessions/ Knowledge/ 2>/dev/null | wc -l | tr -d ' ')
+          work=$(grep -rl "domain: work" Projects/ Knowledge/ 2>/dev/null | wc -l | tr -d ' ')
+          personal=$(grep -rl "domain: personal" Projects/ Knowledge/ 2>/dev/null | wc -l | tr -d ' ')
+          opensource=$(grep -rl "domain: opensource" Projects/ Knowledge/ 2>/dev/null | wc -l | tr -d ' ')
 
           cat > /tmp/vault-stats.md << EOF
           # Vault Statistics

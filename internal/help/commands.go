@@ -129,9 +129,9 @@ var CmdIndex = Command{
 	Synopsis: "rebuild session index from notes",
 	Brief:    "Rebuild session index from notes",
 	Usage:    "vv index",
-	Description: `Walks Sessions/**/*.md in the vault, parses frontmatter from each note,
-and rebuilds .vibe-vault/session-index.json. Preserves TranscriptPath
-values from the existing index. Generates a _context.md document for
+	Description: `Walks Projects/*/sessions/*.md in the vault, parses frontmatter from each
+note, and rebuilds .vibe-vault/session-index.json. Preserves TranscriptPath
+values from the existing index. Generates a history.md document for
 each project with timeline, decisions, open threads, and key files.
 
 Use this after manually editing or deleting session notes.`,
@@ -191,7 +191,7 @@ sessions in the index. Locates transcripts via three-tier lookup:
   3. Fallback discovery scan (~/.claude/projects/)
 
 Overwrites existing notes in place (preserves iteration numbers).
-Regenerates _context.md for each affected project.`,
+Regenerates history.md for each affected project.`,
 	Examples: []string{
 		"vv reprocess                       Reprocess all sessions",
 		"vv reprocess --project myproject   Reprocess one project only",
@@ -208,7 +208,7 @@ var CmdCheck = Command{
   - Config file location and validity
   - Vault directory exists
   - Obsidian config present (.obsidian/)
-  - Sessions directory and note count
+  - Projects directory and note count
   - State directory (.vibe-vault/)
   - Session index validity and entry count
   - Domain paths exist

@@ -13,7 +13,7 @@ summary: "Uncompleted tasks across all sessions"
 
 ```dataview
 TASK
-FROM "Sessions"
+FROM "Projects"
 WHERE !completed
 GROUP BY file.link
 SORT file.frontmatter.date DESC
@@ -35,7 +35,7 @@ SORT file.frontmatter.date DESC
 
 ```dataview
 TASK
-FROM "Sessions"
+FROM "Projects"
 WHERE !completed AND file.frontmatter.domain = "work"
 GROUP BY file.link
 SORT file.frontmatter.date DESC
@@ -45,7 +45,7 @@ SORT file.frontmatter.date DESC
 
 ```dataview
 TASK
-FROM "Sessions"
+FROM "Projects"
 WHERE !completed AND file.frontmatter.domain = "personal"
 GROUP BY file.link
 SORT file.frontmatter.date DESC
@@ -55,7 +55,7 @@ SORT file.frontmatter.date DESC
 
 ```dataview
 TASK
-FROM "Sessions"
+FROM "Projects"
 WHERE !completed AND file.frontmatter.domain = "opensource"
 GROUP BY file.link
 SORT file.frontmatter.date DESC
@@ -65,7 +65,7 @@ SORT file.frontmatter.date DESC
 
 ```dataview
 TASK
-FROM "Sessions"
+FROM "Projects"
 WHERE completed
 GROUP BY file.link
 SORT file.frontmatter.date DESC

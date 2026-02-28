@@ -15,7 +15,7 @@ func TestIndexBackwardsCompat(t *testing.T) {
 	oldJSON := `{
 		"sess-001": {
 			"session_id": "sess-001",
-			"note_path": "Sessions/myproject/2026-02-20-01.md",
+			"note_path": "Projects/myproject/sessions/2026-02-20-01.md",
 			"project": "myproject",
 			"domain": "personal",
 			"date": "2026-02-20",
@@ -66,7 +66,7 @@ func TestIndexEnrichedRoundTrip(t *testing.T) {
 
 	entry := SessionEntry{
 		SessionID:    "sess-enriched",
-		NotePath:     "Sessions/proj/2026-02-25-01.md",
+		NotePath:     "Projects/proj/sessions/2026-02-25-01.md",
 		Project:      "proj",
 		Domain:       "personal",
 		Date:         "2026-02-25",
@@ -119,7 +119,7 @@ func TestIndexTranscriptPathRoundTrip(t *testing.T) {
 
 	entry := SessionEntry{
 		SessionID:      "sess-tp",
-		NotePath:       "Sessions/proj/2026-02-27-01.md",
+		NotePath:       "Projects/proj/sessions/2026-02-27-01.md",
 		Project:        "proj",
 		Date:           "2026-02-27",
 		Iteration:      1,
@@ -148,7 +148,7 @@ func TestIndexCheckpointRoundTrip(t *testing.T) {
 
 	entry := SessionEntry{
 		SessionID:  "sess-ckpt",
-		NotePath:   "Sessions/proj/2026-02-27-01.md",
+		NotePath:   "Projects/proj/sessions/2026-02-27-01.md",
 		Project:    "proj",
 		Date:       "2026-02-27",
 		Iteration:  1,
@@ -177,7 +177,7 @@ func TestIndexToolCountsRoundTrip(t *testing.T) {
 
 	entry := SessionEntry{
 		SessionID: "sess-tools",
-		NotePath:  "Sessions/proj/2026-02-27-01.md",
+		NotePath:  "Projects/proj/sessions/2026-02-27-01.md",
 		Project:   "proj",
 		Date:      "2026-02-27",
 		Iteration: 1,
@@ -217,7 +217,7 @@ func TestIndexTokensRoundTrip(t *testing.T) {
 
 	entry := SessionEntry{
 		SessionID: "sess-tokens",
-		NotePath:  "Sessions/proj/2026-02-27-01.md",
+		NotePath:  "Projects/proj/sessions/2026-02-27-01.md",
 		Project:   "proj",
 		Date:      "2026-02-27",
 		Iteration: 1,
@@ -254,7 +254,7 @@ func TestIndexCommitsRoundTrip(t *testing.T) {
 
 	entry := SessionEntry{
 		SessionID: "sess-commits",
-		NotePath:  "Sessions/proj/2026-02-28-01.md",
+		NotePath:  "Projects/proj/sessions/2026-02-28-01.md",
 		Project:   "proj",
 		Date:      "2026-02-28",
 		Iteration: 1,
@@ -289,7 +289,7 @@ func TestIndexFrictionRoundTrip(t *testing.T) {
 
 	entry := SessionEntry{
 		SessionID:     "sess-friction",
-		NotePath:      "Sessions/proj/2026-02-28-01.md",
+		NotePath:      "Projects/proj/sessions/2026-02-28-01.md",
 		Project:       "proj",
 		Date:          "2026-02-28",
 		Iteration:     1,
@@ -320,11 +320,11 @@ func TestIndexFrictionRoundTrip(t *testing.T) {
 
 func writeNote(t *testing.T, dir, project, filename, content string) {
 	t.Helper()
-	projDir := filepath.Join(dir, project)
-	if err := os.MkdirAll(projDir, 0o755); err != nil {
+	sessDir := filepath.Join(dir, project, "sessions")
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projDir, filename), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sessDir, filename), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -361,12 +361,12 @@ messages: 15
 `
 
 func TestRebuild(t *testing.T) {
-	sessionsDir := filepath.Join(t.TempDir(), "Sessions")
+	projectsDir := filepath.Join(t.TempDir(), "Projects")
 	stateDir := t.TempDir()
 
-	writeNote(t, sessionsDir, "myproject", "2026-02-25-01.md", goodNote)
+	writeNote(t, projectsDir, "myproject", "2026-02-25-01.md", goodNote)
 
-	idx, count, err := Rebuild(sessionsDir, stateDir)
+	idx, count, err := Rebuild(projectsDir, stateDir)
 	if err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestRebuild(t *testing.T) {
 }
 
 func TestRebuildSkipsMalformed(t *testing.T) {
-	sessionsDir := filepath.Join(t.TempDir(), "Sessions")
+	projectsDir := filepath.Join(t.TempDir(), "Projects")
 	stateDir := t.TempDir()
 
 	// Note without session_id
@@ -424,9 +424,9 @@ project: myproject
 
 # No session ID
 `
-	writeNote(t, sessionsDir, "myproject", "2026-02-25-01.md", noID)
+	writeNote(t, projectsDir, "myproject", "2026-02-25-01.md", noID)
 
-	_, count, err := Rebuild(sessionsDir, stateDir)
+	_, count, err := Rebuild(projectsDir, stateDir)
 	if err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
@@ -435,18 +435,25 @@ project: myproject
 	}
 }
 
-func TestRebuildSkipsUnderscoreFiles(t *testing.T) {
-	sessionsDir := filepath.Join(t.TempDir(), "Sessions")
+func TestRebuildSkipsNonSessionFiles(t *testing.T) {
+	projectsDir := filepath.Join(t.TempDir(), "Projects")
 	stateDir := t.TempDir()
 
-	writeNote(t, sessionsDir, "myproject", "_context.md", goodNote)
+	// Write a file at the project root (not inside sessions/) — should be skipped
+	projDir := filepath.Join(projectsDir, "myproject")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projDir, "history.md"), []byte(goodNote), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-	_, count, err := Rebuild(sessionsDir, stateDir)
+	_, count, err := Rebuild(projectsDir, stateDir)
 	if err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
 	if count != 0 {
-		t.Errorf("count = %d, want 0 (underscore files should be skipped)", count)
+		t.Errorf("count = %d, want 0 (non-session files should be skipped)", count)
 	}
 }
 
@@ -605,7 +612,7 @@ func TestRelatedPreviousExclusion(t *testing.T) {
 
 	idx.Entries["s1"] = SessionEntry{
 		SessionID: "s1",
-		NotePath:  "Sessions/proj/2026-02-24-01.md",
+		NotePath:  "Projects/proj/sessions/2026-02-24-01.md",
 		Project:   "proj",
 		Branch:    "feature/x",
 	}
@@ -616,7 +623,7 @@ func TestRelatedPreviousExclusion(t *testing.T) {
 		Branch:    "feature/x",
 	}
 
-	results := idx.RelatedSessions(candidate, "Sessions/proj/2026-02-24-01.md")
+	results := idx.RelatedSessions(candidate, "Projects/proj/sessions/2026-02-24-01.md")
 	if len(results) != 0 {
 		t.Errorf("len = %d, want 0 (previous excluded)", len(results))
 	}
@@ -674,12 +681,12 @@ func TestProjectContextTimeline(t *testing.T) {
 
 	idx.Entries["s1"] = SessionEntry{
 		SessionID: "s1", Project: "proj", Date: "2026-02-20",
-		Iteration: 1, NotePath: "Sessions/proj/2026-02-20-01.md",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-02-20-01.md",
 		Summary: "First session", Tag: "planning",
 	}
 	idx.Entries["s2"] = SessionEntry{
 		SessionID: "s2", Project: "proj", Date: "2026-02-21",
-		Iteration: 1, NotePath: "Sessions/proj/2026-02-21-01.md",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-02-21-01.md",
 		Summary: "Second session", Tag: "implementation",
 	}
 
@@ -704,12 +711,12 @@ func TestProjectContextDecisionDedup(t *testing.T) {
 
 	idx.Entries["s1"] = SessionEntry{
 		SessionID: "s1", Project: "proj", Date: "2026-02-20",
-		Iteration: 1, NotePath: "Sessions/proj/2026-02-20-01.md",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-02-20-01.md",
 		Decisions: []string{"Use JWT auth", "Use PostgreSQL"},
 	}
 	idx.Entries["s2"] = SessionEntry{
 		SessionID: "s2", Project: "proj", Date: "2026-02-21",
-		Iteration: 1, NotePath: "Sessions/proj/2026-02-21-01.md",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-02-21-01.md",
 		Decisions: []string{"Use JWT auth", "Add rate limiting"}, // "Use JWT auth" is duplicate
 	}
 
@@ -727,12 +734,12 @@ func TestProjectContextThreadResolution(t *testing.T) {
 
 	idx.Entries["s1"] = SessionEntry{
 		SessionID: "s1", Project: "proj", Date: "2026-02-20",
-		Iteration: 1, NotePath: "Sessions/proj/2026-02-20-01.md",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-02-20-01.md",
 		OpenThreads: []string{"implement authentication system"},
 	}
 	idx.Entries["s2"] = SessionEntry{
 		SessionID: "s2", Project: "proj", Date: "2026-02-21",
-		Iteration: 1, NotePath: "Sessions/proj/2026-02-21-01.md",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-02-21-01.md",
 		Decisions: []string{"completed authentication system with JWT"},
 	}
 
@@ -756,7 +763,7 @@ func TestProjectContextKeyFiles(t *testing.T) {
 		}
 		idx.Entries[id] = SessionEntry{
 			SessionID: id, Project: "proj", Date: "2026-02-20",
-			Iteration: i + 1, NotePath: "Sessions/proj/note.md",
+			Iteration: i + 1, NotePath: "Projects/proj/sessions/note.md",
 			FilesChanged: files,
 		}
 	}
@@ -795,7 +802,7 @@ func TestIndexSaveLoad(t *testing.T) {
 
 	idx.Add(SessionEntry{
 		SessionID: "test-1",
-		NotePath:  "Sessions/proj/2026-02-25-01.md",
+		NotePath:  "Projects/proj/sessions/2026-02-25-01.md",
 		Project:   "proj",
 		Date:      "2026-02-25",
 		Iteration: 1,

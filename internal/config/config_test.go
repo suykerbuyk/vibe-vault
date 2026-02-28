@@ -167,12 +167,12 @@ func TestLoad_InvalidTOML(t *testing.T) {
 	}
 }
 
-func TestSessionsDir_StateDir(t *testing.T) {
+func TestProjectsDir_StateDir(t *testing.T) {
 	cfg := Config{VaultPath: "/home/user/vault"}
 
-	sessDir := cfg.SessionsDir()
-	if sessDir != "/home/user/vault/Sessions" {
-		t.Errorf("SessionsDir = %q", sessDir)
+	projDir := cfg.ProjectsDir()
+	if projDir != "/home/user/vault/Projects" {
+		t.Errorf("ProjectsDir = %q", projDir)
 	}
 
 	stateDir := cfg.StateDir()

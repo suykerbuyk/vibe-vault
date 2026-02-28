@@ -112,7 +112,7 @@ means something needs fixing. Example output:
   PASS  config           ~/.config/vibe-vault/config.toml
   PASS  vault            ~/obsidian/my-sessions
   WARN  obsidian         .obsidian/ not found (open vault in Obsidian first)
-  PASS  sessions         Sessions/ (0 notes)
+  PASS  projects         Projects/ (0 notes)
   PASS  state            .vibe-vault/ found
   WARN  index            session-index.json not found
   PASS  enrichment       disabled
@@ -120,7 +120,7 @@ means something needs fixing. Example output:
 ```
 
 At this point, **every new Claude Code session will automatically create a
-note** in `Sessions/{project}/YYYY-MM-DD-NN.md`.
+note** in `Projects/{project}/sessions/YYYY-MM-DD-NN.md`.
 
 ## 4. Backfill Historical Sessions
 
@@ -166,7 +166,7 @@ vv index
 ```
 
 This walks all session notes, rebuilds `session-index.json`, and generates
-a `_context.md` file for each project directory with a timeline, key
+a `history.md` file for each project directory with a timeline, key
 decisions, open threads, and frequently-changed files.
 
 ## 5. Connect a Project
@@ -187,7 +187,7 @@ Just start a Claude Code session in any git repository. When the session
 ends, `vv` will:
 
 - Detect the project name from the git remote (or directory name)
-- Create `Sessions/{project}/` in the vault
+- Create `Projects/{project}/sessions/` in the vault
 - Write the session note as `YYYY-MM-DD-01.md`
 
 No configuration needed. The project directory is created on first use.

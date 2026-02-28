@@ -244,7 +244,7 @@ func runIndex() {
 
 	cfg := mustLoadConfig()
 
-	idx, count, err := index.Rebuild(cfg.SessionsDir(), cfg.StateDir())
+	idx, count, err := index.Rebuild(cfg.ProjectsDir(), cfg.StateDir())
 	if err != nil {
 		fatal("index: %v", err)
 	}
@@ -259,17 +259,17 @@ func runIndex() {
 	projects := idx.Projects()
 	for _, project := range projects {
 		doc := idx.ProjectContext(project)
-		dir := filepath.Join(cfg.SessionsDir(), project)
+		dir := filepath.Join(cfg.ProjectsDir(), project)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			log.Printf("warning: create dir for %s: %v", project, err)
 			continue
 		}
-		path := filepath.Join(dir, "_context.md")
+		path := filepath.Join(dir, "history.md")
 		if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 			log.Printf("warning: write context for %s: %v", project, err)
 			continue
 		}
-		fmt.Printf("  context: %s\n", filepath.Join("Sessions", project, "_context.md"))
+		fmt.Printf("  context: %s\n", filepath.Join("Projects", project, "history.md"))
 	}
 }
 
@@ -518,17 +518,17 @@ func runReprocess() {
 		idx, _ = index.Load(cfg.StateDir())
 		for project := range affectedProjects {
 			doc := idx.ProjectContext(project)
-			dir := filepath.Join(cfg.SessionsDir(), project)
+			dir := filepath.Join(cfg.ProjectsDir(), project)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				log.Printf("warning: create dir for %s: %v", project, err)
 				continue
 			}
-			path := filepath.Join(dir, "_context.md")
+			path := filepath.Join(dir, "history.md")
 			if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 				log.Printf("warning: write context for %s: %v", project, err)
 				continue
 			}
-			fmt.Printf("  context: %s\n", filepath.Join("Sessions", project, "_context.md"))
+			fmt.Printf("  context: %s\n", filepath.Join("Projects", project, "history.md"))
 		}
 	}
 

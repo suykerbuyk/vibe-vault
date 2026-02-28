@@ -13,7 +13,7 @@ Search the Obsidian vault for relevant knowledge using two-pass retrieval: searc
 
 ```
 {vault}/
-├── Sessions/{project}/        ← Session logs (type: session), named YYYY-MM-DD-NN.md
+├── Projects/{project}/sessions/  ← Session logs (type: session), named YYYY-MM-DD-NN.md
 ├── Knowledge/decisions/       ← Architectural decisions (type: decision)
 ├── Knowledge/patterns/        ← Reusable patterns (type: pattern)
 ├── Knowledge/learnings/       ← Lessons learned (type: learning)
@@ -31,7 +31,7 @@ Searchable frontmatter fields: `date`, `type`, `domain`, `status`, `tags`, `summ
 1. **Check auto-loaded summaries first.** Scan your context for the "Vault Knowledge (Auto-loaded)" system reminder. If the query can be answered from those summaries alone (e.g., "what decisions are active?"), skip to the Briefing — no filesystem reads needed.
 
 2. **If a topic/project/domain argument is provided**, search the filesystem:
-   - Use **Grep** to search `summary:` lines and note body text across `Sessions/` and `Knowledge/` for the topic
+   - Use **Grep** to search `summary:` lines and note body text across `Projects/` and `Knowledge/` for the topic
    - For `--project` filtering, grep for `^project:.*"<Name>"` in frontmatter
    - For `--domain` filtering, grep for `^domain: <value>` in frontmatter
    - For `--since`, filter by `^date:` values within the time range
@@ -103,4 +103,4 @@ Omit any section with no entries. Only include what was found in vault notes —
 - **0 matches:** Report vault size ("The vault has N sessions, N decisions, N patterns, N learnings"). Suggest broadening: different spelling, related terms, or `/recall` without filters.
 - **Auto-loaded summaries sufficient:** Skip Pass 2 entirely. Note: "All relevant knowledge already in context via VaultContextLoader — no additional reads needed."
 - **Very broad query (20+ grep hits):** Show top 10, tell user N more exist, suggest `--project` or `--since` to narrow.
-- **No arguments (`/recall`):** Synthesize directly from auto-loaded summaries. Surface any open `[ ]` action items by grepping `Sessions/` and `Knowledge/` for unchecked tasks (grep pattern: `- \[ \]`). Cap at 10 action items.
+- **No arguments (`/recall`):** Synthesize directly from auto-loaded summaries. Surface any open `[ ]` action items by grepping `Projects/` and `Knowledge/` for unchecked tasks (grep pattern: `- \[ \]`). Cap at 10 action items.

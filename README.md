@@ -218,7 +218,7 @@ Claude Code session ends
 └────────┬─────────┘
          │
          ▼
-   Sessions/{project}/YYYY-MM-DD-NN.md
+   Projects/{project}/sessions/YYYY-MM-DD-NN.md
    .vibe-vault/session-index.json
 ```
 
@@ -347,15 +347,15 @@ it to enable enrichment or customize domain paths.
 
 ```
 vibe-vault/
-├── Sessions/                   # Session notes, organized by project
+├── Projects/                   # Project-centric organization
 │   └── {project}/
-│       ├── YYYY-MM-DD-NN.md    # Session notes (auto-generated)
-│       └── _context.md         # Per-project context doc (auto-generated)
+│       ├── sessions/           # Session notes (auto-generated)
+│       │   └── YYYY-MM-DD-NN.md
+│       └── history.md          # Per-project context doc (auto-generated)
 ├── Knowledge/
 │   ├── decisions/              # Architectural decisions
 │   ├── patterns/               # Reusable patterns
 │   └── learnings/              # Lessons learned
-├── Projects/                   # Project index notes
 ├── Dashboards/
 │   ├── sessions.md             # All sessions (Dataview)
 │   ├── by-project.md           # Sessions grouped by project
@@ -449,7 +449,7 @@ matters for a tool that runs on every session end.
 
 ### Notes by project, not date
 
-Session notes live in `Sessions/{project}/` rather than `Sessions/YYYY/MM/`.
+Session notes live in `Projects/{project}/sessions/` rather than a flat date-based layout.
 This keeps related sessions together in Obsidian's file explorer, makes
 per-project context documents natural, and mirrors how developers think about
 their work — by project, not by calendar.
@@ -528,7 +528,7 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 | **Observability** — log every context chunk, surface "missing context" signals | Tool usage tracking, friction detection, correction patterns, `vv stats`, `vv friction` |
 | **Testing** — statistical grading across runs, regression detection | Model comparison (Phase 8), trend analysis across sessions |
 | **Version control** — context is versioned, auditable, diffable | Session notes are markdown in git, indexed and cross-linked |
-| **Reuse** — context registries, versioned modules | Per-project `_context.md`, semantic summaries, knowledge notes (Phase 10) |
+| **Reuse** — context registries, versioned modules | Per-project `history.md`, semantic summaries, knowledge notes (Phase 10) |
 | **CI/CD** — automated context pipelines, auto-refresh | Backfill pipeline, reprocess on upgrade, index rebuild |
 
 ### What's Out of Scope

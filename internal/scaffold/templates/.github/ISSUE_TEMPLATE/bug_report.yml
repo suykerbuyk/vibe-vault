@@ -25,7 +25,7 @@ body:
       placeholder: |
         1. Set ENRICHMENT_MODE=inline
         2. Run a coding session with Claude Code
-        3. Check the generated session note in Sessions/
+        3. Check the generated session note in Projects/
     validations:
       required: true
 

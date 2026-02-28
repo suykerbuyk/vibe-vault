@@ -17,7 +17,7 @@ TABLE
   min(rows.date) AS "First",
   max(rows.date) AS "Last",
   rows.domain[0] AS "Domain"
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session" AND project != null AND project != ""
 GROUP BY project
 SORT length(rows) DESC
@@ -29,7 +29,7 @@ SORT length(rows) DESC
 TABLE
   length(rows) AS "Sessions",
   max(rows.date) AS "Last Active"
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session" AND project != null AND project != "" AND date >= date(today) - dur(30 days)
 GROUP BY project
 SORT max(rows.date) DESC
@@ -44,7 +44,7 @@ TABLE
   date AS "Date",
   summary AS "Summary",
   status AS "Status"
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session" AND domain = "work" AND project != null AND project != ""
 SORT project ASC, date DESC
 ```
@@ -56,7 +56,7 @@ TABLE
   date AS "Date",
   summary AS "Summary",
   status AS "Status"
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session" AND domain = "personal" AND project != null AND project != ""
 SORT project ASC, date DESC
 ```
@@ -68,7 +68,7 @@ TABLE
   date AS "Date",
   summary AS "Summary",
   status AS "Status"
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session" AND domain = "opensource" AND project != null AND project != ""
 SORT project ASC, date DESC
 ```

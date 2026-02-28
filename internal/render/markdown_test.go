@@ -262,7 +262,7 @@ func TestNoteFilename(t *testing.T) {
 
 func TestNoteRelPath(t *testing.T) {
 	got := NoteRelPath("vibe-vault", "2026-02-22", 1)
-	want := "Sessions/vibe-vault/2026-02-22-01.md"
+	want := "Projects/vibe-vault/sessions/2026-02-22-01.md"
 	if got != want {
 		t.Errorf("NoteRelPath = %q, want %q", got, want)
 	}

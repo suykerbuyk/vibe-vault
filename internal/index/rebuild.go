@@ -6,16 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/johns/vibe-vault/internal/noteparse"
 )
 
-// Rebuild walks the Sessions directory, parses each note via noteparse,
-// and builds an enriched index from scratch. It skips files prefixed with
-// underscore and logs malformed notes.
-func Rebuild(sessionsDir, stateDir string) (*Index, int, error) {
+// Rebuild walks the Projects directory, parses each note via noteparse,
+// and builds an enriched index from scratch. It only processes .md files
+// inside sessions/ subdirectories and logs malformed notes.
+func Rebuild(projectsDir, stateDir string) (*Index, int, error) {
 	// Load existing index to preserve TranscriptPaths (not stored in notes)
 	oldIdx, _ := Load(stateDir)
 
@@ -26,7 +25,7 @@ func Rebuild(sessionsDir, stateDir string) (*Index, int, error) {
 
 	count := 0
 
-	err := filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(projectsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -41,8 +40,8 @@ func Rebuild(sessionsDir, stateDir string) (*Index, int, error) {
 			return nil
 		}
 
-		// Skip underscore-prefixed files
-		if strings.HasPrefix(info.Name(), "_") {
+		// Only process files inside sessions/ subdirectories
+		if filepath.Base(filepath.Dir(path)) != "sessions" {
 			return nil
 		}
 
@@ -58,17 +57,16 @@ func Rebuild(sessionsDir, stateDir string) (*Index, int, error) {
 			return nil
 		}
 
-		// Build relative path from parent of sessionsDir
-		// sessionsDir is like /vault/Sessions, we want Sessions/project/file.md
-		vaultRoot := filepath.Dir(sessionsDir)
+		// Build relative path from parent of projectsDir
+		// projectsDir is like /vault/Projects, we want Projects/project/sessions/file.md
+		vaultRoot := filepath.Dir(projectsDir)
 		relPath, _ := filepath.Rel(vaultRoot, path)
 
-		// Detect project from directory structure: Sessions/<project>/file.md
+		// Detect project from directory structure: Projects/<project>/sessions/file.md
 		project := note.Project
 		if project == "" {
-			// Fall back to directory name
-			dir := filepath.Dir(path)
-			project = filepath.Base(dir)
+			// Fall back to grandparent directory name (two levels up from file)
+			project = filepath.Base(filepath.Dir(filepath.Dir(path)))
 		}
 
 		iteration := 0
@@ -157,7 +155,7 @@ func Rebuild(sessionsDir, stateDir string) (*Index, int, error) {
 	})
 
 	if err != nil {
-		return nil, 0, fmt.Errorf("walk sessions: %w", err)
+		return nil, 0, fmt.Errorf("walk projects: %w", err)
 	}
 
 	return idx, count, nil

@@ -56,10 +56,10 @@ func TestHandleInput_SessionEnd(t *testing.T) {
 	}
 
 	// Verify the note was written
-	sessDir := filepath.Join(cfg.VaultPath, "Sessions")
-	entries, err := os.ReadDir(sessDir)
+	projDir :=filepath.Join(cfg.VaultPath, "Projects")
+	entries, err := os.ReadDir(projDir)
 	if err != nil {
-		t.Fatalf("read sessions dir: %v", err)
+		t.Fatalf("read projects dir: %v", err)
 	}
 	if len(entries) == 0 {
 		t.Error("expected session note directory to be created")
@@ -125,10 +125,10 @@ func TestHandleInput_StopEvent(t *testing.T) {
 	}
 
 	// Verify a checkpoint note was created
-	sessDir := filepath.Join(cfg.VaultPath, "Sessions")
-	entries, err := os.ReadDir(sessDir)
+	projDir :=filepath.Join(cfg.VaultPath, "Projects")
+	entries, err := os.ReadDir(projDir)
 	if err != nil {
-		t.Fatalf("read sessions dir: %v", err)
+		t.Fatalf("read projects dir: %v", err)
 	}
 	if len(entries) == 0 {
 		t.Error("expected checkpoint note directory to be created")
@@ -162,9 +162,9 @@ func TestHandleInput_StopThenSessionEnd(t *testing.T) {
 	}
 
 	// Verify only one note file exists (overwritten, not duplicated)
-	sessDir := filepath.Join(cfg.VaultPath, "Sessions")
+	projDir :=filepath.Join(cfg.VaultPath, "Projects")
 	var noteFiles []string
-	filepath.Walk(sessDir, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(projDir, func(path string, info os.FileInfo, err error) error {
 		if err == nil && !info.IsDir() && filepath.Ext(path) == ".md" {
 			noteFiles = append(noteFiles, path)
 		}

@@ -2,7 +2,7 @@ Review recent session notes from the vault and extract durable knowledge worth p
 
 ## What to Do
 
-1. **Read session notes** from `Sessions/` for the specified period (default: last 7 days). Use Glob to find `Sessions/**/*.md` and read each note.
+1. **Read session notes** from `Projects/` for the specified period (default: last 7 days). Use Glob to find `Projects/*/sessions/*.md` and read each note.
 
 2. **Identify extractable knowledge** across three categories:
    - **Decisions** — Architectural or design choices that should guide future work (e.g., "Use REST not GraphQL for this API", "Deploy to Fly.io not Vercel")

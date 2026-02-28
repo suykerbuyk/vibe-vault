@@ -19,7 +19,7 @@ TABLE
   model AS "Model",
   duration_minutes AS "Min",
   summary AS "Summary"
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session"
 SORT date DESC, iteration DESC
 LIMIT 50
@@ -31,7 +31,7 @@ LIMIT 50
 
 ```dataview
 TABLE date AS "Date", summary AS "Summary", project AS "Project"
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session" AND domain = "work"
 SORT date DESC
 LIMIT 20
@@ -41,7 +41,7 @@ LIMIT 20
 
 ```dataview
 TABLE date AS "Date", summary AS "Summary", project AS "Project"
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session" AND domain = "personal"
 SORT date DESC
 LIMIT 20
@@ -51,7 +51,7 @@ LIMIT 20
 
 ```dataview
 TABLE date AS "Date", summary AS "Summary", project AS "Project"
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session" AND domain = "opensource"
 SORT date DESC
 LIMIT 20
@@ -64,7 +64,7 @@ TABLE
   date AS "Date",
   domain AS "Domain",
   summary AS "Summary"
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session"
 GROUP BY choice(contains(tags, "research"), "Research",
   choice(contains(tags, "implementation"), "Implementation",
@@ -81,7 +81,7 @@ TABLE
   length(rows) AS "Session Count",
   min(rows.date) AS "First Session",
   max(rows.date) AS "Last Session"
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session" AND project != null AND project != ""
 GROUP BY project
 SORT length(rows) DESC

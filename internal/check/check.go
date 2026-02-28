@@ -116,16 +116,16 @@ func CheckObsidian(path string) Result {
 	return Result{Name: "obsidian", Status: Warn, Detail: ".obsidian/ not found (not yet opened in Obsidian)"}
 }
 
-// CheckSessions checks whether the Sessions directory exists and reports note count.
-func CheckSessions(sessDir string) Result {
-	entries, err := os.ReadDir(sessDir)
+// CheckProjects checks whether the Projects directory exists and reports note count.
+func CheckProjects(projDir string) Result {
+	entries, err := os.ReadDir(projDir)
 	if err != nil {
-		return Result{Name: "sessions", Status: Warn, Detail: "Sessions/ not found (fresh vault)"}
+		return Result{Name: "projects", Status: Warn, Detail: "Projects/ not found (fresh vault)"}
 	}
 	// Count .md files recursively.
-	count := countMD(sessDir)
+	count := countMD(projDir)
 	_ = entries
-	return Result{Name: "sessions", Status: Pass, Detail: fmt.Sprintf("Sessions/ (%d notes)", count)}
+	return Result{Name: "projects", Status: Pass, Detail: fmt.Sprintf("Projects/ (%d notes)", count)}
 }
 
 func countMD(dir string) int {
@@ -235,7 +235,7 @@ func Run(cfg config.Config) Report {
 	results = append(results, CheckConfig())
 	results = append(results, CheckVaultPath(cfg.VaultPath))
 	results = append(results, CheckObsidian(cfg.VaultPath))
-	results = append(results, CheckSessions(cfg.SessionsDir()))
+	results = append(results, CheckProjects(cfg.ProjectsDir()))
 	results = append(results, CheckStateDir(cfg.StateDir()))
 	results = append(results, CheckIndex(cfg.StateDir()))
 	results = append(results, CheckDomains(cfg.Domains)...)

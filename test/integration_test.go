@@ -251,8 +251,8 @@ func TestIntegration(t *testing.T) {
 		if !fileExists(filepath.Join(vaultPath, ".obsidian", "app.json")) {
 			t.Error(".obsidian/app.json not created")
 		}
-		if !fileExists(filepath.Join(vaultPath, "Sessions", ".gitkeep")) {
-			t.Error("Sessions/.gitkeep not created")
+		if !fileExists(filepath.Join(vaultPath, "Projects", ".gitkeep")) {
+			t.Error("Projects/.gitkeep not created")
 		}
 
 		// Config written
@@ -295,7 +295,7 @@ func TestIntegration(t *testing.T) {
 		assertContains(t, stdout, "created:", "process stdout")
 
 		// Note file exists
-		notePath := filepath.Join(vaultPath, "Sessions", "myproject", "2027-06-15-01.md")
+		notePath := filepath.Join(vaultPath, "Projects", "myproject", "sessions", "2027-06-15-01.md")
 		if !fileExists(notePath) {
 			t.Fatalf("note not created at %s", notePath)
 		}
@@ -333,7 +333,7 @@ func TestIntegration(t *testing.T) {
 		stdout := mustRunVV(t, env, "process", a2Path)
 		assertContains(t, stdout, "created:", "process stdout")
 
-		notePath := filepath.Join(vaultPath, "Sessions", "myproject", "2027-06-15-02.md")
+		notePath := filepath.Join(vaultPath, "Projects", "myproject", "sessions", "2027-06-15-02.md")
 		if !fileExists(notePath) {
 			t.Fatalf("note not created at %s", notePath)
 		}
@@ -370,7 +370,7 @@ func TestIntegration(t *testing.T) {
 		stdout := mustRunVV(t, env, "process", bPath)
 		assertContains(t, stdout, "created:", "process stdout")
 
-		notePath := filepath.Join(vaultPath, "Sessions", "other-project", "2027-06-15-01.md")
+		notePath := filepath.Join(vaultPath, "Projects", "other-project", "sessions", "2027-06-15-01.md")
 		if !fileExists(notePath) {
 			t.Fatalf("note not created at %s", notePath)
 		}
@@ -393,7 +393,7 @@ func TestIntegration(t *testing.T) {
 		stdout := mustRunVV(t, env, "process", narrPath)
 		assertContains(t, stdout, "created:", "process stdout")
 
-		notePath := filepath.Join(vaultPath, "Sessions", "narr-project", "2027-08-10-01.md")
+		notePath := filepath.Join(vaultPath, "Projects", "narr-project", "sessions", "2027-08-10-01.md")
 		if !fileExists(notePath) {
 			t.Fatalf("note not created at %s", notePath)
 		}
@@ -475,11 +475,11 @@ func TestIntegration(t *testing.T) {
 			}
 		}
 
-		// _context.md generated per project
+		// history.md generated per project
 		for _, project := range []string{"myproject", "other-project", "narr-project"} {
-			ctxPath := filepath.Join(vaultPath, "Sessions", project, "_context.md")
+			ctxPath := filepath.Join(vaultPath, "Projects", project, "history.md")
 			if !fileExists(ctxPath) {
-				t.Errorf("_context.md not created for %s", project)
+				t.Errorf("history.md not created for %s", project)
 				continue
 			}
 			ctx := readFile(t, ctxPath)
@@ -582,7 +582,7 @@ func TestIntegration(t *testing.T) {
 		}
 
 		// Verify checkpoint note exists with status: checkpoint
-		notePath := filepath.Join(vaultPath, "Sessions", "myproject", "2027-07-01-01.md")
+		notePath := filepath.Join(vaultPath, "Projects", "myproject", "sessions", "2027-07-01-01.md")
 		if !fileExists(notePath) {
 			t.Fatalf("checkpoint note not created at %s", notePath)
 		}
@@ -631,7 +631,7 @@ func TestIntegration(t *testing.T) {
 		}
 
 		// Verify only one note file for this session (not two)
-		projectDir := filepath.Join(vaultPath, "Sessions", "myproject")
+		projectDir := filepath.Join(vaultPath, "Projects", "myproject", "sessions")
 		entries, _ := os.ReadDir(projectDir)
 		stopNotes := 0
 		for _, e := range entries {
@@ -649,7 +649,7 @@ func TestIntegration(t *testing.T) {
 		stdout := mustRunVV(t, env, "process", frictionPath)
 		assertContains(t, stdout, "created:", "process stdout")
 
-		notePath := filepath.Join(vaultPath, "Sessions", "friction-project", "2027-09-01-01.md")
+		notePath := filepath.Join(vaultPath, "Projects", "friction-project", "sessions", "2027-09-01-01.md")
 		if !fileExists(notePath) {
 			t.Fatalf("note not created at %s", notePath)
 		}
@@ -701,9 +701,9 @@ func TestIntegration(t *testing.T) {
 			sessionID string
 			project   string
 		}{
-			{"Sessions/myproject/2027-06-15-01.md", "session-aaa-001", "myproject"},
-			{"Sessions/myproject/2027-06-15-02.md", "session-aaa-002", "myproject"},
-			{"Sessions/other-project/2027-06-15-01.md", "session-bbb-001", "other-project"},
+			{"Projects/myproject/sessions/2027-06-15-01.md", "session-aaa-001", "myproject"},
+			{"Projects/myproject/sessions/2027-06-15-02.md", "session-aaa-002", "myproject"},
+			{"Projects/other-project/sessions/2027-06-15-01.md", "session-bbb-001", "other-project"},
 		} {
 			absPath := filepath.Join(vaultPath, tc.path)
 			if !fileExists(absPath) {
@@ -715,11 +715,11 @@ func TestIntegration(t *testing.T) {
 			assertContains(t, note, fmt.Sprintf("project: %s", tc.project), tc.path+" project")
 		}
 
-		// _context.md regenerated
+		// history.md regenerated
 		for _, project := range []string{"myproject", "other-project"} {
-			ctxPath := filepath.Join(vaultPath, "Sessions", project, "_context.md")
+			ctxPath := filepath.Join(vaultPath, "Projects", project, "history.md")
 			if !fileExists(ctxPath) {
-				t.Errorf("_context.md not regenerated for %s", project)
+				t.Errorf("history.md not regenerated for %s", project)
 			}
 		}
 

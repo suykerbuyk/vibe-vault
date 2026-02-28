@@ -23,7 +23,7 @@ func TestInit_CreatesVault(t *testing.T) {
 		".pii-patterns",
 		".obsidian/app.json",
 		".obsidian/appearance.json",
-		"Sessions/.gitkeep",
+		"Projects/.gitkeep",
 		"Knowledge/decisions/.gitkeep",
 		"Dashboards/sessions.md",
 		"Templates/session-summary.md",

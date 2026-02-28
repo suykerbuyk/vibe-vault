@@ -12,7 +12,7 @@ The `vv` binary (from [vibe-vault](https://github.com/johns/vibe-vault)) runs as
 4. Generates a session note with Obsidian-compatible frontmatter
 5. Maintains a session index for cross-session linking
 
-Notes land in `Sessions/{project}/YYYY-MM-DD-NN.md` and are queryable via Dataview.
+Notes land in `Projects/{project}/sessions/YYYY-MM-DD-NN.md` and are queryable via Dataview.
 
 ## Quick Start
 
@@ -22,12 +22,12 @@ Notes land in `Sessions/{project}/YYYY-MM-DD-NN.md` and are queryable via Datavi
    ```json
    {"hooks": {"SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}]}}
    ```
-4. Start a Claude Code session. When it ends, a note appears in `Sessions/`.
+4. Start a Claude Code session. When it ends, a note appears in `Projects/`.
 
 ## Vault Structure
 
 ```
-Sessions/{project}/       Auto-generated session notes
+Projects/{project}/sessions/  Auto-generated session notes
 Knowledge/decisions/      Architectural decisions
 Knowledge/patterns/       Reusable patterns
 Knowledge/learnings/      Lessons learned

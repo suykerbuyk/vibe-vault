@@ -273,7 +273,7 @@ func NoteFilename(date string, iteration int) string {
 
 // NoteRelPath returns the relative path within the vault for a session note.
 func NoteRelPath(project, date string, iteration int) string {
-	return filepath.Join("Sessions", project, NoteFilename(date, iteration))
+	return filepath.Join("Projects", project, "sessions", NoteFilename(date, iteration))
 }
 
 func titleFromFirstMessage(msg string) string {

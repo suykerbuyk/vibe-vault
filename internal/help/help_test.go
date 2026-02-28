@@ -74,7 +74,7 @@ var expectedTerminal = map[string]string{
 		"  - Config file location and validity\n" +
 		"  - Vault directory exists\n" +
 		"  - Obsidian config present (.obsidian/)\n" +
-		"  - Sessions directory and note count\n" +
+		"  - Projects directory and note count\n" +
 		"  - State directory (.vibe-vault/)\n" +
 		"  - Session index validity and entry count\n" +
 		"  - Domain paths exist\n" +
@@ -87,9 +87,9 @@ var expectedTerminal = map[string]string{
 		"\n" +
 		"Usage: vv index\n" +
 		"\n" +
-		"Walks Sessions/**/*.md in the vault, parses frontmatter from each note,\n" +
-		"and rebuilds .vibe-vault/session-index.json. Preserves TranscriptPath\n" +
-		"values from the existing index. Generates a _context.md document for\n" +
+		"Walks Projects/*/sessions/*.md in the vault, parses frontmatter from each\n" +
+		"note, and rebuilds .vibe-vault/session-index.json. Preserves TranscriptPath\n" +
+		"values from the existing index. Generates a history.md document for\n" +
 		"each project with timeline, decisions, open threads, and key files.\n" +
 		"\n" +
 		"Use this after manually editing or deleting session notes.\n",
@@ -139,7 +139,7 @@ var expectedTerminal = map[string]string{
 		"  3. Fallback discovery scan (~/.claude/projects/)\n" +
 		"\n" +
 		"Overwrites existing notes in place (preserves iteration numbers).\n" +
-		"Regenerates _context.md for each affected project.\n" +
+		"Regenerates history.md for each affected project.\n" +
 		"\n" +
 		"Examples:\n" +
 		"  vv reprocess                       Reprocess all sessions\n" +

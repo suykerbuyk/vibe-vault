@@ -41,24 +41,24 @@ func TestCheckObsidian_Warn(t *testing.T) {
 	}
 }
 
-func TestCheckSessions_Pass(t *testing.T) {
+func TestCheckProjects_Pass(t *testing.T) {
 	dir := t.TempDir()
-	sessDir := filepath.Join(dir, "Sessions")
-	os.Mkdir(sessDir, 0o755)
-	os.WriteFile(filepath.Join(sessDir, "note1.md"), []byte("# Note"), 0o644)
-	os.WriteFile(filepath.Join(sessDir, "note2.md"), []byte("# Note"), 0o644)
+	projDir := filepath.Join(dir, "Projects")
+	os.Mkdir(projDir, 0o755)
+	os.WriteFile(filepath.Join(projDir, "note1.md"), []byte("# Note"), 0o644)
+	os.WriteFile(filepath.Join(projDir, "note2.md"), []byte("# Note"), 0o644)
 
-	r := CheckSessions(sessDir)
+	r := CheckProjects(projDir)
 	if r.Status != Pass {
 		t.Errorf("expected Pass, got %s: %s", r.Status, r.Detail)
 	}
-	if r.Detail != "Sessions/ (2 notes)" {
+	if r.Detail != "Projects/ (2 notes)" {
 		t.Errorf("unexpected detail: %s", r.Detail)
 	}
 }
 
-func TestCheckSessions_Warn(t *testing.T) {
-	r := CheckSessions("/nonexistent/sessions")
+func TestCheckProjects_Warn(t *testing.T) {
+	r := CheckProjects("/nonexistent/projects")
 	if r.Status != Warn {
 		t.Errorf("expected Warn, got %s: %s", r.Status, r.Detail)
 	}
@@ -240,9 +240,9 @@ func TestRun_Integration(t *testing.T) {
 	// Create vault structure.
 	os.Mkdir(filepath.Join(vault, ".obsidian"), 0o755)
 
-	sessDir := filepath.Join(vault, "Sessions")
-	os.Mkdir(sessDir, 0o755)
-	os.WriteFile(filepath.Join(sessDir, "note.md"), []byte("# Note"), 0o644)
+	projDir := filepath.Join(vault, "Projects")
+	os.Mkdir(projDir, 0o755)
+	os.WriteFile(filepath.Join(projDir, "note.md"), []byte("# Note"), 0o644)
 
 	stateDir := filepath.Join(vault, ".vibe-vault")
 	os.Mkdir(stateDir, 0o755)

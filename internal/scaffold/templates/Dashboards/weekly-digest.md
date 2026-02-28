@@ -18,7 +18,7 @@ TABLE
   domain AS "Domain",
   project AS "Project",
   summary AS "Summary"
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session" AND date >= date(today) - dur(7 days)
 SORT date DESC, time DESC
 ```
@@ -31,7 +31,7 @@ TABLE
   length(filter(rows, (r) => r.domain = "work")) AS "Work",
   length(filter(rows, (r) => r.domain = "personal")) AS "Personal",
   length(filter(rows, (r) => r.domain = "opensource")) AS "OSS"
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session"
 GROUP BY dateformat(date, "yyyy-'W'WW") AS "Week"
 SORT key DESC
@@ -57,7 +57,7 @@ SORT date DESC
 
 ```dataview
 LIST summary
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session" AND domain = "work" AND date >= date(today) - dur(7 days)
 SORT date DESC
 ```
@@ -66,7 +66,7 @@ SORT date DESC
 
 ```dataview
 LIST summary
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session" AND domain = "personal" AND date >= date(today) - dur(7 days)
 SORT date DESC
 ```
@@ -75,7 +75,7 @@ SORT date DESC
 
 ```dataview
 LIST summary
-FROM "Sessions"
+FROM "Projects"
 WHERE type = "session" AND domain = "opensource" AND date >= date(today) - dur(7 days)
 SORT date DESC
 ```

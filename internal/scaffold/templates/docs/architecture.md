@@ -18,7 +18,7 @@ Claude Code SessionEnd
     → Generate: title from first meaningful user message
     → Link: find previous session in index
     → Render: Obsidian markdown with frontmatter
-    → Write: Sessions/{project}/YYYY-MM-DD-NN.md
+    → Write: Projects/{project}/sessions/YYYY-MM-DD-NN.md
     → Index: update .vibe-vault/session-index.json
 ```
 
