@@ -22,7 +22,8 @@ type Entry struct {
 
 	// IsMeta marks system-injected messages (e.g., CLAUDE.md, context reminders)
 	// that should be skipped when extracting user requests for titles.
-	IsMeta bool `json:"-"`
+	// Native field in Claude Code's JSONL output.
+	IsMeta bool `json:"isMeta,omitempty"`
 
 	// Present on tool result entries (type=user with tool results)
 	ToolUseResult        *ToolUseResult `json:"toolUseResult,omitempty"`
