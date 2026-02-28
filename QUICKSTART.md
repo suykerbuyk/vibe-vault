@@ -218,7 +218,56 @@ opensource = "~/opensource"
 Any session whose CWD starts with `~/work/` gets `domain: work` in its
 frontmatter. This powers the domain-filtered dashboards in Obsidian.
 
-## 6. Optional: Enable LLM Enrichment
+## 6. Optional: Vault-Resident AI Context
+
+AI workflow files (resume, iteration history, tasks) can live in the vault
+instead of as untracked repo-local files. This makes them portable, searchable
+in Obsidian, and accessible to any session.
+
+### New project (no existing context files)
+
+From your project's repo root:
+
+```bash
+vv context init
+```
+
+This creates:
+- **Vault-side**: `Projects/{project}/resume.md`, `iterations.md`, `tasks/`
+- **Repo-side**: `CLAUDE.md` (vault pointer), `.claude/commands/restart.md`,
+  `.claude/commands/wrap.md`
+- Updates `.gitignore` to exclude `CLAUDE.md` and `commit.msg`
+
+The project name is auto-detected from the git remote. To override:
+
+```bash
+vv context init --project myproject
+```
+
+### Existing project (migrate local files)
+
+If you already have `RESUME.md`, `HISTORY.md`, or `tasks/` in your repo:
+
+```bash
+vv context migrate
+```
+
+This copies:
+- `RESUME.md` → `Projects/{project}/resume.md`
+- `HISTORY.md` → `Projects/{project}/iterations.md`
+- `tasks/` → `Projects/{project}/tasks/` (recursive)
+
+Then rewrites the repo-side files to point at the vault. Local originals
+are preserved — remove them manually after verifying the migration.
+
+### How it works after setup
+
+- `/restart` reads `resume.md` from the vault (not `./RESUME.md`)
+- `/wrap` updates vault-side files (resume, tasks)
+- `CLAUDE.md` in the repo is a lightweight pointer with workflow rules
+- Everything is searchable in Obsidian alongside session notes
+
+## 7. Optional: Enable LLM Enrichment
 
 By default, notes contain extracted metadata and files changed but no
 narrative summary. To add LLM-generated summaries, decisions, and open
@@ -270,6 +319,8 @@ vv reprocess --project myproject   # one project only
 | Archive transcripts | `vv archive` |
 | Rebuild index | `vv index` |
 | Reprocess notes | `vv reprocess` |
+| Init project context | `vv context init` |
+| Migrate local context | `vv context migrate` |
 | Process one file | `vv process path/to/transcript.jsonl` |
 | Per-command help | `vv <command> --help` |
 | Man pages | `man vv` or `man vv-<command>` |

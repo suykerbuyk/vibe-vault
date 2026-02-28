@@ -264,6 +264,8 @@ deterministic heuristics rather than embeddings.
 | `vv check` | Validate config, vault, and hook setup |
 | `vv stats [--project X]` | Show session analytics and metrics |
 | `vv friction [--project X]` | Show friction analysis and correction patterns |
+| `vv trends [--project X]` | Show metric trends over time |
+| `vv context [init \| migrate]` | Manage vault-resident AI context files |
 | `vv version` | Print version |
 
 ### Common Workflows
@@ -295,6 +297,13 @@ vv stats --project myproject   # stats for one project only
 ```bash
 vv friction                       # correction density, high-friction sessions
 vv friction --project myproject   # friction for one project only
+```
+
+**Set up vault-resident AI context for a project:**
+```bash
+vv context init                       # scaffold from current directory
+vv context init --project myproject   # specify project name
+vv context migrate                    # copy existing RESUME.md/HISTORY.md/tasks/ to vault
 ```
 
 **Diagnose issues:**
@@ -492,11 +501,11 @@ how a project was built: what was decided, what was attempted, what failed, what
 was deferred. This is the history that git commits try to be but rarely are —
 decisions in full context, with the reasoning preserved.
 
-**2. Portable AI Memory** — RESUME.md, HISTORY.md, and task files are the AI's
-working memory for a project. Today they live as untracked files in each repo.
-Moving them into the vault makes project context survive machine migrations,
-searchable across the portfolio, and accessible to any session that knows the
-project name.
+**2. Portable AI Memory** — `vv context init` scaffolds vault-resident context
+files (resume, iterations, tasks) for a project, and `vv context migrate` moves
+existing repo-local files (RESUME.md, HISTORY.md, tasks/) into the vault. This
+makes project context survive machine migrations, searchable across the
+portfolio, and accessible to any session that knows the project name.
 
 **3. AI Behavioral Observability** — Every transcript logs which tools the AI
 used, how many tokens it consumed, whether it needed corrections. Aggregating

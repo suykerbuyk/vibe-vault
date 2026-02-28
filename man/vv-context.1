@@ -1,0 +1,17 @@
+.TH VV-CONTEXT 1 "2026-02-28" "vv v0.3.0-12-g070e604-dirty" "Vibe-Vault Manual"
+.SH NAME
+vv-context \- manage vault\-resident AI context files
+.SH SYNOPSIS
+.B vv context [init | migrate]
+.SH DESCRIPTION
+Manages AI workflow context files (resume, iterations, tasks) that live
+in the Obsidian vault rather than as untracked repo\-local files. This
+makes context portable, searchable, and visible to Obsidian.
+.PP
+Subcommands:
+  vv context init      Scaffold vault\-resident context for current project
+  vv context migrate   Copy existing local files to vault
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-context\-init (1),
+.BR vv\-context\-migrate (1)

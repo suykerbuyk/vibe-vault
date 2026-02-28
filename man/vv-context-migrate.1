@@ -1,0 +1,35 @@
+.TH VV-CONTEXT-MIGRATE 1 "2026-02-28" "vv v0.3.0-12-g070e604-dirty" "Vibe-Vault Manual"
+.SH NAME
+vv-context-migrate \- copy existing local context files to vault
+.SH SYNOPSIS
+.B vv context migrate [\-\-project <name>] [\-\-force]
+.SH DESCRIPTION
+Copies existing repo\-local context files to the vault:
+.PP
+  RESUME.md  → Projects/{project}/resume.md
+  HISTORY.md → Projects/{project}/iterations.md
+  tasks/     → Projects/{project}/tasks/ (recursive)
+.PP
+Then force\-updates repo\-side files (CLAUDE.md, .claude/commands/) to
+point at the vault. Local originals are NOT deleted — remove them
+manually after verifying the migration.
+.PP
+Files that don't exist locally are skipped. Vault files that already
+exist are skipped unless \-\-force is specified.
+.SH OPTIONS
+.TP
+.B \-\-project <name>
+Override auto\-detected project name
+.TP
+.B \-\-force
+Overwrite existing vault files
+.SH EXAMPLES
+.nf
+vv context migrate                       Migrate auto\-detected project
+vv context migrate \-\-project myproject   Migrate a specific project
+vv context migrate \-\-force               Overwrite existing vault files
+.fi
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-context (1),
+.BR vv\-context\-init (1)

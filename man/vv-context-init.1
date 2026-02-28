@@ -1,0 +1,39 @@
+.TH VV-CONTEXT-INIT 1 "2026-02-28" "vv v0.3.0-12-g070e604-dirty" "Vibe-Vault Manual"
+.SH NAME
+vv-context-init \- scaffold vault\-resident context for a project
+.SH SYNOPSIS
+.B vv context init [\-\-project <name>] [\-\-force]
+.SH DESCRIPTION
+Creates vault\-resident context files for the current project:
+.PP
+Vault\-side (in Projects/{project}/):
+  resume.md        AI working context skeleton
+  iterations.md    Iteration narratives skeleton
+  tasks/           Task directory with done/ subdirectory
+.PP
+Repo\-side (in current directory):
+  CLAUDE.md              Vault pointer + workflow rules
+  .claude/commands/restart.md  Session resume command
+  .claude/commands/wrap.md     Session wrap command
+.PP
+Also ensures .gitignore has entries for CLAUDE.md and commit.msg.
+.PP
+Existing files are skipped unless \-\-force is specified. Project name
+is auto\-detected from git remote or directory name.
+.SH OPTIONS
+.TP
+.B \-\-project <name>
+Override auto\-detected project name
+.TP
+.B \-\-force
+Overwrite existing files
+.SH EXAMPLES
+.nf
+vv context init                       Scaffold for auto\-detected project
+vv context init \-\-project myproject   Scaffold for a specific project
+vv context init \-\-force               Overwrite existing files
+.fi
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-context (1),
+.BR vv\-context\-migrate (1)
