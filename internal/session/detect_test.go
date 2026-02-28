@@ -1,6 +1,8 @@
 package session
 
 import (
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/johns/vibe-vault/internal/config"
@@ -71,5 +73,118 @@ func TestTitleFromFirstMessage(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("TitleFromFirstMessage(%q) = %q, want %q", tt.msg, got, tt.want)
 		}
+	}
+}
+
+// mustGit runs a git command in the given directory, failing the test on error.
+func mustGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+}
+
+func TestRepoNameFromURL(t *testing.T) {
+	tests := []struct {
+		url  string
+		want string
+	}{
+		// SSH SCP-style
+		{"git@github.com:user/repo.git", "repo"},
+		{"git@github.com:user/repo", "repo"},
+		{"git@gitlab.com:org/sub/repo.git", "repo"},
+
+		// SSH with scheme
+		{"ssh://git@github.com/user/repo.git", "repo"},
+		{"ssh://git@github.com/user/repo", "repo"},
+
+		// HTTPS
+		{"https://github.com/user/repo.git", "repo"},
+		{"https://github.com/user/repo", "repo"},
+		{"https://gitlab.com/org/sub/repo.git", "repo"},
+
+		// File protocol
+		{"file:///path/to/repo.git", "repo"},
+
+		// Bare path
+		{"/path/to/repo.git", "repo"},
+		{"/path/to/repo", "repo"},
+
+		// Edge cases
+		{"", ""},
+		{"   ", ""},
+		{"git@github.com:", ""},
+		{"   git@github.com:user/repo.git   ", "repo"}, // whitespace trimmed
+	}
+
+	for _, tt := range tests {
+		got := repoNameFromURL(tt.url)
+		if got != tt.want {
+			t.Errorf("repoNameFromURL(%q) = %q, want %q", tt.url, got, tt.want)
+		}
+	}
+}
+
+func TestDetectProject_GitRemote(t *testing.T) {
+	dir := t.TempDir()
+	// Name the subdirectory differently from the repo name to prove remote wins
+	projectDir := filepath.Join(dir, "generic-dirname")
+	if err := exec.Command("mkdir", "-p", projectDir).Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	mustGit(t, projectDir, "init")
+	mustGit(t, projectDir, "remote", "add", "origin", "git@github.com:user/awesome-api.git")
+
+	got := detectProject(projectDir)
+	if got != "awesome-api" {
+		t.Errorf("detectProject with SSH remote = %q, want %q", got, "awesome-api")
+	}
+}
+
+func TestDetectProject_GitHTTPS(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "some-dir")
+	if err := exec.Command("mkdir", "-p", projectDir).Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	mustGit(t, projectDir, "init")
+	mustGit(t, projectDir, "remote", "add", "origin", "https://github.com/user/cool-project.git")
+
+	got := detectProject(projectDir)
+	if got != "cool-project" {
+		t.Errorf("detectProject with HTTPS remote = %q, want %q", got, "cool-project")
+	}
+}
+
+func TestDetectProject_GitNoRemote(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "local-only")
+	if err := exec.Command("mkdir", "-p", projectDir).Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	mustGit(t, projectDir, "init")
+
+	got := detectProject(projectDir)
+	if got != "local-only" {
+		t.Errorf("detectProject with no remote = %q, want %q", got, "local-only")
+	}
+}
+
+func TestDetectProject_NotGitRepo(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "plain-dir")
+	if err := exec.Command("mkdir", "-p", projectDir).Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := detectProject(projectDir)
+	if got != "plain-dir" {
+		t.Errorf("detectProject in non-git dir = %q, want %q", got, "plain-dir")
 	}
 }

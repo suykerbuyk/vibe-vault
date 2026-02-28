@@ -1,8 +1,12 @@
 package session
 
 import (
+	"context"
+	"net/url"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/johns/vibe-vault/internal/config"
 )
@@ -33,20 +37,75 @@ func Detect(cwd, gitBranch, model, sessionID string, cfg config.Config) Info {
 }
 
 // detectProject extracts the project name from the working directory.
-// Uses the last path component, which is typically the repo name.
+// Prefers the git remote origin name (stable across worktrees and renames),
+// falling back to the directory basename.
 func detectProject(cwd string) string {
 	if cwd == "" {
 		return "_unknown"
 	}
-
-	// Clean and get the base directory name
 	cwd = filepath.Clean(cwd)
-	name := filepath.Base(cwd)
 
+	// Try git remote first (stable across worktrees and renames)
+	if name := gitRemoteProject(cwd); name != "" {
+		return name
+	}
+
+	// Fall back to directory basename
+	name := filepath.Base(cwd)
 	if name == "" || name == "." || name == "/" {
 		return "_unknown"
 	}
+	return name
+}
 
+// gitRemoteProject runs `git remote get-url origin` and extracts the repo name.
+// Returns "" on any failure (not a git repo, no remote, timeout, parse error).
+func gitRemoteProject(cwd string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
+	cmd.Dir = cwd
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return repoNameFromURL(strings.TrimSpace(string(out)))
+}
+
+// repoNameFromURL extracts the repository name from a git remote URL.
+// Handles SSH (SCP-style), HTTPS, file://, and bare path formats.
+// Returns "" on any parse failure.
+func repoNameFromURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+
+	var path string
+
+	// SCP-style: git@host:path (no :// but has :)
+	if !strings.Contains(rawURL, "://") && strings.Contains(rawURL, ":") {
+		idx := strings.Index(rawURL, ":")
+		path = rawURL[idx+1:]
+	} else {
+		// URL with scheme (https://, ssh://, file://, etc.) or bare path
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			return ""
+		}
+		path = u.Path
+	}
+
+	if path == "" {
+		return ""
+	}
+
+	name := filepath.Base(path)
+	name = strings.TrimSuffix(name, ".git")
+	if name == "" || name == "." || name == "/" {
+		return ""
+	}
 	return name
 }
 
