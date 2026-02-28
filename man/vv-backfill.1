@@ -1,0 +1,26 @@
+.TH VV-BACKFILL 1 "2026-02-27" "vv 0.3.0" "Vibe-Vault Manual"
+.SH NAME
+vv-backfill \- discover and process historical transcripts
+.SH SYNOPSIS
+.B vv backfill [path]
+.SH DESCRIPTION
+Recursively discovers Claude Code JSONL transcripts by UUID filename
+pattern, skips already\-indexed sessions, and processes the rest through
+the full capture pipeline. Also patches TranscriptPath on existing index
+entries that lack it.
+.PP
+Subagent transcripts (in /subagents/ subdirectories) are automatically
+filtered out.
+.SH OPTIONS
+.TP
+.B path
+Directory to scan for transcripts (default: ~/.claude/projects/)
+.SH EXAMPLES
+.nf
+vv backfill                              Scan default Claude projects dir
+vv backfill ~/.claude/projects/myproj    Scan a specific directory
+.fi
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-process (1),
+.BR vv\-archive (1)

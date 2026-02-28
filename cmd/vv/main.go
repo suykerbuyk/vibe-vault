@@ -11,13 +11,12 @@ import (
 	"github.com/johns/vibe-vault/internal/check"
 	"github.com/johns/vibe-vault/internal/config"
 	"github.com/johns/vibe-vault/internal/discover"
+	"github.com/johns/vibe-vault/internal/help"
 	"github.com/johns/vibe-vault/internal/hook"
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/scaffold"
 	"github.com/johns/vibe-vault/internal/session"
 )
-
-const version = "0.3.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -51,7 +50,11 @@ func main() {
 		runCheck()
 
 	case "version":
-		fmt.Printf("vv v%s (vibe-vault)\n", version)
+		if wantsHelp(os.Args[2:]) {
+			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVersion))
+			return
+		}
+		fmt.Printf("vv v%s (vibe-vault)\n", help.Version)
 
 	case "help", "--help", "-help", "-h":
 		usage()
@@ -66,26 +69,7 @@ func main() {
 func runInit() {
 	args := os.Args[2:]
 	if wantsHelp(args) {
-		fmt.Fprintf(os.Stderr, `vv init — create a new Obsidian vault for session notes
-
-Usage: vv init [path] [--git]
-
-Arguments:
-  path       Target directory (default: ./vibe-vault)
-
-Flags:
-  --git      Initialize a git repository in the new vault
-
-Creates a fully configured Obsidian vault with Dataview dashboards,
-Templater templates, and session capture infrastructure. Also writes
-a default config to ~/.config/vibe-vault/config.toml pointing at the
-new vault.
-
-Examples:
-  vv init                       Create ./vibe-vault
-  vv init ~/obsidian/my-vault   Create at a specific path
-  vv init --git                 Create with git repo initialized
-`)
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdInit))
 		return
 	}
 
@@ -131,31 +115,7 @@ Examples:
 
 func runHook() {
 	if wantsHelp(os.Args[2:]) {
-		fmt.Fprintf(os.Stderr, `vv hook — Claude Code hook handler
-
-Usage: vv hook [--event <name>]
-
-Flags:
-  --event <name>   Override the hook event type (default: read from stdin)
-
-Reads a JSON payload from stdin as delivered by Claude Code's hook
-system. Handles two event types:
-
-  SessionEnd — parses transcript, writes a finalized session note
-  Stop       — captures a mid-session checkpoint (no LLM enrichment)
-
-Checkpoint notes are provisional: a subsequent Stop overwrites the
-previous checkpoint, and SessionEnd finalizes it. Clear events and
-unknown events are silently ignored.
-
-This command is meant to be called by Claude Code, not directly.
-
-Hook integration (add to ~/.claude/settings.json):
-  {"hooks": {
-    "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}],
-    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}]
-  }}
-`)
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdHook))
 		return
 	}
 
@@ -168,20 +128,7 @@ Hook integration (add to ~/.claude/settings.json):
 
 func runProcess() {
 	if wantsHelp(os.Args[2:]) {
-		fmt.Fprintf(os.Stderr, `vv process — process a single transcript file
-
-Usage: vv process <transcript.jsonl>
-
-Arguments:
-  transcript.jsonl   Path to a Claude Code JSONL transcript
-
-Parses the transcript, detects the project from the session's working
-directory, and writes a session note to the vault. Skips trivial
-sessions (< 2 messages) and already-indexed sessions.
-
-Examples:
-  vv process ~/.claude/projects/-home-user-myproject/abc123.jsonl
-`)
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdProcess))
 		return
 	}
 
@@ -203,23 +150,7 @@ Examples:
 
 func runCheck() {
 	if wantsHelp(os.Args[2:]) {
-		fmt.Fprintf(os.Stderr, `vv check — validate config, vault, and hook setup
-
-Usage: vv check
-
-Runs diagnostic checks and prints a pass/warn/FAIL report:
-  - Config file location and validity
-  - Vault directory exists
-  - Obsidian config present (.obsidian/)
-  - Sessions directory and note count
-  - State directory (.vibe-vault/)
-  - Session index validity and entry count
-  - Domain paths exist
-  - Enrichment config and API key
-  - Claude Code hook setup in ~/.claude/settings.json
-
-Exit code 0 if all checks pass or warn, 1 if any check fails.
-`)
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdCheck))
 		return
 	}
 
@@ -233,17 +164,7 @@ Exit code 0 if all checks pass or warn, 1 if any check fails.
 
 func runIndex() {
 	if wantsHelp(os.Args[2:]) {
-		fmt.Fprintf(os.Stderr, `vv index — rebuild session index from notes
-
-Usage: vv index
-
-Walks Sessions/**/*.md in the vault, parses frontmatter from each note,
-and rebuilds .vibe-vault/session-index.json. Preserves TranscriptPath
-values from the existing index. Generates a _context.md document for
-each project with timeline, decisions, open threads, and key files.
-
-Use this after manually editing or deleting session notes.
-`)
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdIndex))
 		return
 	}
 
@@ -288,25 +209,7 @@ func defaultTranscriptDir() string {
 
 func runBackfill() {
 	if wantsHelp(os.Args[2:]) {
-		fmt.Fprintf(os.Stderr, `vv backfill — discover and process historical transcripts
-
-Usage: vv backfill [path]
-
-Arguments:
-  path   Directory to scan for transcripts (default: ~/.claude/projects/)
-
-Recursively discovers Claude Code JSONL transcripts by UUID filename
-pattern, skips already-indexed sessions, and processes the rest through
-the full capture pipeline. Also patches TranscriptPath on existing index
-entries that lack it.
-
-Subagent transcripts (in /subagents/ subdirectories) are automatically
-filtered out.
-
-Examples:
-  vv backfill                              Scan default Claude projects dir
-  vv backfill ~/.claude/projects/myproj    Scan a specific directory
-`)
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdBackfill))
 		return
 	}
 
@@ -387,17 +290,7 @@ Examples:
 
 func runArchive() {
 	if wantsHelp(os.Args[2:]) {
-		fmt.Fprintf(os.Stderr, `vv archive — compress transcripts into vault archive
-
-Usage: vv archive
-
-Iterates all sessions in the index and compresses each transcript to
-.vibe-vault/archive/{session-id}.jsonl.zst using zstd compression
-(typically ~10:1 on JSONL). Skips already-archived and missing
-transcripts. Originals are not deleted.
-
-Reports total bytes before and after compression.
-`)
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdArchive))
 		return
 	}
 
@@ -460,27 +353,7 @@ Reports total bytes before and after compression.
 
 func runReprocess() {
 	if wantsHelp(os.Args[2:]) {
-		fmt.Fprintf(os.Stderr, `vv reprocess — re-generate notes from transcripts
-
-Usage: vv reprocess [--project <name>]
-
-Flags:
-  --project <name>   Only reprocess sessions for this project
-
-Re-runs the capture pipeline with Force mode for all (or filtered)
-sessions in the index. Locates transcripts via three-tier lookup:
-
-  1. Original path (TranscriptPath in index)
-  2. Archived copy (.vibe-vault/archive/)
-  3. Fallback discovery scan (~/.claude/projects/)
-
-Overwrites existing notes in place (preserves iteration numbers).
-Regenerates _context.md for each affected project.
-
-Examples:
-  vv reprocess                       Reprocess all sessions
-  vv reprocess --project myproject   Reprocess one project only
-`)
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdReprocess))
 		return
 	}
 
@@ -604,25 +477,7 @@ func humanBytes(b int64) string {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `vv v%s — vibe-vault session capture
-
-Usage:
-  vv init [path] [--git]       Create a new vault (default: ./vibe-vault)
-  vv hook [--event <name>]     Hook mode (reads stdin from Claude Code)
-  vv process <file.jsonl>      Process a single transcript file
-  vv index                     Rebuild session index from notes
-  vv backfill [path]           Discover and process historical transcripts
-  vv archive                   Compress transcripts into vault archive
-  vv reprocess [--project X]   Re-generate notes from transcripts
-  vv check                     Validate config, vault, and hook setup
-  vv version                   Print version
-  vv help                      Show this help
-
-Hook integration (settings.json):
-  {"type": "command", "command": "vv hook"}
-
-Configuration: ~/.config/vibe-vault/config.toml
-`, version)
+	fmt.Fprint(os.Stderr, help.FormatUsage(help.TopLevel, help.Subcommands))
 }
 
 func mustLoadConfig() config.Config {

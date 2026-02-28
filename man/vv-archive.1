@@ -1,0 +1,16 @@
+.TH VV-ARCHIVE 1 "2026-02-27" "vv 0.3.0" "Vibe-Vault Manual"
+.SH NAME
+vv-archive \- compress transcripts into vault archive
+.SH SYNOPSIS
+.B vv archive
+.SH DESCRIPTION
+Iterates all sessions in the index and compresses each transcript to
+\&.vibe\-vault/archive/{session\-id}.jsonl.zst using zstd compression
+(typically ~10:1 on JSONL). Skips already\-archived and missing
+transcripts. Originals are not deleted.
+.PP
+Reports total bytes before and after compression.
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-backfill (1),
+.BR vv\-reprocess (1)

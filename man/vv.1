@@ -1,0 +1,52 @@
+.TH VV 1 "2026-02-27" "vv 0.3.0" "Vibe-Vault Manual"
+.SH NAME
+vv \- vibe\-vault session capture
+.SH SYNOPSIS
+.B vv
+.I command
+.RI [ options ]
+.SH DESCRIPTION
+.B vv
+(vibe-vault) captures Claude Code session transcripts as structured
+Obsidian notes with frontmatter metadata, project context documents,
+and Dataview dashboards.
+.SH COMMANDS
+.TP
+.B "vv init [path] [\-\-git]"
+Create a new vault (default: ./vibe\-vault)
+.TP
+.B "vv hook [\-\-event <name>]"
+Hook mode (reads stdin from Claude Code)
+.TP
+.B "vv process <file.jsonl>"
+Process a single transcript file
+.TP
+.B "vv index"
+Rebuild session index from notes
+.TP
+.B "vv backfill [path]"
+Discover and process historical transcripts
+.TP
+.B "vv archive"
+Compress transcripts into vault archive
+.TP
+.B "vv reprocess [\-\-project X]"
+Re\-generate notes from transcripts
+.TP
+.B "vv check"
+Validate config, vault, and hook setup
+.TP
+.B "vv version"
+Print version
+.SH CONFIGURATION
+Configuration file: ~/.config/vibe-vault/config.toml
+.SH SEE ALSO
+.BR vv\-init (1),
+.BR vv\-hook (1),
+.BR vv\-process (1),
+.BR vv\-index (1),
+.BR vv\-backfill (1),
+.BR vv\-archive (1),
+.BR vv\-reprocess (1),
+.BR vv\-check (1),
+.BR vv\-version (1)

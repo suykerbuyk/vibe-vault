@@ -1,0 +1,238 @@
+package help
+
+// Version is the current vv release version.
+const Version = "0.3.0"
+
+// Flag describes a command-line flag.
+type Flag struct {
+	Name string // e.g. "--git" or "--event <name>"
+	Desc string
+}
+
+// Arg describes a positional argument.
+type Arg struct {
+	Name     string // e.g. "path" or "transcript.jsonl"
+	Desc     string
+	Optional bool
+}
+
+// Command describes a vv subcommand (or the top-level binary when Name is "").
+type Command struct {
+	Name        string   // "init", "hook", etc; "" for top-level
+	Synopsis    string   // one-line description (lowercase, for --help header)
+	Brief       string   // short description for usage table (capitalized)
+	Usage       string   // full usage line, e.g. "vv init [path] [--git]"
+	TableUsage  string   // shortened usage for the top-level table (if different from Usage)
+	Args        []Arg
+	Flags       []Flag
+	Description string   // multi-line prose (stored verbatim)
+	Examples    []string // one per line, without leading 2-space indent
+	SeeAlso     []string // man page cross-refs, e.g. "vv(1)"
+}
+
+// tableUsage returns TableUsage if set, otherwise Usage.
+func (c Command) tableUsage() string {
+	if c.TableUsage != "" {
+		return c.TableUsage
+	}
+	return c.Usage
+}
+
+// ManName returns the man page name: "vv" for top-level, "vv-<name>" for subs.
+func (c Command) ManName() string {
+	if c.Name == "" {
+		return "vv"
+	}
+	return "vv-" + c.Name
+}
+
+// TopLevel is the top-level vv command (used by FormatUsage).
+var TopLevel = Command{
+	Name:     "",
+	Synopsis: "vibe-vault session capture",
+}
+
+var CmdInit = Command{
+	Name:     "init",
+	Synopsis: "create a new Obsidian vault for session notes",
+	Brief:    "Create a new vault (default: ./vibe-vault)",
+	Usage:    "vv init [path] [--git]",
+	Args: []Arg{
+		{Name: "path", Desc: "Target directory (default: ./vibe-vault)", Optional: true},
+	},
+	Flags: []Flag{
+		{Name: "--git", Desc: "Initialize a git repository in the new vault"},
+	},
+	Description: `Creates a fully configured Obsidian vault with Dataview dashboards,
+Templater templates, and session capture infrastructure. Also writes
+a default config to ~/.config/vibe-vault/config.toml pointing at the
+new vault.`,
+	Examples: []string{
+		"vv init                       Create ./vibe-vault",
+		"vv init ~/obsidian/my-vault   Create at a specific path",
+		"vv init --git                 Create with git repo initialized",
+	},
+	SeeAlso: []string{"vv(1)", "vv-hook(1)", "vv-check(1)"},
+}
+
+var CmdHook = Command{
+	Name:     "hook",
+	Synopsis: "Claude Code hook handler",
+	Brief:    "Hook mode (reads stdin from Claude Code)",
+	Usage:    "vv hook [--event <name>]",
+	Flags: []Flag{
+		{Name: "--event <name>", Desc: "Override the hook event type (default: read from stdin)"},
+	},
+	Description: `Reads a JSON payload from stdin as delivered by Claude Code's hook
+system. Handles two event types:
+
+  SessionEnd — parses transcript, writes a finalized session note
+  Stop       — captures a mid-session checkpoint (no LLM enrichment)
+
+Checkpoint notes are provisional: a subsequent Stop overwrites the
+previous checkpoint, and SessionEnd finalizes it. Clear events and
+unknown events are silently ignored.
+
+This command is meant to be called by Claude Code, not directly.
+
+Hook integration (add to ~/.claude/settings.json):
+  {"hooks": {
+    "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}],
+    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}]
+  }}`,
+	SeeAlso: []string{"vv(1)", "vv-process(1)"},
+}
+
+var CmdProcess = Command{
+	Name:       "process",
+	Synopsis:   "process a single transcript file",
+	Brief:      "Process a single transcript file",
+	Usage:      "vv process <transcript.jsonl>",
+	TableUsage: "vv process <file.jsonl>",
+	Args: []Arg{
+		{Name: "transcript.jsonl", Desc: "Path to a Claude Code JSONL transcript"},
+	},
+	Description: `Parses the transcript, detects the project from the session's working
+directory, and writes a session note to the vault. Skips trivial
+sessions (< 2 messages) and already-indexed sessions.`,
+	Examples: []string{
+		"vv process ~/.claude/projects/-home-user-myproject/abc123.jsonl",
+	},
+	SeeAlso: []string{"vv(1)", "vv-hook(1)", "vv-backfill(1)"},
+}
+
+var CmdIndex = Command{
+	Name:     "index",
+	Synopsis: "rebuild session index from notes",
+	Brief:    "Rebuild session index from notes",
+	Usage:    "vv index",
+	Description: `Walks Sessions/**/*.md in the vault, parses frontmatter from each note,
+and rebuilds .vibe-vault/session-index.json. Preserves TranscriptPath
+values from the existing index. Generates a _context.md document for
+each project with timeline, decisions, open threads, and key files.
+
+Use this after manually editing or deleting session notes.`,
+	SeeAlso: []string{"vv(1)", "vv-reprocess(1)"},
+}
+
+var CmdBackfill = Command{
+	Name:     "backfill",
+	Synopsis: "discover and process historical transcripts",
+	Brief:    "Discover and process historical transcripts",
+	Usage:    "vv backfill [path]",
+	Args: []Arg{
+		{Name: "path", Desc: "Directory to scan for transcripts (default: ~/.claude/projects/)", Optional: true},
+	},
+	Description: `Recursively discovers Claude Code JSONL transcripts by UUID filename
+pattern, skips already-indexed sessions, and processes the rest through
+the full capture pipeline. Also patches TranscriptPath on existing index
+entries that lack it.
+
+Subagent transcripts (in /subagents/ subdirectories) are automatically
+filtered out.`,
+	Examples: []string{
+		"vv backfill                              Scan default Claude projects dir",
+		"vv backfill ~/.claude/projects/myproj    Scan a specific directory",
+	},
+	SeeAlso: []string{"vv(1)", "vv-process(1)", "vv-archive(1)"},
+}
+
+var CmdArchive = Command{
+	Name:     "archive",
+	Synopsis: "compress transcripts into vault archive",
+	Brief:    "Compress transcripts into vault archive",
+	Usage:    "vv archive",
+	Description: `Iterates all sessions in the index and compresses each transcript to
+.vibe-vault/archive/{session-id}.jsonl.zst using zstd compression
+(typically ~10:1 on JSONL). Skips already-archived and missing
+transcripts. Originals are not deleted.
+
+Reports total bytes before and after compression.`,
+	SeeAlso: []string{"vv(1)", "vv-backfill(1)", "vv-reprocess(1)"},
+}
+
+var CmdReprocess = Command{
+	Name:       "reprocess",
+	Synopsis:   "re-generate notes from transcripts",
+	Brief:      "Re-generate notes from transcripts",
+	Usage:      "vv reprocess [--project <name>]",
+	TableUsage: "vv reprocess [--project X]",
+	Flags: []Flag{
+		{Name: "--project <name>", Desc: "Only reprocess sessions for this project"},
+	},
+	Description: `Re-runs the capture pipeline with Force mode for all (or filtered)
+sessions in the index. Locates transcripts via three-tier lookup:
+
+  1. Original path (TranscriptPath in index)
+  2. Archived copy (.vibe-vault/archive/)
+  3. Fallback discovery scan (~/.claude/projects/)
+
+Overwrites existing notes in place (preserves iteration numbers).
+Regenerates _context.md for each affected project.`,
+	Examples: []string{
+		"vv reprocess                       Reprocess all sessions",
+		"vv reprocess --project myproject   Reprocess one project only",
+	},
+	SeeAlso: []string{"vv(1)", "vv-archive(1)", "vv-index(1)"},
+}
+
+var CmdCheck = Command{
+	Name:     "check",
+	Synopsis: "validate config, vault, and hook setup",
+	Brief:    "Validate config, vault, and hook setup",
+	Usage:    "vv check",
+	Description: `Runs diagnostic checks and prints a pass/warn/FAIL report:
+  - Config file location and validity
+  - Vault directory exists
+  - Obsidian config present (.obsidian/)
+  - Sessions directory and note count
+  - State directory (.vibe-vault/)
+  - Session index validity and entry count
+  - Domain paths exist
+  - Enrichment config and API key
+  - Claude Code hook setup in ~/.claude/settings.json
+
+Exit code 0 if all checks pass or warn, 1 if any check fails.`,
+	SeeAlso: []string{"vv(1)", "vv-init(1)"},
+}
+
+var CmdVersion = Command{
+	Name:     "version",
+	Synopsis: "print version",
+	Brief:    "Print version",
+	Usage:    "vv version",
+	SeeAlso:  []string{"vv(1)"},
+}
+
+// Subcommands is the ordered list of all subcommands.
+var Subcommands = []Command{
+	CmdInit,
+	CmdHook,
+	CmdProcess,
+	CmdIndex,
+	CmdBackfill,
+	CmdArchive,
+	CmdReprocess,
+	CmdCheck,
+	CmdVersion,
+}

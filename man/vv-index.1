@@ -1,0 +1,15 @@
+.TH VV-INDEX 1 "2026-02-27" "vv 0.3.0" "Vibe-Vault Manual"
+.SH NAME
+vv-index \- rebuild session index from notes
+.SH SYNOPSIS
+.B vv index
+.SH DESCRIPTION
+Walks Sessions/**/*.md in the vault, parses frontmatter from each note,
+and rebuilds .vibe\-vault/session\-index.json. Preserves TranscriptPath
+values from the existing index. Generates a _context.md document for
+each project with timeline, decisions, open threads, and key files.
+.PP
+Use this after manually editing or deleting session notes.
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-reprocess (1)

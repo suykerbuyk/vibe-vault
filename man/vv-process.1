@@ -1,0 +1,21 @@
+.TH VV-PROCESS 1 "2026-02-27" "vv 0.3.0" "Vibe-Vault Manual"
+.SH NAME
+vv-process \- process a single transcript file
+.SH SYNOPSIS
+.B vv process <transcript.jsonl>
+.SH DESCRIPTION
+Parses the transcript, detects the project from the session's working
+directory, and writes a session note to the vault. Skips trivial
+sessions (< 2 messages) and already\-indexed sessions.
+.SH OPTIONS
+.TP
+.B transcript.jsonl
+Path to a Claude Code JSONL transcript
+.SH EXAMPLES
+.nf
+vv process ~/.claude/projects/\-home\-user\-myproject/abc123.jsonl
+.fi
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-hook (1),
+.BR vv\-backfill (1)

@@ -1,0 +1,30 @@
+.TH VV-HOOK 1 "2026-02-27" "vv 0.3.0" "Vibe-Vault Manual"
+.SH NAME
+vv-hook \- Claude Code hook handler
+.SH SYNOPSIS
+.B vv hook [\-\-event <name>]
+.SH DESCRIPTION
+Reads a JSON payload from stdin as delivered by Claude Code's hook
+system. Handles two event types:
+.PP
+  SessionEnd — parses transcript, writes a finalized session note
+  Stop       — captures a mid\-session checkpoint (no LLM enrichment)
+.PP
+Checkpoint notes are provisional: a subsequent Stop overwrites the
+previous checkpoint, and SessionEnd finalizes it. Clear events and
+unknown events are silently ignored.
+.PP
+This command is meant to be called by Claude Code, not directly.
+.PP
+Hook integration (add to ~/.claude/settings.json):
+  {"hooks": {
+    "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}],
+    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "vv hook"}]}]
+  }}
+.SH OPTIONS
+.TP
+.B \-\-event <name>
+Override the hook event type (default: read from stdin)
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-process (1)

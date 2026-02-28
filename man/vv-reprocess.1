@@ -1,0 +1,28 @@
+.TH VV-REPROCESS 1 "2026-02-27" "vv 0.3.0" "Vibe-Vault Manual"
+.SH NAME
+vv-reprocess \- re\-generate notes from transcripts
+.SH SYNOPSIS
+.B vv reprocess [\-\-project <name>]
+.SH DESCRIPTION
+Re\-runs the capture pipeline with Force mode for all (or filtered)
+sessions in the index. Locates transcripts via three\-tier lookup:
+.PP
+  1. Original path (TranscriptPath in index)
+  2. Archived copy (.vibe\-vault/archive/)
+  3. Fallback discovery scan (~/.claude/projects/)
+.PP
+Overwrites existing notes in place (preserves iteration numbers).
+Regenerates _context.md for each affected project.
+.SH OPTIONS
+.TP
+.B \-\-project <name>
+Only reprocess sessions for this project
+.SH EXAMPLES
+.nf
+vv reprocess                       Reprocess all sessions
+vv reprocess \-\-project myproject   Reprocess one project only
+.fi
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-archive (1),
+.BR vv\-index (1)
