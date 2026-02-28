@@ -201,6 +201,19 @@ const fixtureNarrativeSession = `{"type":"user","uuid":"u1","sessionId":"session
 {"type":"assistant","uuid":"a4","sessionId":"session-narr-001","timestamp":"2027-08-10T09:05:00Z","cwd":"/home/dev/narr-project","gitBranch":"feat/auth","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Done! JWT authentication has been added and committed."}],"usage":{"input_tokens":200,"output_tokens":80,"cache_creation_input_tokens":0,"cache_read_input_tokens":50}}}
 `
 
+// fixtureFrictionSession: session with correction patterns. sessionId session-friction-001
+const fixtureFrictionSession = `{"type":"user","uuid":"u1","sessionId":"session-friction-001","timestamp":"2027-09-01T10:00:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"user","content":"Implement the user profile page"}}
+{"type":"assistant","uuid":"a1","sessionId":"session-friction-001","timestamp":"2027-09-01T10:01:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll create the profile page with a basic layout."},{"type":"tool_use","id":"ftu1","name":"Write","input":{"file_path":"/home/dev/friction-project/profile.tsx","content":"// profile page"}}],"usage":{"input_tokens":500,"output_tokens":200,"cache_creation_input_tokens":100,"cache_read_input_tokens":50}}}
+{"type":"user","uuid":"u1r","sessionId":"session-friction-001","timestamp":"2027-09-01T10:01:30Z","cwd":"/home/dev/friction-project","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ftu1","content":"File created successfully"}]}}
+{"type":"user","uuid":"u2","sessionId":"session-friction-001","timestamp":"2027-09-01T10:02:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"user","content":"No, that's not what I wanted. Use a card layout instead."}}
+{"type":"assistant","uuid":"a2","sessionId":"session-friction-001","timestamp":"2027-09-01T10:03:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Sorry about that. Let me redo it with a card layout."},{"type":"tool_use","id":"ftu2","name":"Edit","input":{"file_path":"/home/dev/friction-project/profile.tsx","old_string":"// profile page","new_string":"// card layout profile"}}],"usage":{"input_tokens":400,"output_tokens":150,"cache_creation_input_tokens":0,"cache_read_input_tokens":200}}}
+{"type":"user","uuid":"u2r","sessionId":"session-friction-001","timestamp":"2027-09-01T10:03:30Z","cwd":"/home/dev/friction-project","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ftu2","content":"File edited successfully"}]}}
+{"type":"user","uuid":"u3","sessionId":"session-friction-001","timestamp":"2027-09-01T10:04:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"user","content":"Actually, I meant to use the existing UserCard component"}}
+{"type":"assistant","uuid":"a3","sessionId":"session-friction-001","timestamp":"2027-09-01T10:05:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Using the existing UserCard component now."},{"type":"tool_use","id":"ftu3","name":"Edit","input":{"file_path":"/home/dev/friction-project/profile.tsx","old_string":"// card layout profile","new_string":"<UserCard />"}}],"usage":{"input_tokens":300,"output_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":100}}}
+{"type":"user","uuid":"u3r","sessionId":"session-friction-001","timestamp":"2027-09-01T10:05:30Z","cwd":"/home/dev/friction-project","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ftu3","content":"File edited successfully"}]}}
+{"type":"assistant","uuid":"a4","sessionId":"session-friction-001","timestamp":"2027-09-01T10:06:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Done! The profile page now uses the existing UserCard component."}],"usage":{"input_tokens":200,"output_tokens":80,"cache_creation_input_tokens":0,"cache_read_input_tokens":50}}}
+`
+
 // --- Integration Test ---
 
 func TestIntegration(t *testing.T) {
@@ -222,6 +235,7 @@ func TestIntegration(t *testing.T) {
 	trivialPath := writeFixture(t, fixtureDir, "session-trivial-001.jsonl", fixtureTrivial)
 	bPath := writeFixture(t, fixtureDir, "session-bbb-001.jsonl", fixtureSessionB)
 	narrPath := writeFixture(t, fixtureDir, "session-narr-001.jsonl", fixtureNarrativeSession)
+	frictionPath := writeFixture(t, fixtureDir, "session-friction-001.jsonl", fixtureFrictionSession)
 
 	// 1. init
 	t.Run("init", func(t *testing.T) {
@@ -630,7 +644,53 @@ func TestIntegration(t *testing.T) {
 		}
 	})
 
-	// 10. reprocess
+	// 10a. process friction session
+	t.Run("process_friction_session", func(t *testing.T) {
+		stdout := mustRunVV(t, env, "process", frictionPath)
+		assertContains(t, stdout, "created:", "process stdout")
+
+		notePath := filepath.Join(vaultPath, "Sessions", "friction-project", "2027-09-01-01.md")
+		if !fileExists(notePath) {
+			t.Fatalf("note not created at %s", notePath)
+		}
+
+		note := readFile(t, notePath)
+
+		// Should have friction signals from corrections
+		assertContains(t, note, "friction_score:", "friction_score frontmatter")
+
+		// Index should have friction data
+		idx := readIndex(t, stateDir)
+		entry, ok := idx["session-friction-001"]
+		if !ok {
+			t.Fatal("session-friction-001 not in index")
+		}
+		if score, ok := entry["friction_score"].(float64); !ok || score == 0 {
+			t.Errorf("expected non-zero friction_score, got %v", entry["friction_score"])
+		}
+		if corrections, ok := entry["corrections"].(float64); !ok || corrections == 0 {
+			t.Errorf("expected non-zero corrections, got %v", entry["corrections"])
+		}
+	})
+
+	// 10b. friction command
+	t.Run("friction", func(t *testing.T) {
+		stdout := mustRunVV(t, env, "friction")
+
+		// Should contain expected sections
+		assertContains(t, stdout, "Friction Analysis", "friction header")
+		assertContains(t, stdout, "Overview", "friction overview")
+
+		// Project filter
+		projStdout := mustRunVV(t, env, "friction", "--project", "myproject")
+		assertContains(t, projStdout, "myproject", "project filter in header")
+
+		// Help flag
+		_, helpStderr, _ := runVV(t, env, "friction", "--help")
+		assertContains(t, helpStderr, "friction", "friction help text")
+	})
+
+	// 11. reprocess
 	t.Run("reprocess", func(t *testing.T) {
 		stdout := mustRunVV(t, env, "reprocess")
 		assertContains(t, stdout, "reprocessed:", "reprocess stdout")

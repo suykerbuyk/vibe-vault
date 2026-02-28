@@ -50,6 +50,7 @@ type Commit struct {
 // Narrative holds the full extracted narrative for a session.
 type Narrative struct {
 	Segments      []Segment
+	Commits       []Commit // Git commits extracted from tool output
 	Title         string   // Better title from conversation analysis
 	Summary       string   // Multi-sentence heuristic summary
 	WorkPerformed string   // Rendered markdown for note section

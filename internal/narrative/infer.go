@@ -34,9 +34,160 @@ func inferTitle(segments []Segment, t *transcript.Transcript) string {
 	return "Session"
 }
 
-// inferSummary builds a multi-sentence summary from activity statistics.
-func inferSummary(segments []Segment) string {
-	var created, modified, testRuns, testFails, commits, pushes, errors, recoveries int
+// inferSummary builds a semantic summary: "prefix: subject (outcomes)"
+func inferSummary(segments []Segment, title string, commits []Commit) string {
+	prefix := inferIntentPrefix(segments, commits)
+	subject := inferSubject(title, commits)
+	outcomes := formatOutcomes(segments)
+
+	if subject == "" && outcomes == "" {
+		return "Claude Code session."
+	}
+
+	var b strings.Builder
+
+	if prefix != "" && subject != "" {
+		b.WriteString(prefix)
+		b.WriteString(": ")
+		b.WriteString(subject)
+	} else if subject != "" {
+		b.WriteString(subject)
+	} else if prefix != "" {
+		b.WriteString(prefix)
+	}
+
+	if outcomes != "" {
+		if b.Len() > 0 {
+			b.WriteString(" (")
+			b.WriteString(outcomes)
+			b.WriteString(")")
+		} else {
+			b.WriteString(outcomes)
+		}
+	}
+
+	return b.String()
+}
+
+// inferIntentPrefix determines the conventional commit prefix from commits or activity patterns.
+func inferIntentPrefix(segments []Segment, commits []Commit) string {
+	// Priority 1: conventional prefix from first commit message
+	if len(commits) > 0 {
+		msg := commits[0].Message
+		if p := extractConventionalPrefix(msg); p != "" {
+			return p
+		}
+	}
+
+	// Priority 2: derive from activity patterns
+	var writes, tests, errors, planModes, reads int
+	for _, seg := range segments {
+		for _, a := range seg.Activities {
+			switch a.Kind {
+			case KindFileCreate, KindFileModify:
+				writes++
+			case KindTestRun:
+				tests++
+			case KindError:
+				errors++
+			case KindPlanMode:
+				planModes++
+			case KindExplore:
+				reads++
+			}
+			if a.IsError && !a.Recovered {
+				errors++
+			}
+		}
+	}
+
+	total := 0
+	for _, seg := range segments {
+		total += len(seg.Activities)
+	}
+	if total == 0 {
+		return ""
+	}
+
+	// Plan mode dominant
+	if planModes > 0 && writes <= 2 {
+		return "plan"
+	}
+	// Errors + writes = debugging/fix
+	if errors > 0 && writes > 0 && tests > 0 {
+		return "fix"
+	}
+	// Writes + tests = implementation
+	if writes > 0 && tests > 0 {
+		return "feat"
+	}
+	// Writes without tests
+	if writes > 0 {
+		return "feat"
+	}
+	// Reads dominant
+	if reads > 0 && writes == 0 {
+		return "explore"
+	}
+
+	return ""
+}
+
+// extractConventionalPrefix extracts a conventional commit prefix from a message.
+func extractConventionalPrefix(msg string) string {
+	prefixes := []string{"feat", "fix", "refactor", "docs", "test", "chore", "style", "perf", "ci", "build"}
+	lower := strings.ToLower(msg)
+	for _, p := range prefixes {
+		if strings.HasPrefix(lower, p+":") || strings.HasPrefix(lower, p+"(") {
+			return p
+		}
+	}
+	return ""
+}
+
+// inferSubject determines the best subject for the summary.
+func inferSubject(title string, commits []Commit) string {
+	// Priority 1: first commit message body (stripped of prefix)
+	if len(commits) > 0 {
+		msg := commits[0].Message
+		subject := stripConventionalPrefix(msg)
+		if subject != "" {
+			return truncateStr(subject, 80)
+		}
+	}
+
+	// Priority 2: title from user request
+	if title != "" && title != "Session" {
+		return truncateStr(title, 80)
+	}
+
+	return ""
+}
+
+// stripConventionalPrefix removes "feat: ", "fix(scope): " etc. from a commit message.
+func stripConventionalPrefix(msg string) string {
+	// Check for "prefix: body" or "prefix(scope): body"
+	idx := strings.Index(msg, ": ")
+	if idx > 0 && idx < 30 {
+		prefix := strings.ToLower(msg[:idx])
+		// Validate it looks like a conventional prefix (possibly with scope)
+		base := prefix
+		if p := strings.IndexByte(base, '('); p > 0 {
+			base = base[:p]
+		}
+		conventionals := []string{"feat", "fix", "refactor", "docs", "test", "chore", "style", "perf", "ci", "build"}
+		for _, c := range conventionals {
+			if base == c {
+				return strings.TrimSpace(msg[idx+2:])
+			}
+		}
+	}
+	return msg
+}
+
+// formatOutcomes builds a condensed parenthetical outcomes string.
+func formatOutcomes(segments []Segment) string {
+	var created, modified, testRuns, testFails, commits, pushes, recoveries int
 
 	for _, seg := range segments {
 		for _, a := range seg.Activities {
@@ -55,63 +206,47 @@ func inferSummary(segments []Segment) string {
 			case KindGitPush:
 				pushes++
 			}
-			if a.IsError {
-				errors++
-			}
 			if a.Recovered {
 				recoveries++
 			}
 		}
 	}
 
-	var sentences []string
+	var parts []string
 
-	// File changes
+	// File changes: "3+12 files" or "3 new" or "12 modified"
 	if created > 0 && modified > 0 {
-		sentences = append(sentences, fmt.Sprintf("Created %d and modified %d files.", created, modified))
+		parts = append(parts, fmt.Sprintf("%d+%d files", created, modified))
 	} else if created > 0 {
-		sentences = append(sentences, fmt.Sprintf("Created %d files.", created))
+		parts = append(parts, fmt.Sprintf("%d files", created))
 	} else if modified > 0 {
-		sentences = append(sentences, fmt.Sprintf("Modified %d files.", modified))
+		parts = append(parts, fmt.Sprintf("%d files", modified))
 	}
 
 	// Test results
 	if testRuns > 0 {
 		if testFails == 0 {
-			sentences = append(sentences, "All tests passed.")
+			parts = append(parts, "tests pass")
 		} else if testFails == testRuns {
-			sentences = append(sentences, "Tests failed.")
+			parts = append(parts, "tests fail")
 		} else {
-			sentences = append(sentences, "Tests had mixed results.")
+			parts = append(parts, "mixed tests")
 		}
 	}
 
 	// Git operations
 	if commits > 0 && pushes > 0 {
-		sentences = append(sentences, "Changes committed and pushed.")
+		parts = append(parts, "pushed")
 	} else if commits > 0 {
-		sentences = append(sentences, "Changes committed.")
+		parts = append(parts, "committed")
 	}
 
 	// Error recoveries
 	if recoveries > 0 {
-		sentences = append(sentences, fmt.Sprintf("Resolved %d errors.", recoveries))
+		parts = append(parts, fmt.Sprintf("resolved %d errors", recoveries))
 	}
 
-	if len(sentences) == 0 {
-		// Count total activities
-		total := 0
-		for _, seg := range segments {
-			total += len(seg.Activities)
-		}
-		if total > 0 {
-			sentences = append(sentences, fmt.Sprintf("Performed %d actions.", total))
-		} else {
-			return "Claude Code session."
-		}
-	}
-
-	return strings.Join(sentences, " ")
+	return strings.Join(parts, ", ")
 }
 
 // inferTag classifies the session based on activity patterns.

@@ -56,6 +56,9 @@ func (idx *Index) ProjectContext(project string) string {
 		if e.Tag != "" {
 			line += fmt.Sprintf(" #%s", e.Tag)
 		}
+		if e.FrictionScore >= 30 {
+			line += fmt.Sprintf(" ⚡%d", e.FrictionScore)
+		}
 		if e.Summary != "" {
 			line += fmt.Sprintf(" — %s", e.Summary)
 		}
@@ -84,6 +87,16 @@ func (idx *Index) ProjectContext(project string) string {
 		b.WriteString("## Open Threads\n\n")
 		for _, t := range threads {
 			b.WriteString(fmt.Sprintf("- [ ] %s\n", t))
+		}
+		b.WriteString("\n")
+	}
+
+	// Friction Patterns — recurring high-friction signals
+	frictionPatterns := collectFrictionPatterns(entries)
+	if len(frictionPatterns) > 0 {
+		b.WriteString("## Friction Patterns\n\n")
+		for _, fp := range frictionPatterns {
+			b.WriteString(fmt.Sprintf("- %s\n", fp))
 		}
 		b.WriteString("\n")
 	}
@@ -213,6 +226,45 @@ func collectKeyFiles(entries []SessionEntry) []keyFile {
 	})
 
 	return files
+}
+
+func collectFrictionPatterns(entries []SessionEntry) []string {
+	var highFriction int
+	var totalCorrections int
+	var totalScore int
+	scored := 0
+
+	for _, e := range entries {
+		if e.FrictionScore > 0 {
+			scored++
+			totalScore += e.FrictionScore
+			totalCorrections += e.Corrections
+			if e.FrictionScore >= 40 {
+				highFriction++
+			}
+		}
+	}
+
+	if scored == 0 {
+		return nil
+	}
+
+	var patterns []string
+
+	if highFriction > 0 {
+		patterns = append(patterns, fmt.Sprintf("%d of %d sessions had high friction (score ≥ 40)", highFriction, len(entries)))
+	}
+
+	if totalCorrections > 0 {
+		patterns = append(patterns, fmt.Sprintf("%d total corrections across %d sessions", totalCorrections, scored))
+	}
+
+	avgScore := float64(totalScore) / float64(scored)
+	if avgScore > 15 {
+		patterns = append(patterns, fmt.Sprintf("Average friction score: %.0f/100", avgScore))
+	}
+
+	return patterns
 }
 
 func filenameNoExt(path string) string {

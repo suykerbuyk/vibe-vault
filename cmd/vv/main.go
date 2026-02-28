@@ -11,6 +11,7 @@ import (
 	"github.com/johns/vibe-vault/internal/check"
 	"github.com/johns/vibe-vault/internal/config"
 	"github.com/johns/vibe-vault/internal/discover"
+	"github.com/johns/vibe-vault/internal/friction"
 	"github.com/johns/vibe-vault/internal/help"
 	"github.com/johns/vibe-vault/internal/hook"
 	"github.com/johns/vibe-vault/internal/index"
@@ -52,6 +53,9 @@ func main() {
 
 	case "stats":
 		runStats()
+
+	case "friction":
+		runFriction()
 
 	case "version":
 		if wantsHelp(os.Args[2:]) {
@@ -212,6 +216,24 @@ func runStats() {
 
 	summary := stats.Compute(idx.Entries, project)
 	fmt.Print(stats.Format(summary, project))
+}
+
+func runFriction() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdFriction))
+		return
+	}
+
+	cfg := mustLoadConfig()
+	project := flagValue(os.Args[2:], "--project")
+
+	idx, err := index.Load(cfg.StateDir())
+	if err != nil {
+		fatal("load index: %v", err)
+	}
+
+	projects := friction.ComputeProjectFriction(idx.Entries, project)
+	fmt.Print(friction.Format(projects, len(idx.Entries), project))
 }
 
 func runIndex() {

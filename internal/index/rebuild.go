@@ -131,6 +131,11 @@ func Rebuild(sessionsDir, stateDir string) (*Index, int, error) {
 			entry.Messages, _ = strconv.Atoi(msgs)
 		}
 
+		// Parse friction fields from frontmatter
+		if fs, ok := note.Frontmatter["friction_score"]; ok {
+			entry.FrictionScore, _ = strconv.Atoi(fs)
+		}
+
 		// Parse status: checkpoint flag
 		if status, ok := note.Frontmatter["status"]; ok && status == "checkpoint" {
 			entry.Checkpoint = true

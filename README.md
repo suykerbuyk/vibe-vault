@@ -17,15 +17,16 @@ they deserve the same observability we give to code, builds, and deployments.
 ## The Solution
 
 vibe-vault (`vv`) is a single Go binary that runs as a Claude Code hook. When a
-session ends, it reads the JSONL transcript from stdin, extracts metadata (duration,
-tokens, files changed, branch), detects the project via git remote, optionally
-enriches the note with an LLM summary, and writes a structured Obsidian markdown
-note — organized by project, cross-linked to previous sessions, and queryable via
-Dataview.
+session ends, it reads the JSONL transcript from stdin, extracts structured
+narratives (tool activity segments, prose dialogue, git commits), detects the
+project via git remote, optionally enriches the note with an LLM summary, and
+writes a structured Obsidian markdown note — organized by project, cross-linked
+to previous sessions, and queryable via Dataview.
 
 It can also backfill historical sessions, archive transcripts with zstd (~10:1
-compression), rebuild cross-session indexes, and maintain per-project context
-documents. Two dependencies. Zero runtime services. Notes are always written,
+compression), rebuild cross-session indexes, maintain per-project context
+documents, compute session analytics, and detect friction patterns in AI
+interactions. Two dependencies. Zero runtime services. Notes are always written,
 even when enrichment fails.
 
 ## Sample Output
@@ -46,10 +47,14 @@ duration_minutes: 47
 messages: 24
 tokens_in: 52000
 tokens_out: 18000
+tool_uses: 38
 status: completed
 tags: [cortana-session, implementation]
-summary: "Implemented token-bucket rate limiter with Redis backing store"
+commits: ["a1b2c3d", "d4e5f6a"]
+friction_score: 12
+summary: "feat: token-bucket rate limiter with Redis (4+4 files, tests pass)"
 previous: "[[2026-02-09-02]]"
+related: ["[[2026-02-08-01]]"]
 ---
 
 # Add rate limiting middleware and update API docs
@@ -70,6 +75,12 @@ and automatic in-memory fallback for local dev. Updated OpenAPI spec with
 - Rate limit headers on every response — clients can proactively throttle
   by reading X-RateLimit-Remaining
 
+## Dialogue
+
+> **User**: Add rate limiting to the public API endpoints
+>
+> **Assistant**: I'll implement a token-bucket rate limiter with Redis...
+
 ## What Changed
 
 - `src/middleware/rate-limiter.ts` (new)
@@ -87,8 +98,8 @@ and automatic in-memory fallback for local dev. Updated OpenAPI spec with
 ```
 
 Without enrichment, notes still contain all frontmatter, the title (from the
-first meaningful user message), and the files-changed section — just without the
-LLM-generated summary, decisions, and threads.
+first meaningful user message), extracted dialogue, files changed, and narrative
+summary — just without the LLM-generated "What Happened", decisions, and threads.
 
 ## Table of Contents
 
@@ -182,6 +193,11 @@ Claude Code session ends
 └────────┬─────────┘
          │
          ▼
+┌──────────────────┐     Segments, dialogue, commits, summary, tag
+│ Narrative + Prose│
+└────────┬─────────┘
+         │
+         ▼
 ┌──────────────────┐     git remote origin → project name, CWD → domain
 │  Detect Project  │
 └────────┬─────────┘
@@ -189,6 +205,11 @@ Claude Code session ends
          ▼
 ┌──────────────────┐     Optional: summary, decisions, threads, tag
 │  LLM Enrichment  │     (graceful skip if disabled or API unreachable)
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐     Correction detection, friction scoring
+│ Friction Analysis│
 └────────┬─────────┘
          │
          ▼
@@ -203,6 +224,16 @@ Claude Code session ends
 
 **Transcript parsing** uses a streaming JSONL parser with a 10MB line buffer.
 Unparseable lines are skipped — partial transcripts still produce notes.
+
+**Narrative extraction** segments tool activity into a structured timeline,
+extracts prose dialogue (user/assistant turns), detects git commit SHAs from
+tool output, and generates intent-driven summaries using conventional commit
+prefixes (e.g., `feat: rate limiter (4+4 files, tests pass)`).
+
+**Friction analysis** detects user corrections in the dialogue (negation,
+redirects, undo requests, quality complaints) and computes a composite friction
+score (0-100) from correction density, token efficiency, file retry patterns,
+error cycles, and recurring open threads.
 
 **Project detection** extracts the repository name from `git remote get-url
 origin` (stable across worktrees, renames, and machines), falling back to
@@ -231,6 +262,8 @@ deterministic heuristics rather than embeddings.
 | `vv archive` | Compress transcripts into vault archive |
 | `vv reprocess [--project X]` | Re-generate notes from transcripts |
 | `vv check` | Validate config, vault, and hook setup |
+| `vv stats [--project X]` | Show session analytics and metrics |
+| `vv friction [--project X]` | Show friction analysis and correction patterns |
 | `vv version` | Print version |
 
 ### Common Workflows
@@ -250,6 +283,18 @@ vv archive    # zstd-compress transcripts (~10:1), stores in .vibe-vault/archive
 ```bash
 vv reprocess                       # all sessions
 vv reprocess --project myproject   # one project only
+```
+
+**View session analytics:**
+```bash
+vv stats                       # global stats: projects, models, activity
+vv stats --project myproject   # stats for one project only
+```
+
+**Analyze friction patterns:**
+```bash
+vv friction                       # correction density, high-friction sessions
+vv friction --project myproject   # friction for one project only
 ```
 
 **Diagnose issues:**
@@ -334,7 +379,9 @@ related sessions together in Obsidian's file explorer.
 ## LLM Enrichment
 
 Without enrichment, notes contain extracted metadata (frontmatter), the session
-title, and files changed. With enrichment enabled, an LLM call adds:
+title, narrative summary, dialogue excerpts, files changed, git commits, and
+friction signals — all derived from the transcript alone. With enrichment
+enabled, an LLM call adds:
 
 - **What Happened** — 1-3 sentence summary (past tense, outcome-focused)
 - **Key Decisions** — 0-5 decisions in "Decision — rationale" format
@@ -465,11 +512,11 @@ built on data vv already captures.
 | 2 | LLM enrichment — summary, decisions, threads via OpenAI-compatible API | Complete |
 | 3 | Cross-session intelligence — related sessions, per-project context docs | Complete |
 | 4 | Backfill & archive — historical transcripts, zstd compression, reprocess | Complete |
-| 5 | Foundation — project namespacing, vault migration, man pages, stop hooks | Mostly complete |
-| 6 | Session analytics — model tracking, computed metrics, `vv stats`, dashboards | Planned |
-| 7 | Behavioral analysis — correction detection, repeated instructions, friction signals | Planned |
+| 5 | Foundation — project namespacing, vault migration, man pages, stop hooks | Complete |
+| 6 | Session analytics — narrative extraction, prose dialogue, `vv stats`, semantic summaries | Complete |
+| 7 | Behavioral analysis — correction detection, friction scoring, `vv friction` | Complete |
 | 8 | Model comparison — model-vs-model stats, regression detection, trend analysis | Planned |
-| 9 | Provenance — git commit linkage, timeline export, signed notes | Planned |
+| 9 | Provenance — git commit linkage, timeline export, signed notes | Partially complete |
 | 10 | Knowledge distillation — learning capture, knowledge notes, cross-project patterns | Planned |
 
 ### Context as Code Connections
@@ -478,10 +525,10 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 | Knox's Principle | vibe-vault Implementation |
 |------------------|--------------------------|
-| **Observability** — log every context chunk, surface "missing context" signals | Tool usage tracking (Phase 5), friction detection (Phase 7), correction patterns (Phase 7) |
+| **Observability** — log every context chunk, surface "missing context" signals | Tool usage tracking, friction detection, correction patterns, `vv stats`, `vv friction` |
 | **Testing** — statistical grading across runs, regression detection | Model comparison (Phase 8), trend analysis across sessions |
 | **Version control** — context is versioned, auditable, diffable | Session notes are markdown in git, indexed and cross-linked |
-| **Reuse** — context registries, versioned modules | Per-project `_context.md` (today), knowledge notes (Phase 10) |
+| **Reuse** — context registries, versioned modules | Per-project `_context.md`, semantic summaries, knowledge notes (Phase 10) |
 | **CI/CD** — automated context pipelines, auto-refresh | Backfill pipeline, reprocess on upgrade, index rebuild |
 
 ### What's Out of Scope
@@ -512,10 +559,10 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 ### Test Suite
 
-**139 unit tests** across 16 test files + **1 integration test** with 10
+**330 tests** across 27 test files + **1 integration test** with 15
 subtests. The integration test exercises the full pipeline:
 `init` → `process` → `index` → `backfill` → `archive` → `reprocess` →
-`checkpoint lifecycle`.
+`checkpoint lifecycle` → `stats` → `friction`.
 
 ```bash
 make test          # unit tests only (~0.5s)

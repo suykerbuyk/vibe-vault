@@ -35,6 +35,8 @@ type SessionEntry struct {
 	TokensIn       int            `json:"tokens_in,omitempty"`
 	TokensOut      int            `json:"tokens_out,omitempty"`
 	Messages       int            `json:"messages,omitempty"`
+	Corrections    int            `json:"corrections,omitempty"`
+	FrictionScore  int            `json:"friction_score,omitempty"`
 }
 
 // Index manages the session-index.json file.

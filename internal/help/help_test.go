@@ -165,6 +165,26 @@ var expectedTerminal = map[string]string{
 		"  vv stats                       Show global stats\n" +
 		"  vv stats --project myproject   Show stats for one project\n",
 
+	"friction": "vv friction \u2014 show friction analysis and correction patterns\n" +
+		"\n" +
+		"Usage: vv friction [--project <name>]\n" +
+		"\n" +
+		"Flags:\n" +
+		"  --project <name>   Show friction for a specific project only\n" +
+		"\n" +
+		"Analyzes friction signals from the session index: correction density,\n" +
+		"token efficiency, file retry patterns, error cycles, and recurring\n" +
+		"open threads. Shows per-project aggregates and identifies high-friction\n" +
+		"sessions.\n" +
+		"\n" +
+		"Friction scores range from 0 (smooth) to 100 (high friction). Sessions\n" +
+		"scoring \u2265 40 are flagged as high-friction. Run vv reprocess to generate\n" +
+		"friction data if none is available.\n" +
+		"\n" +
+		"Examples:\n" +
+		"  vv friction                       Show global friction analysis\n" +
+		"  vv friction --project myproject   Show friction for one project\n",
+
 	"version": "vv version \u2014 print version\n" +
 		"\n" +
 		"Usage: vv version\n",
@@ -199,6 +219,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv reprocess [--project X]   Re-generate notes from transcripts\n" +
 		"  vv check                     Validate config, vault, and hook setup\n" +
 		"  vv stats [--project X]       Show session analytics and metrics\n" +
+		"  vv friction [--project X]    Show friction analysis and correction patterns\n" +
 		"  vv version                   Print version\n" +
 		"  vv help                      Show this help\n" +
 		"\n" +
@@ -217,7 +238,7 @@ func TestFormatUsage(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))

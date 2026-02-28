@@ -12,6 +12,7 @@ import (
 
 	"github.com/johns/vibe-vault/internal/config"
 	"github.com/johns/vibe-vault/internal/enrichment"
+	"github.com/johns/vibe-vault/internal/friction"
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/narrative"
 	"github.com/johns/vibe-vault/internal/prose"
@@ -143,10 +144,31 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		noteData.ProseDialogue = prose.Render(dialogue)
 	}
 
-	// Git commit extraction
-	commits := narrative.ExtractCommits(t.Entries)
-	if len(commits) > 0 {
+	// Git commit extraction (from narrative, which runs ExtractCommits internally)
+	var commits []narrative.Commit
+	if narr != nil && len(narr.Commits) > 0 {
+		commits = narr.Commits
 		noteData.Commits = commits
+	} else {
+		// Fallback: extract commits directly if narrative was nil
+		commits = narrative.ExtractCommits(t.Entries)
+		if len(commits) > 0 {
+			noteData.Commits = commits
+		}
+	}
+
+	// Friction analysis
+	var frictionResult *friction.Result
+	if dialogue != nil || narr != nil {
+		var priorThreads []string
+		if prev := idx.PreviousSession(info.Project, t.Stats.StartTime); prev != nil {
+			priorThreads = prev.OpenThreads
+		}
+		frictionResult = friction.Analyze(dialogue, narr, t.Stats, priorThreads)
+	}
+	if frictionResult != nil {
+		noteData.FrictionScore = frictionResult.Score
+		noteData.FrictionSignals = frictionResult.Summary
 	}
 
 	// Mark checkpoint status
@@ -277,6 +299,8 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		TokensIn:       noteData.InputTokens,
 		TokensOut:      noteData.OutputTokens,
 		Messages:       noteData.Messages,
+		Corrections:    frictionCorrections(frictionResult),
+		FrictionScore:  frictionScore(frictionResult),
 	})
 
 	if err := idx.Save(); err != nil {
@@ -342,6 +366,20 @@ func commitSHAs(commits []narrative.Commit) []string {
 		shas[i] = c.SHA
 	}
 	return shas
+}
+
+func frictionCorrections(r *friction.Result) int {
+	if r == nil {
+		return 0
+	}
+	return r.Signals.Corrections
+}
+
+func frictionScore(r *friction.Result) int {
+	if r == nil {
+		return 0
+	}
+	return r.Score
 }
 
 func filenameNoExt(path string) string {

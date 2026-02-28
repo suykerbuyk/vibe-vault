@@ -49,8 +49,9 @@ func Extract(t *transcript.Transcript, cwd string) *Narrative {
 		Segments: segments,
 	}
 
+	narr.Commits = ExtractCommits(t.Entries)
 	narr.Title = inferTitle(segments, t)
-	narr.Summary = inferSummary(segments)
+	narr.Summary = inferSummary(segments, narr.Title, narr.Commits)
 	narr.Tag = inferTag(segments)
 	narr.Decisions = extractDecisions(segments, t.Entries)
 	narr.OpenThreads = inferOpenThreads(segments)

@@ -243,6 +243,30 @@ counts from note frontmatter).`,
 	SeeAlso: []string{"vv(1)", "vv-index(1)"},
 }
 
+var CmdFriction = Command{
+	Name:       "friction",
+	Synopsis:   "show friction analysis and correction patterns",
+	Brief:      "Show friction analysis and correction patterns",
+	Usage:      "vv friction [--project <name>]",
+	TableUsage: "vv friction [--project X]",
+	Flags: []Flag{
+		{Name: "--project <name>", Desc: "Show friction for a specific project only"},
+	},
+	Description: `Analyzes friction signals from the session index: correction density,
+token efficiency, file retry patterns, error cycles, and recurring
+open threads. Shows per-project aggregates and identifies high-friction
+sessions.
+
+Friction scores range from 0 (smooth) to 100 (high friction). Sessions
+scoring ≥ 40 are flagged as high-friction. Run vv reprocess to generate
+friction data if none is available.`,
+	Examples: []string{
+		"vv friction                       Show global friction analysis",
+		"vv friction --project myproject   Show friction for one project",
+	},
+	SeeAlso: []string{"vv(1)", "vv-stats(1)", "vv-reprocess(1)"},
+}
+
 var CmdVersion = Command{
 	Name:     "version",
 	Synopsis: "print version",
@@ -301,5 +325,6 @@ var Subcommands = []Command{
 	CmdReprocess,
 	CmdCheck,
 	CmdStats,
+	CmdFriction,
 	CmdVersion,
 }

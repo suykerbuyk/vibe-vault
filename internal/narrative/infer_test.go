@@ -60,110 +60,258 @@ func TestInferTitle_FallsBackToSession(t *testing.T) {
 	}
 }
 
-func TestInferSummary_FilesAndTests(t *testing.T) {
+func TestInferSummary_CommitPrefix(t *testing.T) {
 	segments := []Segment{
-		{
-			Activities: []Activity{
-				{Kind: KindFileCreate},
-				{Kind: KindFileCreate},
-				{Kind: KindFileModify},
-				{Kind: KindTestRun},
-			},
-		},
+		{Activities: []Activity{
+			{Kind: KindFileCreate},
+			{Kind: KindFileCreate},
+			{Kind: KindFileModify},
+			{Kind: KindTestRun},
+		}},
 	}
-	got := inferSummary(segments)
-	if !strings.Contains(got, "Created 2") {
-		t.Errorf("expected created count, got %q", got)
+	commits := []Commit{{SHA: "abc1234", Message: "feat: add JWT authentication"}}
+	got := inferSummary(segments, "Add JWT authentication", commits)
+	if !strings.Contains(got, "feat:") {
+		t.Errorf("expected feat prefix, got %q", got)
 	}
-	if !strings.Contains(got, "modified 1") {
-		t.Errorf("expected modified count, got %q", got)
+	if !strings.Contains(got, "add JWT authentication") {
+		t.Errorf("expected commit subject, got %q", got)
 	}
-	if !strings.Contains(got, "All tests passed") {
-		t.Errorf("expected test pass, got %q", got)
+	if !strings.Contains(got, "2+1 files") {
+		t.Errorf("expected condensed file count, got %q", got)
+	}
+	if !strings.Contains(got, "tests pass") {
+		t.Errorf("expected tests pass, got %q", got)
+	}
+}
+
+func TestInferSummary_TitleFallback(t *testing.T) {
+	segments := []Segment{
+		{Activities: []Activity{
+			{Kind: KindFileModify},
+			{Kind: KindTestRun},
+		}},
+	}
+	got := inferSummary(segments, "Implement the login page", nil)
+	if !strings.Contains(got, "Implement the login page") {
+		t.Errorf("expected title as subject, got %q", got)
+	}
+	if !strings.Contains(got, "tests pass") {
+		t.Errorf("expected tests pass, got %q", got)
 	}
 }
 
 func TestInferSummary_TestsFailed(t *testing.T) {
 	segments := []Segment{
-		{
-			Activities: []Activity{
-				{Kind: KindTestRun, IsError: true},
-			},
-		},
+		{Activities: []Activity{
+			{Kind: KindTestRun, IsError: true},
+		}},
 	}
-	got := inferSummary(segments)
-	if !strings.Contains(got, "Tests failed") {
-		t.Errorf("expected test fail, got %q", got)
+	got := inferSummary(segments, "Fix tests", nil)
+	if !strings.Contains(got, "tests fail") {
+		t.Errorf("expected tests fail, got %q", got)
 	}
 }
 
 func TestInferSummary_MixedTests(t *testing.T) {
 	segments := []Segment{
-		{
-			Activities: []Activity{
-				{Kind: KindTestRun, IsError: true},
-				{Kind: KindTestRun, IsError: false},
-			},
-		},
+		{Activities: []Activity{
+			{Kind: KindTestRun, IsError: true},
+			{Kind: KindTestRun, IsError: false},
+		}},
 	}
-	got := inferSummary(segments)
-	if !strings.Contains(got, "mixed results") {
-		t.Errorf("expected mixed results, got %q", got)
+	got := inferSummary(segments, "Fix tests", nil)
+	if !strings.Contains(got, "mixed tests") {
+		t.Errorf("expected mixed tests, got %q", got)
 	}
 }
 
 func TestInferSummary_CommitAndPush(t *testing.T) {
 	segments := []Segment{
-		{
-			Activities: []Activity{
-				{Kind: KindFileModify},
-				{Kind: KindGitCommit},
-				{Kind: KindGitPush},
-			},
-		},
+		{Activities: []Activity{
+			{Kind: KindFileModify},
+			{Kind: KindGitCommit},
+			{Kind: KindGitPush},
+		}},
 	}
-	got := inferSummary(segments)
-	if !strings.Contains(got, "committed and pushed") {
-		t.Errorf("expected commit+push, got %q", got)
+	got := inferSummary(segments, "Deploy changes", nil)
+	if !strings.Contains(got, "pushed") {
+		t.Errorf("expected pushed, got %q", got)
 	}
 }
 
 func TestInferSummary_CommitOnly(t *testing.T) {
 	segments := []Segment{
-		{
-			Activities: []Activity{
-				{Kind: KindFileModify},
-				{Kind: KindGitCommit},
-			},
-		},
+		{Activities: []Activity{
+			{Kind: KindFileModify},
+			{Kind: KindGitCommit},
+		}},
 	}
-	got := inferSummary(segments)
-	if !strings.Contains(got, "Changes committed.") {
-		t.Errorf("expected commit only, got %q", got)
+	got := inferSummary(segments, "Save changes", nil)
+	if !strings.Contains(got, "committed") {
+		t.Errorf("expected committed, got %q", got)
 	}
 }
 
 func TestInferSummary_ErrorRecoveries(t *testing.T) {
 	segments := []Segment{
-		{
-			Activities: []Activity{
-				{Kind: KindTestRun, IsError: true, Recovered: true},
-				{Kind: KindFileModify},
-				{Kind: KindTestRun},
-			},
-		},
+		{Activities: []Activity{
+			{Kind: KindTestRun, IsError: true, Recovered: true},
+			{Kind: KindFileModify},
+			{Kind: KindTestRun},
+		}},
 	}
-	got := inferSummary(segments)
-	if !strings.Contains(got, "Resolved 1 errors") {
+	got := inferSummary(segments, "Fix the bug", nil)
+	if !strings.Contains(got, "resolved 1 errors") {
 		t.Errorf("expected recovery, got %q", got)
 	}
 }
 
 func TestInferSummary_NoActivities(t *testing.T) {
 	segments := []Segment{{}}
-	got := inferSummary(segments)
+	got := inferSummary(segments, "", nil)
 	if got != "Claude Code session." {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestInferSummary_SessionTitle(t *testing.T) {
+	// "Session" title should be treated as empty
+	segments := []Segment{
+		{Activities: []Activity{{Kind: KindFileModify}}},
+	}
+	got := inferSummary(segments, "Session", nil)
+	// Should still produce something from outcomes
+	if !strings.Contains(got, "1 files") {
+		t.Errorf("expected file count, got %q", got)
+	}
+}
+
+func TestInferIntentPrefix_FromCommit(t *testing.T) {
+	commits := []Commit{{SHA: "abc", Message: "fix: handle nil pointer"}}
+	got := inferIntentPrefix(nil, commits)
+	if got != "fix" {
+		t.Errorf("got %q, want fix", got)
+	}
+}
+
+func TestInferIntentPrefix_FromActivities(t *testing.T) {
+	segments := []Segment{
+		{Activities: []Activity{
+			{Kind: KindFileCreate},
+			{Kind: KindTestRun},
+		}},
+	}
+	got := inferIntentPrefix(segments, nil)
+	if got != "feat" {
+		t.Errorf("got %q, want feat", got)
+	}
+}
+
+func TestInferIntentPrefix_PlanMode(t *testing.T) {
+	segments := []Segment{
+		{Activities: []Activity{
+			{Kind: KindPlanMode},
+			{Kind: KindExplore},
+		}},
+	}
+	got := inferIntentPrefix(segments, nil)
+	if got != "plan" {
+		t.Errorf("got %q, want plan", got)
+	}
+}
+
+func TestInferIntentPrefix_Explore(t *testing.T) {
+	segments := []Segment{
+		{Activities: []Activity{
+			{Kind: KindExplore},
+			{Kind: KindExplore},
+		}},
+	}
+	got := inferIntentPrefix(segments, nil)
+	if got != "explore" {
+		t.Errorf("got %q, want explore", got)
+	}
+}
+
+func TestInferSubject_FromCommit(t *testing.T) {
+	commits := []Commit{{SHA: "abc", Message: "feat: add auth handler"}}
+	got := inferSubject("Implement authentication", commits)
+	if got != "add auth handler" {
+		t.Errorf("got %q, want %q", got, "add auth handler")
+	}
+}
+
+func TestInferSubject_FromTitle(t *testing.T) {
+	got := inferSubject("Implement authentication", nil)
+	if got != "Implement authentication" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestInferSubject_EmptyTitle(t *testing.T) {
+	got := inferSubject("Session", nil)
+	if got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
+
+func TestExtractConventionalPrefix(t *testing.T) {
+	tests := []struct {
+		msg  string
+		want string
+	}{
+		{"feat: add auth", "feat"},
+		{"fix(auth): nil pointer", "fix"},
+		{"refactor: clean up code", "refactor"},
+		{"docs: update README", "docs"},
+		{"just some message", ""},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		got := extractConventionalPrefix(tc.msg)
+		if got != tc.want {
+			t.Errorf("extractConventionalPrefix(%q) = %q, want %q", tc.msg, got, tc.want)
+		}
+	}
+}
+
+func TestStripConventionalPrefix(t *testing.T) {
+	tests := []struct {
+		msg  string
+		want string
+	}{
+		{"feat: add auth", "add auth"},
+		{"fix(auth): nil pointer", "nil pointer"},
+		{"just a message", "just a message"},
+	}
+	for _, tc := range tests {
+		got := stripConventionalPrefix(tc.msg)
+		if got != tc.want {
+			t.Errorf("stripConventionalPrefix(%q) = %q, want %q", tc.msg, got, tc.want)
+		}
+	}
+}
+
+func TestFormatOutcomes(t *testing.T) {
+	segments := []Segment{
+		{Activities: []Activity{
+			{Kind: KindFileCreate},
+			{Kind: KindFileCreate},
+			{Kind: KindFileModify},
+			{Kind: KindTestRun},
+			{Kind: KindGitCommit},
+		}},
+	}
+	got := formatOutcomes(segments)
+	if !strings.Contains(got, "2+1 files") {
+		t.Errorf("expected 2+1 files, got %q", got)
+	}
+	if !strings.Contains(got, "tests pass") {
+		t.Errorf("expected tests pass, got %q", got)
+	}
+	if !strings.Contains(got, "committed") {
+		t.Errorf("expected committed, got %q", got)
 	}
 }
 

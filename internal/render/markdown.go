@@ -43,8 +43,10 @@ type NoteData struct {
 	TotalTools    int
 	Status        string // "completed" or "checkpoint"
 	Commits       []narrative.Commit // Git commits extracted from tool output
-	WorkPerformed string             // Rendered markdown for Work Performed section
-	ProseDialogue string             // Rendered prose section (empty = use summary fallback)
+	WorkPerformed   string             // Rendered markdown for Work Performed section
+	ProseDialogue   string             // Rendered prose section (empty = use summary fallback)
+	FrictionScore   int                // Composite friction score 0-100
+	FrictionSignals []string           // Human-readable friction signal descriptions
 }
 
 // SessionNote renders a full Obsidian markdown note from NoteData.
@@ -89,6 +91,9 @@ func SessionNote(d NoteData) string {
 			shas = append(shas, c.SHA)
 		}
 		b.WriteString(fmt.Sprintf("commits: [%s]\n", strings.Join(shas, ", ")))
+	}
+	if d.FrictionScore > 0 {
+		b.WriteString(fmt.Sprintf("friction_score: %d\n", d.FrictionScore))
 	}
 	if d.Tag != "" {
 		b.WriteString(fmt.Sprintf("tags: [cortana-session, %s]\n", d.Tag))
@@ -180,6 +185,16 @@ func SessionNote(d NoteData) string {
 		b.WriteString("## Open Threads\n\n")
 		for _, t := range d.OpenThreads {
 			b.WriteString(fmt.Sprintf("- [ ] %s\n", t))
+		}
+		b.WriteString("\n")
+	}
+
+	// Friction Signals
+	if d.FrictionScore >= 15 && len(d.FrictionSignals) > 0 {
+		b.WriteString("## Friction Signals\n\n")
+		b.WriteString(fmt.Sprintf("**Friction score: %d/100**\n\n", d.FrictionScore))
+		for _, sig := range d.FrictionSignals {
+			b.WriteString(fmt.Sprintf("- %s\n", sig))
 		}
 		b.WriteString("\n")
 	}

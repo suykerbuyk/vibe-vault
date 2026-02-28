@@ -517,6 +517,30 @@ func TestExtractCommits_NoCommits(t *testing.T) {
 	}
 }
 
+func TestExtract_PopulatesCommits(t *testing.T) {
+	entries := []transcript.Entry{
+		makeEntry("user", "Commit the changes"),
+		makeEntry("assistant", "Committing.", transcript.ContentBlock{
+			Type:  "tool_use",
+			ID:    "c1",
+			Name:  "Bash",
+			Input: map[string]interface{}{"command": `git commit -m "feat: add auth"`},
+		}),
+		makeToolResult("c1", false, "[feat/auth abc1234] feat: add auth\n 1 file changed"),
+	}
+	tr := &transcript.Transcript{Entries: entries}
+	narr := Extract(tr, "/tmp")
+	if narr == nil {
+		t.Fatal("expected non-nil narrative")
+	}
+	if len(narr.Commits) != 1 {
+		t.Fatalf("expected 1 commit, got %d", len(narr.Commits))
+	}
+	if narr.Commits[0].SHA != "abc1234" {
+		t.Errorf("SHA = %q, want abc1234", narr.Commits[0].SHA)
+	}
+}
+
 func TestExtractCommits_Multiple(t *testing.T) {
 	entries := []transcript.Entry{
 		makeEntry("assistant", "First commit.", transcript.ContentBlock{

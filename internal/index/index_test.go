@@ -283,6 +283,39 @@ func TestIndexCommitsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestIndexFrictionRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	idx, _ := Load(dir)
+
+	entry := SessionEntry{
+		SessionID:     "sess-friction",
+		NotePath:      "Sessions/proj/2026-02-28-01.md",
+		Project:       "proj",
+		Date:          "2026-02-28",
+		Iteration:     1,
+		Corrections:   3,
+		FrictionScore: 42,
+	}
+
+	idx.Add(entry)
+	if err := idx.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	idx2, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	e := idx2.Entries["sess-friction"]
+	if e.Corrections != 3 {
+		t.Errorf("Corrections = %d, want 3", e.Corrections)
+	}
+	if e.FrictionScore != 42 {
+		t.Errorf("FrictionScore = %d, want 42", e.FrictionScore)
+	}
+}
+
 // --- Rebuild tests ---
 
 func writeNote(t *testing.T, dir, project, filename, content string) {

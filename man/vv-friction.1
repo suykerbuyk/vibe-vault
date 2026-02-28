@@ -1,0 +1,27 @@
+.TH VV-FRICTION 1 "2026-02-28" "vv v0.3.0-7-g4e9abb5-dirty" "Vibe-Vault Manual"
+.SH NAME
+vv-friction \- show friction analysis and correction patterns
+.SH SYNOPSIS
+.B vv friction [\-\-project <name>]
+.SH DESCRIPTION
+Analyzes friction signals from the session index: correction density,
+token efficiency, file retry patterns, error cycles, and recurring
+open threads. Shows per\-project aggregates and identifies high\-friction
+sessions.
+.PP
+Friction scores range from 0 (smooth) to 100 (high friction). Sessions
+scoring ≥ 40 are flagged as high\-friction. Run vv reprocess to generate
+friction data if none is available.
+.SH OPTIONS
+.TP
+.B \-\-project <name>
+Show friction for a specific project only
+.SH EXAMPLES
+.nf
+vv friction                       Show global friction analysis
+vv friction \-\-project myproject   Show friction for one project
+.fi
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-stats (1),
+.BR vv\-reprocess (1)

@@ -404,6 +404,64 @@ func TestSessionNote_NoCommits(t *testing.T) {
 	}
 }
 
+func TestSessionNote_FrictionSignals(t *testing.T) {
+	d := NoteData{
+		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",
+		FrictionScore: 42,
+		FrictionSignals: []string{
+			"3 corrections in 10 user turns (30% density)",
+			"45K tokens/file changed",
+		},
+	}
+	out := SessionNote(d)
+
+	if !strings.Contains(out, "friction_score: 42") {
+		t.Error("missing friction_score in frontmatter")
+	}
+	if !strings.Contains(out, "## Friction Signals") {
+		t.Error("missing ## Friction Signals section")
+	}
+	if !strings.Contains(out, "**Friction score: 42/100**") {
+		t.Error("missing friction score heading")
+	}
+	if !strings.Contains(out, "3 corrections in 10 user turns") {
+		t.Error("missing correction signal")
+	}
+	if !strings.Contains(out, "45K tokens/file changed") {
+		t.Error("missing token signal")
+	}
+}
+
+func TestSessionNote_NoFriction(t *testing.T) {
+	d := NoteData{
+		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",
+	}
+	out := SessionNote(d)
+
+	if strings.Contains(out, "friction_score:") {
+		t.Error("should not have friction_score when zero")
+	}
+	if strings.Contains(out, "## Friction Signals") {
+		t.Error("should not have Friction Signals section when zero")
+	}
+}
+
+func TestSessionNote_LowFrictionNoSection(t *testing.T) {
+	d := NoteData{
+		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",
+		FrictionScore:   10,
+		FrictionSignals: []string{"minor signal"},
+	}
+	out := SessionNote(d)
+
+	if !strings.Contains(out, "friction_score: 10") {
+		t.Error("missing friction_score in frontmatter")
+	}
+	if strings.Contains(out, "## Friction Signals") {
+		t.Error("should not have Friction Signals section when score < 15")
+	}
+}
+
 // extractLine finds the first line containing substr for error messages.
 func extractLine(text, substr string) string {
 	for _, line := range strings.Split(text, "\n") {
