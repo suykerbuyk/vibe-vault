@@ -26,7 +26,7 @@ func inferTitle(segments []Segment, t *transcript.Transcript) string {
 		if len(first) > 80 {
 			first = first[:77] + "..."
 		}
-		if !isNoiseMessage(first) {
+		if !IsNoiseMessage(first) {
 			return first
 		}
 	}

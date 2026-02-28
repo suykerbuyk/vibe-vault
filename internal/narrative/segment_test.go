@@ -13,7 +13,7 @@ func TestSegmentEntries_NoCompaction(t *testing.T) {
 		{Type: "assistant", UUID: "a1"},
 		{Type: "user", UUID: "u2"},
 	}
-	segs := segmentEntries(entries)
+	segs := SegmentEntries(entries)
 	if len(segs) != 1 {
 		t.Fatalf("expected 1 segment, got %d", len(segs))
 	}
@@ -30,7 +30,7 @@ func TestSegmentEntries_SingleBoundary(t *testing.T) {
 		{Type: "user", UUID: "u2"},
 		{Type: "assistant", UUID: "a2"},
 	}
-	segs := segmentEntries(entries)
+	segs := SegmentEntries(entries)
 	if len(segs) != 2 {
 		t.Fatalf("expected 2 segments, got %d", len(segs))
 	}
@@ -50,7 +50,7 @@ func TestSegmentEntries_MultipleBoundaries(t *testing.T) {
 		{Type: "system", Subtype: "compact_boundary"},
 		{Type: "user", UUID: "u3"},
 	}
-	segs := segmentEntries(entries)
+	segs := SegmentEntries(entries)
 	if len(segs) != 3 {
 		t.Fatalf("expected 3 segments, got %d", len(segs))
 	}
@@ -62,7 +62,7 @@ func TestSegmentEntries_BoundaryExcluded(t *testing.T) {
 		{Type: "system", Subtype: "compact_boundary"},
 		{Type: "user", UUID: "u2", Timestamp: time.Unix(200, 0)},
 	}
-	segs := segmentEntries(entries)
+	segs := SegmentEntries(entries)
 	// Boundary entry should not appear in either segment
 	for i, seg := range segs {
 		for _, e := range seg {
@@ -74,7 +74,7 @@ func TestSegmentEntries_BoundaryExcluded(t *testing.T) {
 }
 
 func TestSegmentEntries_EmptyInput(t *testing.T) {
-	segs := segmentEntries(nil)
+	segs := SegmentEntries(nil)
 	if len(segs) != 1 {
 		t.Fatalf("expected 1 segment for empty input, got %d", len(segs))
 	}

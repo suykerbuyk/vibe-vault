@@ -14,6 +14,7 @@ import (
 	"github.com/johns/vibe-vault/internal/enrichment"
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/narrative"
+	"github.com/johns/vibe-vault/internal/prose"
 	"github.com/johns/vibe-vault/internal/render"
 	"github.com/johns/vibe-vault/internal/transcript"
 )
@@ -136,13 +137,20 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		noteData.WorkPerformed = narr.WorkPerformed
 	}
 
+	// Prose dialogue extraction
+	dialogue := prose.Extract(t, cwd)
+	if dialogue != nil {
+		noteData.ProseDialogue = prose.Render(dialogue)
+	}
+
 	// Mark checkpoint status
 	if opts.Checkpoint {
 		noteData.Status = "checkpoint"
 	}
 
 	// LLM enrichment (graceful: skip on error or if disabled)
-	if !opts.SkipEnrichment {
+	// Skip when prose extraction produced output — the prose subsumes enrichment's purpose.
+	if !opts.SkipEnrichment && noteData.ProseDialogue == "" {
 		var filesChanged []string
 		for f := range t.Stats.FilesWritten {
 			filesChanged = append(filesChanged, f)

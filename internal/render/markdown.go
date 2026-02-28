@@ -42,6 +42,7 @@ type NoteData struct {
 	TotalTools    int
 	Status        string // "completed" or "checkpoint"
 	WorkPerformed string // Rendered markdown for Work Performed section
+	ProseDialogue string // Rendered prose section (empty = use summary fallback)
 }
 
 // SessionNote renders a full Obsidian markdown note from NoteData.
@@ -104,9 +105,15 @@ func SessionNote(d NoteData) string {
 	// Title
 	b.WriteString(fmt.Sprintf("# %s\n\n", d.Title))
 
-	// What Happened
-	b.WriteString("## What Happened\n\n")
-	b.WriteString(fmt.Sprintf("%s\n\n", d.Summary))
+	// Session Dialogue / What Happened
+	if d.ProseDialogue != "" {
+		b.WriteString("## Session Dialogue\n\n")
+		b.WriteString(d.ProseDialogue)
+		b.WriteString("\n")
+	} else {
+		b.WriteString("## What Happened\n\n")
+		b.WriteString(fmt.Sprintf("%s\n\n", d.Summary))
+	}
 
 	// What Changed
 	if len(d.FilesChanged) > 0 {

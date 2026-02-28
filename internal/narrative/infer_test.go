@@ -334,9 +334,9 @@ func TestIsNoiseMessage(t *testing.T) {
 		{"Add unit tests for the handler", false},
 	}
 	for _, tc := range tests {
-		got := isNoiseMessage(tc.msg)
+		got := IsNoiseMessage(tc.msg)
 		if got != tc.want {
-			t.Errorf("isNoiseMessage(%q) = %v, want %v", tc.msg, got, tc.want)
+			t.Errorf("IsNoiseMessage(%q) = %v, want %v", tc.msg, got, tc.want)
 		}
 	}
 }

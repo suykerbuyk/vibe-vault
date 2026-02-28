@@ -15,7 +15,7 @@ func Extract(t *transcript.Transcript, cwd string) *Narrative {
 		return nil
 	}
 
-	rawSegments := segmentEntries(t.Entries)
+	rawSegments := SegmentEntries(t.Entries)
 
 	var segments []Segment
 	for i, raw := range rawSegments {
@@ -59,15 +59,15 @@ func Extract(t *transcript.Transcript, cwd string) *Narrative {
 	return narr
 }
 
-// toolResult pairs a tool_use ID with its result information.
-type toolResult struct {
-	isError bool
-	content string
+// ToolResult pairs a tool_use ID with its result information.
+type ToolResult struct {
+	IsError bool
+	Content string
 }
 
-// buildToolResultMap pairs tool_use IDs with their results from tool_result blocks.
-func buildToolResultMap(entries []transcript.Entry) map[string]*toolResult {
-	results := make(map[string]*toolResult)
+// BuildToolResultMap pairs tool_use IDs with their results from tool_result blocks.
+func BuildToolResultMap(entries []transcript.Entry) map[string]*ToolResult {
+	results := make(map[string]*ToolResult)
 
 	for _, e := range entries {
 		if e.Message == nil {
@@ -76,18 +76,18 @@ func buildToolResultMap(entries []transcript.Entry) map[string]*toolResult {
 		blocks := transcript.ContentBlocks(e.Message)
 		for _, b := range blocks {
 			if b.Type == "tool_result" && b.ToolUseID != "" {
-				tr := &toolResult{
-					isError: b.IsError,
+				tr := &ToolResult{
+					IsError: b.IsError,
 				}
 				// Extract content string
 				switch c := b.Content.(type) {
 				case string:
-					tr.content = c
+					tr.Content = c
 				case []interface{}:
 					for _, item := range c {
 						if m, ok := item.(map[string]interface{}); ok {
 							if text, ok := m["text"].(string); ok {
-								tr.content = text
+								tr.Content = text
 								break
 							}
 						}
@@ -103,7 +103,7 @@ func buildToolResultMap(entries []transcript.Entry) map[string]*toolResult {
 
 // extractActivities processes entries from one segment into activities.
 func extractActivities(entries []transcript.Entry, cwd string) []Activity {
-	resultMap := buildToolResultMap(entries)
+	resultMap := BuildToolResultMap(entries)
 	var activities []Activity
 
 	for _, e := range entries {
@@ -125,8 +125,8 @@ func extractActivities(entries []transcript.Entry, cwd string) []Activity {
 }
 
 // classifyToolUse maps a tool call to an Activity.
-func classifyToolUse(tu transcript.ContentBlock, result *toolResult, ts time.Time, cwd string) *Activity {
-	isErr := result != nil && result.isError
+func classifyToolUse(tu transcript.ContentBlock, result *ToolResult, ts time.Time, cwd string) *Activity {
+	isErr := result != nil && result.IsError
 
 	switch tu.Name {
 	case "Write":
@@ -161,7 +161,7 @@ func classifyToolUse(tu transcript.ContentBlock, result *toolResult, ts time.Tim
 
 	case "Bash":
 		cmd := inputStr(tu.Input, "command")
-		return classifyBashCommand(cmd, result, ts, cwd)
+		return ClassifyBashCommand(cmd, result, ts, cwd)
 
 	case "EnterPlanMode":
 		return &Activity{
@@ -225,9 +225,9 @@ func classifyToolUse(tu transcript.ContentBlock, result *toolResult, ts time.Tim
 	}
 }
 
-// classifyBashCommand classifies a Bash tool call based on the command text.
-func classifyBashCommand(cmd string, result *toolResult, ts time.Time, cwd string) *Activity {
-	isErr := result != nil && result.isError
+// ClassifyBashCommand classifies a Bash tool call based on the command text.
+func ClassifyBashCommand(cmd string, result *ToolResult, ts time.Time, cwd string) *Activity {
+	isErr := result != nil && result.IsError
 	lower := strings.ToLower(cmd)
 
 	// Test commands
@@ -236,7 +236,7 @@ func classifyBashCommand(cmd string, result *toolResult, ts time.Time, cwd strin
 		if isErr {
 			status = "failed"
 		} else if result != nil {
-			status = extractTestStatus(result.content, isErr)
+			status = extractTestStatus(result.Content, isErr)
 		}
 		return &Activity{
 			Timestamp:   ts,
@@ -472,7 +472,7 @@ func firstUserRequest(entries []transcript.Entry) string {
 		}
 
 		// Skip noise patterns
-		if isNoiseMessage(text) {
+		if IsNoiseMessage(text) {
 			continue
 		}
 
@@ -520,8 +520,8 @@ func extractUserText(e transcript.Entry) string {
 	return ""
 }
 
-// isNoiseMessage detects messages that shouldn't be used as user requests.
-func isNoiseMessage(text string) bool {
+// IsNoiseMessage detects messages that shouldn't be used as user requests.
+func IsNoiseMessage(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
 
 	// Slash commands

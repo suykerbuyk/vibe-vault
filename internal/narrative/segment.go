@@ -2,9 +2,9 @@ package narrative
 
 import "github.com/johns/vibe-vault/internal/transcript"
 
-// segmentEntries splits transcript entries at compact_boundary system messages.
+// SegmentEntries splits transcript entries at compact_boundary system messages.
 // Returns one or more slices of entries. Boundary entries are excluded from both segments.
-func segmentEntries(entries []transcript.Entry) [][]transcript.Entry {
+func SegmentEntries(entries []transcript.Entry) [][]transcript.Entry {
 	var segments [][]transcript.Entry
 	var current []transcript.Entry
 

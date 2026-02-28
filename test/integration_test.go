@@ -386,23 +386,28 @@ func TestIntegration(t *testing.T) {
 
 		note := readFile(t, notePath)
 
-		// Work Performed section present
+		// Session Dialogue section (prose extraction)
+		assertContains(t, note, "## Session Dialogue", "session dialogue section")
+
+		// User turns preserved in prose
+		assertContains(t, note, "Add JWT authentication to the API", "user request in prose")
+		assertContains(t, note, "commit the changes", "second user request in prose")
+
+		// Assistant turns preserved in prose
+		assertContains(t, note, "JWT authentication has been added and committed", "assistant conclusion in prose")
+
+		// Tool markers in prose
+		assertContains(t, note, "Created `internal/auth/handler.go`", "file create marker")
+		assertContains(t, note, "Ran tests", "test marker")
+		assertContains(t, note, "feat: add JWT authentication", "commit marker")
+
+		// Work Performed section still present (complementary)
 		assertContains(t, note, "## Work Performed", "work performed section")
-
-		// File creation activity
-		assertContains(t, note, "Created `internal/auth/handler.go`", "file create activity")
-
-		// Test activity
-		assertContains(t, note, "Ran tests", "test activity")
-
-		// Commit activity
-		assertContains(t, note, "Committed:", "commit activity")
-		assertContains(t, note, "feat: add JWT authentication", "commit message")
 
 		// Tag inferred
 		assertContains(t, note, "implementation", "inferred tag")
 
-		// Better title than raw first message prefix
+		// Better title
 		assertContains(t, note, "Add JWT authentication to the API", "narrative title")
 
 		// Narrative summary has file info

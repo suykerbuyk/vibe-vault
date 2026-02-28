@@ -328,6 +328,40 @@ func TestSessionNote_NoTools(t *testing.T) {
 	}
 }
 
+func TestSessionNote_ProseDialogue(t *testing.T) {
+	d := NoteData{
+		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",
+		ProseDialogue: "> **User:** Add auth\n\nI'll implement JWT authentication.\n",
+	}
+	out := SessionNote(d)
+	if !strings.Contains(out, "## Session Dialogue") {
+		t.Error("missing ## Session Dialogue section")
+	}
+	if strings.Contains(out, "## What Happened") {
+		t.Error("should not have ## What Happened when prose is present")
+	}
+	if !strings.Contains(out, "> **User:** Add auth") {
+		t.Error("missing prose content")
+	}
+}
+
+func TestSessionNote_ProseDialogueFallback(t *testing.T) {
+	d := NoteData{
+		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T",
+		Summary: "Quick session",
+	}
+	out := SessionNote(d)
+	if !strings.Contains(out, "## What Happened") {
+		t.Error("missing ## What Happened fallback")
+	}
+	if strings.Contains(out, "## Session Dialogue") {
+		t.Error("should not have ## Session Dialogue when prose is empty")
+	}
+	if !strings.Contains(out, "Quick session") {
+		t.Error("missing summary text")
+	}
+}
+
 // extractLine finds the first line containing substr for error messages.
 func extractLine(text, substr string) string {
 	for _, line := range strings.Split(text, "\n") {

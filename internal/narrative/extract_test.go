@@ -183,7 +183,7 @@ func TestClassifyToolUse_Task(t *testing.T) {
 }
 
 func TestClassifyBash_TestCommand(t *testing.T) {
-	act := classifyBashCommand("go test ./...", nil, time.Now(), "/tmp")
+	act := ClassifyBashCommand("go test ./...", nil, time.Now(), "/tmp")
 	if act.Kind != KindTestRun {
 		t.Errorf("kind: got %d, want KindTestRun", act.Kind)
 	}
@@ -193,8 +193,8 @@ func TestClassifyBash_TestCommand(t *testing.T) {
 }
 
 func TestClassifyBash_TestFailed(t *testing.T) {
-	result := &toolResult{isError: true, content: "FAIL"}
-	act := classifyBashCommand("go test ./...", result, time.Now(), "/tmp")
+	result := &ToolResult{IsError: true, Content: "FAIL"}
+	act := ClassifyBashCommand("go test ./...", result, time.Now(), "/tmp")
 	if act.Kind != KindTestRun {
 		t.Errorf("kind: got %d, want KindTestRun", act.Kind)
 	}
@@ -207,7 +207,7 @@ func TestClassifyBash_TestFailed(t *testing.T) {
 }
 
 func TestClassifyBash_GitCommit(t *testing.T) {
-	act := classifyBashCommand(`git commit -m "feat: add auth"`, nil, time.Now(), "/tmp")
+	act := ClassifyBashCommand(`git commit -m "feat: add auth"`, nil, time.Now(), "/tmp")
 	if act.Kind != KindGitCommit {
 		t.Errorf("kind: got %d, want KindGitCommit", act.Kind)
 	}
@@ -217,21 +217,21 @@ func TestClassifyBash_GitCommit(t *testing.T) {
 }
 
 func TestClassifyBash_GitPush(t *testing.T) {
-	act := classifyBashCommand("git push origin main", nil, time.Now(), "/tmp")
+	act := ClassifyBashCommand("git push origin main", nil, time.Now(), "/tmp")
 	if act.Kind != KindGitPush {
 		t.Errorf("kind: got %d, want KindGitPush", act.Kind)
 	}
 }
 
 func TestClassifyBash_Build(t *testing.T) {
-	act := classifyBashCommand("make build", nil, time.Now(), "/tmp")
+	act := ClassifyBashCommand("make build", nil, time.Now(), "/tmp")
 	if act.Kind != KindBuild {
 		t.Errorf("kind: got %d, want KindBuild", act.Kind)
 	}
 }
 
 func TestClassifyBash_GeneralCommand(t *testing.T) {
-	act := classifyBashCommand("ls -la", nil, time.Now(), "/tmp")
+	act := ClassifyBashCommand("ls -la", nil, time.Now(), "/tmp")
 	if act.Kind != KindCommand {
 		t.Errorf("kind: got %d, want KindCommand", act.Kind)
 	}
@@ -335,14 +335,14 @@ func TestBuildToolResultMap(t *testing.T) {
 		makeToolResult("tu1", false, "success output"),
 		makeToolResult("tu2", true, "error output"),
 	}
-	m := buildToolResultMap(entries)
+	m := BuildToolResultMap(entries)
 	if len(m) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(m))
 	}
-	if m["tu1"].isError {
+	if m["tu1"].IsError {
 		t.Error("tu1 should not be error")
 	}
-	if !m["tu2"].isError {
+	if !m["tu2"].IsError {
 		t.Error("tu2 should be error")
 	}
 }

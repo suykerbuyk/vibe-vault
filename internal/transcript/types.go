@@ -25,6 +25,9 @@ type Entry struct {
 	// Native field in Claude Code's JSONL output.
 	IsMeta bool `json:"isMeta,omitempty"`
 
+	// PlanContent holds the full plan document when a user submits a plan.
+	PlanContent string `json:"planContent,omitempty"`
+
 	// Present on tool result entries (type=user with tool results)
 	ToolUseResult        *ToolUseResult `json:"toolUseResult,omitempty"`
 	SourceToolAssistantUUID string      `json:"sourceToolAssistantUUID,omitempty"`
