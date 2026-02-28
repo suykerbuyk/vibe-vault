@@ -30,16 +30,16 @@ func Detect(cwd, gitBranch, model, sessionID string, cfg config.Config) Info {
 		CWD:       cwd,
 	}
 
-	info.Project = detectProject(cwd)
+	info.Project = DetectProject(cwd)
 	info.Domain = detectDomain(cwd, cfg)
 
 	return info
 }
 
-// detectProject extracts the project name from the working directory.
+// DetectProject extracts the project name from the working directory.
 // Prefers the git remote origin name (stable across worktrees and renames),
 // falling back to the directory basename.
-func detectProject(cwd string) string {
+func DetectProject(cwd string) string {
 	if cwd == "" {
 		return "_unknown"
 	}

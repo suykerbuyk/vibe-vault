@@ -11,6 +11,7 @@ import (
 	"github.com/johns/vibe-vault/internal/archive"
 	"github.com/johns/vibe-vault/internal/check"
 	"github.com/johns/vibe-vault/internal/config"
+	vvcontext "github.com/johns/vibe-vault/internal/context"
 	"github.com/johns/vibe-vault/internal/discover"
 	"github.com/johns/vibe-vault/internal/friction"
 	"github.com/johns/vibe-vault/internal/help"
@@ -34,6 +35,9 @@ func main() {
 
 	case "hook":
 		runHook()
+
+	case "context":
+		runContext()
 
 	case "process":
 		runProcess()
@@ -167,6 +171,72 @@ func runHook() {
 	if err := hook.Handle(cfg, event); err != nil {
 		fatal("%v", err)
 	}
+}
+
+func runContext() {
+	args := os.Args[2:]
+
+	// Route sub-subcommands
+	if len(args) > 0 {
+		switch args[0] {
+		case "init":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdContextInit))
+				return
+			}
+			cfg := mustLoadConfig()
+			cwd, err := os.Getwd()
+			if err != nil {
+				fatal("getwd: %v", err)
+			}
+			opts := vvcontext.Opts{
+				Project: flagValue(args[1:], "--project"),
+				Force:   hasFlag(args[1:], "--force"),
+			}
+			result, err := vvcontext.Init(cfg, cwd, opts)
+			if err != nil {
+				fatal("%v", err)
+			}
+			fmt.Printf("Context initialized for project: %s\n\n", result.Project)
+			for _, a := range result.Actions {
+				fmt.Printf("  %-8s %s\n", a.Action, a.Path)
+			}
+			return
+		case "migrate":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdContextMigrate))
+				return
+			}
+			cfg := mustLoadConfig()
+			cwd, err := os.Getwd()
+			if err != nil {
+				fatal("getwd: %v", err)
+			}
+			opts := vvcontext.Opts{
+				Project: flagValue(args[1:], "--project"),
+				Force:   hasFlag(args[1:], "--force"),
+			}
+			result, err := vvcontext.Migrate(cfg, cwd, opts)
+			if err != nil {
+				fatal("%v", err)
+			}
+			fmt.Printf("Context migrated for project: %s\n\n", result.Project)
+			for _, a := range result.Actions {
+				fmt.Printf("  %-8s %s\n", a.Action, a.Path)
+			}
+			fmt.Println("\nLocal originals preserved — remove manually after verifying.")
+			return
+		}
+	}
+
+	if wantsHelp(args) {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdContext))
+		return
+	}
+
+	// No subcommand given — show help
+	fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdContext))
+	os.Exit(1)
 }
 
 func runProcess() {

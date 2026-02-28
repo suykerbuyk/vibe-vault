@@ -21,9 +21,9 @@ func TestDetectProject(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := detectProject(tt.cwd)
+		got := DetectProject(tt.cwd)
 		if got != tt.want {
-			t.Errorf("detectProject(%q) = %q, want %q", tt.cwd, got, tt.want)
+			t.Errorf("DetectProject(%q) = %q, want %q", tt.cwd, got, tt.want)
 		}
 	}
 }
@@ -139,7 +139,7 @@ func TestDetectProject_GitRemote(t *testing.T) {
 	mustGit(t, projectDir, "init")
 	mustGit(t, projectDir, "remote", "add", "origin", "git@github.com:user/awesome-api.git")
 
-	got := detectProject(projectDir)
+	got := DetectProject(projectDir)
 	if got != "awesome-api" {
 		t.Errorf("detectProject with SSH remote = %q, want %q", got, "awesome-api")
 	}
@@ -155,7 +155,7 @@ func TestDetectProject_GitHTTPS(t *testing.T) {
 	mustGit(t, projectDir, "init")
 	mustGit(t, projectDir, "remote", "add", "origin", "https://github.com/user/cool-project.git")
 
-	got := detectProject(projectDir)
+	got := DetectProject(projectDir)
 	if got != "cool-project" {
 		t.Errorf("detectProject with HTTPS remote = %q, want %q", got, "cool-project")
 	}
@@ -170,7 +170,7 @@ func TestDetectProject_GitNoRemote(t *testing.T) {
 
 	mustGit(t, projectDir, "init")
 
-	got := detectProject(projectDir)
+	got := DetectProject(projectDir)
 	if got != "local-only" {
 		t.Errorf("detectProject with no remote = %q, want %q", got, "local-only")
 	}
@@ -183,7 +183,7 @@ func TestDetectProject_NotGitRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := detectProject(projectDir)
+	got := DetectProject(projectDir)
 	if got != "plain-dir" {
 		t.Errorf("detectProject in non-git dir = %q, want %q", got, "plain-dir")
 	}

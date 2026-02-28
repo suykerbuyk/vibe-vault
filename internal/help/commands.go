@@ -339,16 +339,101 @@ prints an informational message and exits successfully.`,
 	SeeAlso: []string{"vv(1)", "vv-hook(1)", "vv-hook-install(1)"},
 }
 
+var CmdContext = Command{
+	Name:     "context",
+	Synopsis: "manage vault-resident AI context files",
+	Brief:    "Manage vault-resident AI context",
+	Usage:      "vv context [init | migrate]",
+	TableUsage: "vv context [init | ...]",
+	Description: `Manages AI workflow context files (resume, iterations, tasks) that live
+in the Obsidian vault rather than as untracked repo-local files. This
+makes context portable, searchable, and visible to Obsidian.
+
+Subcommands:
+  vv context init      Scaffold vault-resident context for current project
+  vv context migrate   Copy existing local files to vault`,
+	SeeAlso: []string{"vv(1)", "vv-context-init(1)", "vv-context-migrate(1)"},
+}
+
+var CmdContextInit = Command{
+	Name:     "context init",
+	Synopsis: "scaffold vault-resident context for a project",
+	Brief:    "Scaffold vault-resident context",
+	Usage:    "vv context init [--project <name>] [--force]",
+	Flags: []Flag{
+		{Name: "--project <name>", Desc: "Override auto-detected project name"},
+		{Name: "--force", Desc: "Overwrite existing files"},
+	},
+	Description: `Creates vault-resident context files for the current project:
+
+Vault-side (in Projects/{project}/):
+  resume.md        AI working context skeleton
+  iterations.md    Iteration narratives skeleton
+  tasks/           Task directory with done/ subdirectory
+
+Repo-side (in current directory):
+  CLAUDE.md              Vault pointer + workflow rules
+  .claude/commands/restart.md  Session resume command
+  .claude/commands/wrap.md     Session wrap command
+
+Also ensures .gitignore has entries for CLAUDE.md and commit.msg.
+
+Existing files are skipped unless --force is specified. Project name
+is auto-detected from git remote or directory name.`,
+	Examples: []string{
+		"vv context init                       Scaffold for auto-detected project",
+		"vv context init --project myproject   Scaffold for a specific project",
+		"vv context init --force               Overwrite existing files",
+	},
+	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-context-migrate(1)"},
+}
+
+var CmdContextMigrate = Command{
+	Name:     "context migrate",
+	Synopsis: "copy existing local context files to vault",
+	Brief:    "Copy local context files to vault",
+	Usage:    "vv context migrate [--project <name>] [--force]",
+	Flags: []Flag{
+		{Name: "--project <name>", Desc: "Override auto-detected project name"},
+		{Name: "--force", Desc: "Overwrite existing vault files"},
+	},
+	Description: `Copies existing repo-local context files to the vault:
+
+  RESUME.md  → Projects/{project}/resume.md
+  HISTORY.md → Projects/{project}/iterations.md
+  tasks/     → Projects/{project}/tasks/ (recursive)
+
+Then force-updates repo-side files (CLAUDE.md, .claude/commands/) to
+point at the vault. Local originals are NOT deleted — remove them
+manually after verifying the migration.
+
+Files that don't exist locally are skipped. Vault files that already
+exist are skipped unless --force is specified.`,
+	Examples: []string{
+		"vv context migrate                       Migrate auto-detected project",
+		"vv context migrate --project myproject   Migrate a specific project",
+		"vv context migrate --force               Overwrite existing vault files",
+	},
+	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-context-init(1)"},
+}
+
 // HookSubcommands is the ordered list of hook sub-subcommands.
 var HookSubcommands = []Command{
 	CmdHookInstall,
 	CmdHookUninstall,
 }
 
+// ContextSubcommands is the ordered list of context sub-subcommands.
+var ContextSubcommands = []Command{
+	CmdContextInit,
+	CmdContextMigrate,
+}
+
 // Subcommands is the ordered list of all subcommands.
 var Subcommands = []Command{
 	CmdInit,
 	CmdHook,
+	CmdContext,
 	CmdProcess,
 	CmdIndex,
 	CmdBackfill,

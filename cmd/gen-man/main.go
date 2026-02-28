@@ -37,6 +37,15 @@ func main() {
 		}
 	}
 
+	// Context sub-subcommand man pages
+	for _, cmd := range help.ContextSubcommands {
+		filename := cmd.ManName() + ".1"
+		if err := write(dir, filename, help.FormatRoff(cmd, date)); err != nil {
+			fmt.Fprintf(os.Stderr, "gen-man: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	// Hook sub-subcommand man pages
 	for _, cmd := range help.HookSubcommands {
 		filename := cmd.ManName() + ".1"

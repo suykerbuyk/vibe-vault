@@ -166,6 +166,27 @@ func assertNotContains(t *testing.T, s, substr, msg string) {
 	}
 }
 
+func runVVInDir(t *testing.T, env []string, dir string, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	cmd := exec.Command(vvBinary, args...)
+	cmd.Env = env
+	cmd.Dir = dir
+	var outBuf, errBuf strings.Builder
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	err = cmd.Run()
+	return outBuf.String(), errBuf.String(), err
+}
+
+func mustRunVVInDir(t *testing.T, env []string, dir string, args ...string) string {
+	t.Helper()
+	stdout, stderr, err := runVVInDir(t, env, dir, args...)
+	if err != nil {
+		t.Fatalf("vv %s failed: %v\nstdout: %s\nstderr: %s", strings.Join(args, " "), err, stdout, stderr)
+	}
+	return stdout
+}
+
 func runVVWithStdin(t *testing.T, env []string, stdin string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	cmd := exec.Command(vvBinary, args...)
@@ -710,6 +731,100 @@ func TestIntegration(t *testing.T) {
 		// Help flag
 		_, helpStderr, _ := runVV(t, env, "trends", "--help")
 		assertContains(t, helpStderr, "trends", "trends help text")
+	})
+
+	// 10d. context init + migrate
+	t.Run("context_init_and_migrate", func(t *testing.T) {
+		// Use a temp dir as the "repo" for context commands
+		repoCwd := t.TempDir()
+
+		// context init (run from repoCwd)
+		stdout := mustRunVVInDir(t, env, repoCwd, "context", "init", "--project", "ctx-project")
+		assertContains(t, stdout, "Context initialized", "context init stdout")
+		assertContains(t, stdout, "ctx-project", "context init project name")
+
+		// Vault files created
+		if !fileExists(filepath.Join(vaultPath, "Projects", "ctx-project", "resume.md")) {
+			t.Error("vault resume.md not created by context init")
+		}
+		if !fileExists(filepath.Join(vaultPath, "Projects", "ctx-project", "iterations.md")) {
+			t.Error("vault iterations.md not created by context init")
+		}
+		if !dirExists(filepath.Join(vaultPath, "Projects", "ctx-project", "tasks")) {
+			t.Error("vault tasks/ not created by context init")
+		}
+		if !dirExists(filepath.Join(vaultPath, "Projects", "ctx-project", "tasks", "done")) {
+			t.Error("vault tasks/done/ not created by context init")
+		}
+
+		// Repo files created
+		if !fileExists(filepath.Join(repoCwd, "CLAUDE.md")) {
+			t.Error("repo CLAUDE.md not created by context init")
+		}
+		if !fileExists(filepath.Join(repoCwd, ".claude", "commands", "restart.md")) {
+			t.Error("repo restart.md not created by context init")
+		}
+
+		// CLAUDE.md has vault pointer
+		claudeContent := readFile(t, filepath.Join(repoCwd, "CLAUDE.md"))
+		assertContains(t, claudeContent, "resume.md", "CLAUDE.md vault pointer")
+
+		// context migrate — set up local files in a different temp dir
+		migrateDir := t.TempDir()
+		writeFixture(t, migrateDir, "RESUME.md", "# My Resume\nProject state.")
+		writeFixture(t, migrateDir, "HISTORY.md", "# Iteration History")
+		writeFixture(t, filepath.Join(migrateDir, "tasks"), "001-feature.md", "Feature task")
+
+		migrateStdout := mustRunVVInDir(t, env, migrateDir, "context", "migrate", "--project", "migrate-test")
+		assertContains(t, migrateStdout, "Context migrated", "context migrate stdout")
+
+		// Verify vault contents from migrate
+		migrateResume := filepath.Join(vaultPath, "Projects", "migrate-test", "resume.md")
+		if !fileExists(migrateResume) {
+			t.Error("vault resume.md not created by context migrate")
+		} else {
+			content := readFile(t, migrateResume)
+			assertContains(t, content, "My Resume", "migrated resume content")
+		}
+
+		migrateIter := filepath.Join(vaultPath, "Projects", "migrate-test", "iterations.md")
+		if !fileExists(migrateIter) {
+			t.Error("vault iterations.md not created by context migrate")
+		} else {
+			content := readFile(t, migrateIter)
+			assertContains(t, content, "Iteration History", "migrated iterations content")
+		}
+
+		// Migrated task file in vault
+		migrateTask := filepath.Join(vaultPath, "Projects", "migrate-test", "tasks", "001-feature.md")
+		if !fileExists(migrateTask) {
+			t.Error("vault task not created by context migrate")
+		} else {
+			content := readFile(t, migrateTask)
+			assertContains(t, content, "Feature task", "migrated task content")
+		}
+
+		// Local originals preserved
+		if !fileExists(filepath.Join(migrateDir, "RESUME.md")) {
+			t.Error("local RESUME.md deleted by migrate")
+		}
+		if !fileExists(filepath.Join(migrateDir, "HISTORY.md")) {
+			t.Error("local HISTORY.md deleted by migrate")
+		}
+
+		// Repo-side files updated by migrate
+		migrateClaudeContent := readFile(t, filepath.Join(migrateDir, "CLAUDE.md"))
+		assertContains(t, migrateClaudeContent, "resume.md", "migrated CLAUDE.md vault pointer")
+
+		// Help flags work
+		_, helpStderr, _ := runVV(t, env, "context", "--help")
+		assertContains(t, helpStderr, "context", "context help text")
+
+		_, initHelpStderr, _ := runVV(t, env, "context", "init", "--help")
+		assertContains(t, initHelpStderr, "init", "context init help text")
+
+		_, migrateHelpStderr, _ := runVV(t, env, "context", "migrate", "--help")
+		assertContains(t, migrateHelpStderr, "migrate", "context migrate help text")
 	})
 
 	// 11. reprocess

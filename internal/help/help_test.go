@@ -212,6 +212,18 @@ var expectedTerminal = map[string]string{
 		"  vv trends --weeks 24            Show last 24 weeks\n" +
 		"  vv trends --project myproject   Show trends for one project\n",
 
+	"context": "vv context \u2014 manage vault-resident AI context files\n" +
+		"\n" +
+		"Usage: vv context [init | migrate]\n" +
+		"\n" +
+		"Manages AI workflow context files (resume, iterations, tasks) that live\n" +
+		"in the Obsidian vault rather than as untracked repo-local files. This\n" +
+		"makes context portable, searchable, and visible to Obsidian.\n" +
+		"\n" +
+		"Subcommands:\n" +
+		"  vv context init      Scaffold vault-resident context for current project\n" +
+		"  vv context migrate   Copy existing local files to vault\n",
+
 	"version": "vv version \u2014 print version\n" +
 		"\n" +
 		"Usage: vv version\n",
@@ -239,6 +251,7 @@ func TestFormatUsage(t *testing.T) {
 		"Usage:\n" +
 		"  vv init [path] [--git]       Create a new vault (default: ./vibe-vault)\n" +
 		"  vv hook [install | ...]      Hook mode (reads stdin from Claude Code)\n" +
+		"  vv context [init | ...]      Manage vault-resident AI context\n" +
 		"  vv process <file.jsonl>      Process a single transcript file\n" +
 		"  vv index                     Rebuild session index from notes\n" +
 		"  vv backfill [path]           Discover and process historical transcripts\n" +
@@ -265,7 +278,7 @@ func TestFormatUsage(t *testing.T) {
 
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
-		"init", "hook", "process", "index",
+		"init", "hook", "context", "process", "index",
 		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
@@ -331,6 +344,7 @@ func TestFormatRoffStructure(t *testing.T) {
 	fixedDate := "2026-02-27"
 
 	allCmds := append(Subcommands, HookSubcommands...)
+	allCmds = append(allCmds, ContextSubcommands...)
 	// Test each subcommand has required sections
 	for _, cmd := range allCmds {
 		t.Run(cmd.Name, func(t *testing.T) {
@@ -410,6 +424,27 @@ func quote(s string) string {
 
 func TestFormatTerminal_HookSubcommands(t *testing.T) {
 	for _, cmd := range HookSubcommands {
+		t.Run(cmd.Name, func(t *testing.T) {
+			out := FormatTerminal(cmd)
+			// Verify header format
+			prefix := fmt.Sprintf("vv %s \u2014 %s\n", cmd.Name, cmd.Synopsis)
+			if !strings.HasPrefix(out, prefix) {
+				t.Errorf("FormatTerminal(%q) header mismatch.\nwant prefix: %q\ngot:         %q", cmd.Name, prefix, out[:min(len(out), len(prefix)+20)])
+			}
+			// Verify usage line present
+			if !strings.Contains(out, "Usage: "+cmd.Usage) {
+				t.Errorf("FormatTerminal(%q) missing usage line", cmd.Name)
+			}
+			// Verify description present
+			if cmd.Description != "" && !strings.Contains(out, cmd.Description) {
+				t.Errorf("FormatTerminal(%q) missing description", cmd.Name)
+			}
+		})
+	}
+}
+
+func TestFormatTerminal_ContextSubcommands(t *testing.T) {
+	for _, cmd := range ContextSubcommands {
 		t.Run(cmd.Name, func(t *testing.T) {
 			out := FormatTerminal(cmd)
 			// Verify header format
