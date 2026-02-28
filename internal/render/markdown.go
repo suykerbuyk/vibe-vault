@@ -46,6 +46,7 @@ type NoteData struct {
 	WorkPerformed   string             // Rendered markdown for Work Performed section
 	ProseDialogue   string             // Rendered prose section (empty = use summary fallback)
 	FrictionScore   int                // Composite friction score 0-100
+	Corrections     int                // Count of detected user corrections
 	FrictionSignals []string           // Human-readable friction signal descriptions
 }
 
@@ -94,6 +95,9 @@ func SessionNote(d NoteData) string {
 	}
 	if d.FrictionScore > 0 {
 		b.WriteString(fmt.Sprintf("friction_score: %d\n", d.FrictionScore))
+	}
+	if d.Corrections > 0 {
+		b.WriteString(fmt.Sprintf("corrections: %d\n", d.Corrections))
 	}
 	if d.Tag != "" {
 		b.WriteString(fmt.Sprintf("tags: [cortana-session, %s]\n", d.Tag))

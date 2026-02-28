@@ -132,7 +132,11 @@ duration_minutes: 45
 messages: 24
 tokens_in: 52000
 tokens_out: 18000
+tool_uses: 85
+tools: [Bash, Edit, Glob, Grep, Read, Write]
 status: completed
+friction_score: 28
+corrections: 2
 tags: [cortana-session]
 summary: "One-line description"
 previous: "[[YYYY-MM-DD-NN]]"
@@ -175,7 +179,7 @@ Only use these tags to keep the vault searchable and consistent:
 | `Knowledge/learnings/` | Lessons learned from successes and failures |
 | `Projects/` | Project-specific index notes |
 | `Templates/` | Templater templates for new notes |
-| `Dashboards/` | Dataview-powered overview pages |
+| `Dashboards/` | Dataview-powered overview pages (sessions, decisions, action-items, weekly-digest, by-project, analytics) |
 | `_archive/` | Completed or superseded notes |
 
 ### State Files (gitignored)

@@ -16,7 +16,9 @@ TABLE
   length(rows) AS "Sessions",
   min(rows.date) AS "First",
   max(rows.date) AS "Last",
-  rows.domain[0] AS "Domain"
+  rows.domain[0] AS "Domain",
+  sum(rows.tokens_in) AS "Tokens In",
+  round(sum(rows.friction_score) / length(rows)) AS "Avg Friction"
 FROM "Projects"
 WHERE type = "session" AND project != null AND project != ""
 GROUP BY project

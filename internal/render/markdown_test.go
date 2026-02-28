@@ -408,6 +408,7 @@ func TestSessionNote_FrictionSignals(t *testing.T) {
 	d := NoteData{
 		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",
 		FrictionScore: 42,
+		Corrections:   3,
 		FrictionSignals: []string{
 			"3 corrections in 10 user turns (30% density)",
 			"45K tokens/file changed",
@@ -417,6 +418,9 @@ func TestSessionNote_FrictionSignals(t *testing.T) {
 
 	if !strings.Contains(out, "friction_score: 42") {
 		t.Error("missing friction_score in frontmatter")
+	}
+	if !strings.Contains(out, "corrections: 3") {
+		t.Error("missing corrections in frontmatter")
 	}
 	if !strings.Contains(out, "## Friction Signals") {
 		t.Error("missing ## Friction Signals section")

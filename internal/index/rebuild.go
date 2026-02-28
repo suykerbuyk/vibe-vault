@@ -133,6 +133,9 @@ func Rebuild(projectsDir, stateDir string) (*Index, int, error) {
 		if fs, ok := note.Frontmatter["friction_score"]; ok {
 			entry.FrictionScore, _ = strconv.Atoi(fs)
 		}
+		if corr, ok := note.Frontmatter["corrections"]; ok {
+			entry.Corrections, _ = strconv.Atoi(corr)
+		}
 
 		// Parse status: checkpoint flag
 		if status, ok := note.Frontmatter["status"]; ok && status == "checkpoint" {

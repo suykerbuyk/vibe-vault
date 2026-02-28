@@ -15,3 +15,4 @@ Install the [Dataview](https://github.com/blacksmithgu/obsidian-dataview) commun
 | `action-items.md` | Open action items from sessions |
 | `weekly-digest.md` | Week-by-week summary of activity |
 | `by-project.md` | Sessions and knowledge grouped by project |
+| `analytics.md` | Token usage, friction trends, tool usage, and project analytics |

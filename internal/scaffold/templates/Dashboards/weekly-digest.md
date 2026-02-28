@@ -30,7 +30,9 @@ TABLE
   length(rows) AS "Sessions",
   length(filter(rows, (r) => r.domain = "work")) AS "Work",
   length(filter(rows, (r) => r.domain = "personal")) AS "Personal",
-  length(filter(rows, (r) => r.domain = "opensource")) AS "OSS"
+  length(filter(rows, (r) => r.domain = "opensource")) AS "OSS",
+  sum(rows.tokens_in) AS "Tokens In",
+  sum(rows.tokens_out) AS "Tokens Out"
 FROM "Projects"
 WHERE type = "session"
 GROUP BY dateformat(date, "yyyy-'W'WW") AS "Week"

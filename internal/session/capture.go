@@ -168,6 +168,7 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	}
 	if frictionResult != nil {
 		noteData.FrictionScore = frictionResult.Score
+		noteData.Corrections = frictionResult.Signals.Corrections
 		noteData.FrictionSignals = frictionResult.Summary
 	}
 
