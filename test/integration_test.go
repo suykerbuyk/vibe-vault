@@ -237,6 +237,27 @@ func TestIntegration(t *testing.T) {
 
 		// stdout
 		assertContains(t, stdout, "Done", "init stdout")
+		assertContains(t, stdout, "Config written to", "init config created message")
+
+		// Re-init with a different path updates config
+		t.Run("reinit_updates_vault_path", func(t *testing.T) {
+			altVault := t.TempDir()
+
+			reStdout := mustRunVV(t, env, "init", altVault)
+			assertContains(t, reStdout, "Config updated", "reinit stdout")
+
+			cfgContent2 := readFile(t, cfgPath)
+			assertContains(t, cfgContent2, altVault, "config points to new vault")
+			assertNotContains(t, cfgContent2, vaultPath, "config no longer points to old vault")
+
+			// Restore config to point back to the original vaultPath.
+			// Can't use `vv init` because scaffold correctly refuses to
+			// re-scaffold an existing vault directory — update config directly.
+			restored := strings.Replace(cfgContent2, altVault, vaultPath, 1)
+			if err := os.WriteFile(cfgPath, []byte(restored), 0o644); err != nil {
+				t.Fatalf("restore config: %v", err)
+			}
+		})
 	})
 
 	// 2. process session A1

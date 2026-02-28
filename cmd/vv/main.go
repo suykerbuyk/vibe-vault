@@ -97,7 +97,7 @@ func runInit() {
 		fatal("init: %v", err)
 	}
 
-	cfgPath, err := config.WriteDefault(absTarget)
+	cfgPath, action, err := config.WriteDefault(absTarget)
 	if err != nil {
 		fatal("write config: %v", err)
 	}
@@ -106,7 +106,15 @@ func runInit() {
 	fmt.Printf("  1. Open %s in Obsidian\n", absTarget)
 	fmt.Println("  2. Install community plugins: Dataview, Templater")
 	fmt.Println("  3. Run: vv hook install")
-	fmt.Printf("\nConfig written to %s\n", cfgPath)
+
+	switch action {
+	case "created":
+		fmt.Printf("\nConfig written to %s\n", cfgPath)
+	case "updated":
+		fmt.Printf("\nConfig updated: vault_path → %s (%s)\n", config.CompressHome(absTarget), cfgPath)
+	case "unchanged":
+		fmt.Printf("\nConfig already set to this vault (%s)\n", cfgPath)
+	}
 }
 
 func runHook() {
