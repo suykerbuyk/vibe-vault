@@ -405,3 +405,143 @@ func TestFirstLine(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestParseCommitResult(t *testing.T) {
+	tests := []struct {
+		name    string
+		output  string
+		wantSHA string
+		wantMsg string
+	}{
+		{
+			name:    "normal",
+			output:  "[feat/auth abc1234] feat: add JWT authentication\n 1 file changed",
+			wantSHA: "abc1234",
+			wantMsg: "feat: add JWT authentication",
+		},
+		{
+			name:    "multi-line",
+			output:  "[main def5678a] fix: handle nil pointer\n 2 files changed, 10 insertions(+)",
+			wantSHA: "def5678a",
+			wantMsg: "fix: handle nil pointer",
+		},
+		{
+			name:    "empty",
+			output:  "",
+			wantSHA: "",
+			wantMsg: "",
+		},
+		{
+			name:    "no bracket",
+			output:  "nothing to commit, working tree clean",
+			wantSHA: "",
+			wantMsg: "",
+		},
+		{
+			name:    "short SHA",
+			output:  "[main abc] short sha",
+			wantSHA: "",
+			wantMsg: "",
+		},
+		{
+			name:    "non-hex",
+			output:  "[main zzzzzzz] bad sha",
+			wantSHA: "",
+			wantMsg: "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sha, msg := parseCommitResult(tc.output)
+			if sha != tc.wantSHA {
+				t.Errorf("sha: got %q, want %q", sha, tc.wantSHA)
+			}
+			if msg != tc.wantMsg {
+				t.Errorf("msg: got %q, want %q", msg, tc.wantMsg)
+			}
+		})
+	}
+}
+
+func TestExtractCommits(t *testing.T) {
+	entries := []transcript.Entry{
+		makeEntry("assistant", "Committing.", transcript.ContentBlock{
+			Type:  "tool_use",
+			ID:    "c1",
+			Name:  "Bash",
+			Input: map[string]interface{}{"command": `git commit -m "feat: add auth"`},
+		}),
+		makeToolResult("c1", false, "[feat/auth abc1234] feat: add auth\n 1 file changed"),
+	}
+	commits := ExtractCommits(entries)
+	if len(commits) != 1 {
+		t.Fatalf("got %d commits, want 1", len(commits))
+	}
+	if commits[0].SHA != "abc1234" {
+		t.Errorf("SHA = %q, want abc1234", commits[0].SHA)
+	}
+	if commits[0].Message != "feat: add auth" {
+		t.Errorf("Message = %q, want %q", commits[0].Message, "feat: add auth")
+	}
+}
+
+func TestExtractCommits_FailedCommit(t *testing.T) {
+	entries := []transcript.Entry{
+		makeEntry("assistant", "Committing.", transcript.ContentBlock{
+			Type:  "tool_use",
+			ID:    "c1",
+			Name:  "Bash",
+			Input: map[string]interface{}{"command": `git commit -m "feat: add auth"`},
+		}),
+		makeToolResult("c1", true, "error: nothing to commit"),
+	}
+	commits := ExtractCommits(entries)
+	if len(commits) != 0 {
+		t.Errorf("got %d commits, want 0 for failed commit", len(commits))
+	}
+}
+
+func TestExtractCommits_NoCommits(t *testing.T) {
+	entries := []transcript.Entry{
+		makeEntry("assistant", "Reading file.", transcript.ContentBlock{
+			Type:  "tool_use",
+			ID:    "r1",
+			Name:  "Read",
+			Input: map[string]interface{}{"file_path": "/tmp/foo.go"},
+		}),
+		makeToolResult("r1", false, "file contents"),
+	}
+	commits := ExtractCommits(entries)
+	if len(commits) != 0 {
+		t.Errorf("got %d commits, want 0", len(commits))
+	}
+}
+
+func TestExtractCommits_Multiple(t *testing.T) {
+	entries := []transcript.Entry{
+		makeEntry("assistant", "First commit.", transcript.ContentBlock{
+			Type:  "tool_use",
+			ID:    "c1",
+			Name:  "Bash",
+			Input: map[string]interface{}{"command": `git commit -m "feat: add auth"`},
+		}),
+		makeToolResult("c1", false, "[feat/auth abc1234] feat: add auth\n 1 file changed"),
+		makeEntry("assistant", "Second commit.", transcript.ContentBlock{
+			Type:  "tool_use",
+			ID:    "c2",
+			Name:  "Bash",
+			Input: map[string]interface{}{"command": `git commit -m "fix: handle nil"`},
+		}),
+		makeToolResult("c2", false, "[feat/auth def5678] fix: handle nil\n 1 file changed"),
+	}
+	commits := ExtractCommits(entries)
+	if len(commits) != 2 {
+		t.Fatalf("got %d commits, want 2", len(commits))
+	}
+	if commits[0].SHA != "abc1234" {
+		t.Errorf("first SHA = %q", commits[0].SHA)
+	}
+	if commits[1].SHA != "def5678" {
+		t.Errorf("second SHA = %q", commits[1].SHA)
+	}
+}

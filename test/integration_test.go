@@ -413,10 +413,23 @@ func TestIntegration(t *testing.T) {
 		// Narrative summary has file info
 		assertContains(t, note, "Created", "summary mentions creation")
 
+		// Commits section
+		assertContains(t, note, "## Commits", "commits section")
+		assertContains(t, note, "- `abc1234`", "commit SHA in body")
+		assertContains(t, note, "commits: [abc1234]", "commits frontmatter")
+
 		// Index entry
 		idx := readIndex(t, stateDir)
-		if _, ok := idx["session-narr-001"]; !ok {
+		narrEntry, ok := idx["session-narr-001"]
+		if !ok {
 			t.Error("session-narr-001 not in index")
+		}
+		if commits, ok := narrEntry["commits"].([]interface{}); ok {
+			if len(commits) != 1 || commits[0] != "abc1234" {
+				t.Errorf("index commits = %v, want [abc1234]", commits)
+			}
+		} else {
+			t.Error("index entry missing commits field")
 		}
 	})
 
@@ -433,6 +446,18 @@ func TestIntegration(t *testing.T) {
 		for _, sid := range []string{"session-aaa-001", "session-aaa-002", "session-bbb-001", "session-narr-001"} {
 			if _, ok := idx[sid]; !ok {
 				t.Errorf("rebuilt index missing %s", sid)
+			}
+		}
+
+		// Commits survive rebuild
+		narrEntry, ok := idx["session-narr-001"]
+		if ok {
+			if commits, ok := narrEntry["commits"].([]interface{}); ok {
+				if len(commits) != 1 || commits[0] != "abc1234" {
+					t.Errorf("rebuilt index commits = %v, want [abc1234]", commits)
+				}
+			} else {
+				t.Error("rebuilt index missing commits for session-narr-001")
 			}
 		}
 

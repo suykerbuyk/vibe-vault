@@ -29,6 +29,7 @@ type Note struct {
 	Decisions    []string // from ## Key Decisions
 	OpenThreads  []string // from ## Open Threads
 	FilesChanged []string // from ## What Changed
+	Commits      []string // from ## Commits
 }
 
 // ParseFile reads and parses a session note from disk.
@@ -119,6 +120,7 @@ func Parse(r io.Reader) (*Note, error) {
 	note.Decisions = extractBulletSection(bodyLines, "## Key Decisions")
 	note.OpenThreads = extractCheckboxSection(bodyLines, "## Open Threads")
 	note.FilesChanged = extractCodeItems(bodyLines, "## What Changed")
+	note.Commits = extractCodeItems(bodyLines, "## Commits")
 
 	return note, nil
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johns/vibe-vault/internal/narrative"
 	"github.com/johns/vibe-vault/internal/transcript"
 )
 
@@ -41,8 +42,9 @@ type NoteData struct {
 	ToolCounts    map[string]int
 	TotalTools    int
 	Status        string // "completed" or "checkpoint"
-	WorkPerformed string // Rendered markdown for Work Performed section
-	ProseDialogue string // Rendered prose section (empty = use summary fallback)
+	Commits       []narrative.Commit // Git commits extracted from tool output
+	WorkPerformed string             // Rendered markdown for Work Performed section
+	ProseDialogue string             // Rendered prose section (empty = use summary fallback)
 }
 
 // SessionNote renders a full Obsidian markdown note from NoteData.
@@ -81,6 +83,13 @@ func SessionNote(d NoteData) string {
 		status = "completed"
 	}
 	b.WriteString(fmt.Sprintf("status: %s\n", status))
+	if len(d.Commits) > 0 {
+		var shas []string
+		for _, c := range d.Commits {
+			shas = append(shas, c.SHA)
+		}
+		b.WriteString(fmt.Sprintf("commits: [%s]\n", strings.Join(shas, ", ")))
+	}
 	if d.Tag != "" {
 		b.WriteString(fmt.Sprintf("tags: [cortana-session, %s]\n", d.Tag))
 	} else {
@@ -120,6 +129,15 @@ func SessionNote(d NoteData) string {
 		b.WriteString("## What Changed\n\n")
 		for _, f := range d.FilesChanged {
 			b.WriteString(fmt.Sprintf("- `%s`\n", f))
+		}
+		b.WriteString("\n")
+	}
+
+	// Commits
+	if len(d.Commits) > 0 {
+		b.WriteString("## Commits\n\n")
+		for _, c := range d.Commits {
+			b.WriteString(fmt.Sprintf("- `%s` %s\n", c.SHA, c.Message))
 		}
 		b.WriteString("\n")
 	}

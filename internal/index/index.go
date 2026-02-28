@@ -26,6 +26,7 @@ type SessionEntry struct {
 	OpenThreads []string `json:"open_threads,omitempty"`
 	Tag         string   `json:"tag,omitempty"`
 	FilesChanged []string `json:"files_changed,omitempty"`
+	Commits        []string       `json:"commits,omitempty"`
 	Branch         string         `json:"branch,omitempty"`
 	TranscriptPath string         `json:"transcript_path,omitempty"`
 	Checkpoint     bool           `json:"checkpoint,omitempty"`

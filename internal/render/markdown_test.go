@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johns/vibe-vault/internal/narrative"
 	"github.com/johns/vibe-vault/internal/transcript"
 )
 
@@ -105,7 +106,7 @@ func TestSessionNote_MinimalFields(t *testing.T) {
 	}
 
 	// Optional sections should be absent
-	for _, absent := range []string{"## What Changed", "## Key Decisions", "## Open Threads", "## Related Sessions", "branch:", "model:", "previous:"} {
+	for _, absent := range []string{"## What Changed", "## Commits", "## Key Decisions", "## Open Threads", "## Related Sessions", "branch:", "model:", "previous:", "commits:"} {
 		if strings.Contains(out, absent) {
 			t.Errorf("unexpected %q in minimal output", absent)
 		}
@@ -359,6 +360,47 @@ func TestSessionNote_ProseDialogueFallback(t *testing.T) {
 	}
 	if !strings.Contains(out, "Quick session") {
 		t.Error("missing summary text")
+	}
+}
+
+func TestSessionNote_Commits(t *testing.T) {
+	d := NoteData{
+		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",
+		Commits: []narrative.Commit{
+			{SHA: "abc1234", Message: "feat: add auth"},
+			{SHA: "def5678", Message: "fix: handle nil"},
+		},
+	}
+	out := SessionNote(d)
+
+	// Frontmatter
+	if !strings.Contains(out, "commits: [abc1234, def5678]") {
+		t.Errorf("missing commits frontmatter, got: %s", extractLine(out, "commits:"))
+	}
+
+	// Body section
+	if !strings.Contains(out, "## Commits") {
+		t.Error("missing ## Commits section")
+	}
+	if !strings.Contains(out, "- `abc1234` feat: add auth") {
+		t.Error("missing first commit line")
+	}
+	if !strings.Contains(out, "- `def5678` fix: handle nil") {
+		t.Error("missing second commit line")
+	}
+}
+
+func TestSessionNote_NoCommits(t *testing.T) {
+	d := NoteData{
+		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",
+	}
+	out := SessionNote(d)
+
+	if strings.Contains(out, "## Commits") {
+		t.Error("should not have ## Commits section when no commits")
+	}
+	if strings.Contains(out, "commits:") {
+		t.Error("should not have commits in frontmatter when no commits")
 	}
 }
 

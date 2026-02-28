@@ -19,6 +19,7 @@ messages: 12
 tokens_in: 5000
 tokens_out: 3000
 status: completed
+commits: [abc1234, def5678]
 tags: [cortana-session, implementation]
 summary: "Added index rebuild command"
 previous: "[[2026-02-24-01]]"
@@ -35,6 +36,11 @@ Added index rebuild command for reprocessing session notes.
 - ` + "`internal/index/rebuild.go`" + `
 - ` + "`cmd/vv/main.go`" + `
 - ` + "`internal/index/index.go`" + `
+
+## Commits
+
+- ` + "`abc1234`" + ` feat: add index rebuild
+- ` + "`def5678`" + ` fix: handle edge case
 
 ## Key Decisions
 
@@ -141,6 +147,23 @@ func TestExtractFilesChanged(t *testing.T) {
 	}
 	if note.FilesChanged[0] != "internal/index/rebuild.go" {
 		t.Errorf("FilesChanged[0] = %q", note.FilesChanged[0])
+	}
+}
+
+func TestExtractCommits(t *testing.T) {
+	note, err := Parse(strings.NewReader(sampleNote))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if len(note.Commits) != 2 {
+		t.Fatalf("Commits len = %d, want 2", len(note.Commits))
+	}
+	if note.Commits[0] != "abc1234" {
+		t.Errorf("Commits[0] = %q, want %q", note.Commits[0], "abc1234")
+	}
+	if note.Commits[1] != "def5678" {
+		t.Errorf("Commits[1] = %q, want %q", note.Commits[1], "def5678")
 	}
 }
 

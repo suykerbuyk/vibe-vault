@@ -248,6 +248,41 @@ func TestIndexTokensRoundTrip(t *testing.T) {
 	}
 }
 
+func TestIndexCommitsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	idx, _ := Load(dir)
+
+	entry := SessionEntry{
+		SessionID: "sess-commits",
+		NotePath:  "Sessions/proj/2026-02-28-01.md",
+		Project:   "proj",
+		Date:      "2026-02-28",
+		Iteration: 1,
+		Commits:   []string{"abc1234", "def5678"},
+	}
+
+	idx.Add(entry)
+	if err := idx.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	idx2, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	e := idx2.Entries["sess-commits"]
+	if len(e.Commits) != 2 {
+		t.Fatalf("Commits len = %d, want 2", len(e.Commits))
+	}
+	if e.Commits[0] != "abc1234" {
+		t.Errorf("Commits[0] = %q, want abc1234", e.Commits[0])
+	}
+	if e.Commits[1] != "def5678" {
+		t.Errorf("Commits[1] = %q, want def5678", e.Commits[1])
+	}
+}
+
 // --- Rebuild tests ---
 
 func writeNote(t *testing.T, dir, project, filename, content string) {

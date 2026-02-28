@@ -143,6 +143,12 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		noteData.ProseDialogue = prose.Render(dialogue)
 	}
 
+	// Git commit extraction
+	commits := narrative.ExtractCommits(t.Entries)
+	if len(commits) > 0 {
+		noteData.Commits = commits
+	}
+
 	// Mark checkpoint status
 	if opts.Checkpoint {
 		noteData.Status = "checkpoint"
@@ -262,6 +268,7 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		OpenThreads:    noteData.OpenThreads,
 		Tag:            noteData.Tag,
 		FilesChanged:   noteData.FilesChanged,
+		Commits:        commitSHAs(commits),
 		Branch:         info.Branch,
 		TranscriptPath: transcriptPath,
 		Checkpoint:     opts.Checkpoint,
@@ -324,6 +331,17 @@ func sharedFiles(a, b []string) int {
 		}
 	}
 	return count
+}
+
+func commitSHAs(commits []narrative.Commit) []string {
+	if len(commits) == 0 {
+		return nil
+	}
+	shas := make([]string, len(commits))
+	for i, c := range commits {
+		shas[i] = c.SHA
+	}
+	return shas
 }
 
 func filenameNoExt(path string) string {

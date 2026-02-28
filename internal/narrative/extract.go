@@ -570,6 +570,78 @@ func IsNoiseMessage(text string) bool {
 	return false
 }
 
+// ExtractCommits scans all transcript entries for successful git commit tool
+// calls and extracts the SHA and message from the tool result output.
+func ExtractCommits(entries []transcript.Entry) []Commit {
+	resultMap := BuildToolResultMap(entries)
+	var commits []Commit
+
+	for _, e := range entries {
+		if e.Message == nil || e.Message.Role != "assistant" {
+			continue
+		}
+
+		toolUses := transcript.ToolUses(e.Message)
+		for _, tu := range toolUses {
+			if tu.Name != "Bash" {
+				continue
+			}
+			cmd := inputStr(tu.Input, "command")
+			if !strings.Contains(strings.ToLower(cmd), "git commit") {
+				continue
+			}
+			result := resultMap[tu.ID]
+			if result == nil || result.IsError {
+				continue
+			}
+			sha, msg := parseCommitResult(result.Content)
+			if sha != "" {
+				commits = append(commits, Commit{SHA: sha, Message: msg})
+			}
+		}
+	}
+
+	return commits
+}
+
+// parseCommitResult extracts SHA and message from git commit output.
+// Expected format: "[branch sha] message"
+func parseCommitResult(output string) (sha, msg string) {
+	line := firstLine(output)
+	// Find bracketed section
+	open := strings.IndexByte(line, '[')
+	close := strings.IndexByte(line, ']')
+	if open < 0 || close < 0 || close <= open {
+		return "", ""
+	}
+
+	bracket := line[open+1 : close]
+	// SHA is the last space-delimited word inside brackets
+	parts := strings.Fields(bracket)
+	if len(parts) < 2 {
+		return "", ""
+	}
+	candidate := parts[len(parts)-1]
+
+	// Validate: >= 7 chars, all hex
+	if len(candidate) < 7 {
+		return "", ""
+	}
+	for _, c := range candidate {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return "", ""
+		}
+	}
+
+	// Message is everything after "] "
+	msg = ""
+	if close+2 < len(line) {
+		msg = strings.TrimSpace(line[close+1:])
+	}
+
+	return candidate, msg
+}
+
 // --- Helpers ---
 
 func inputStr(input interface{}, key string) string {

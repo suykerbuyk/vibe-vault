@@ -41,6 +41,12 @@ type Segment struct {
 	TokensBefore int    // preTokens from compact_boundary (0 for first)
 }
 
+// Commit represents a git commit extracted from tool output.
+type Commit struct {
+	SHA     string // Short SHA from git output (7+ chars)
+	Message string // Commit message
+}
+
 // Narrative holds the full extracted narrative for a session.
 type Narrative struct {
 	Segments      []Segment
