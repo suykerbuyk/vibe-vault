@@ -259,6 +259,9 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		Checkpoint:     opts.Checkpoint,
 		ToolCounts:     t.Stats.ToolCounts,
 		ToolUses:       t.Stats.ToolUses,
+		TokensIn:       noteData.InputTokens,
+		TokensOut:      noteData.OutputTokens,
+		Messages:       noteData.Messages,
 	})
 
 	if err := idx.Save(); err != nil {

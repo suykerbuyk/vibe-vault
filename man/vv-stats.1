@@ -1,0 +1,26 @@
+.TH VV-STATS 1 "2026-02-27" "vv v0.3.0-4-gd762973-dirty" "Vibe-Vault Manual"
+.SH NAME
+vv-stats \- show session analytics and metrics
+.SH SYNOPSIS
+.B vv stats [\-\-project <name>]
+.SH DESCRIPTION
+Computes aggregate metrics from the session index and displays them
+in aligned terminal output. Shows overview totals, per\-project and
+per\-model breakdowns, activity tag distribution, monthly trends,
+and top files.
+.PP
+All data is read from the session index — no note re\-parsing needed.
+Run vv index first if token data appears incomplete (backfills token
+counts from note frontmatter).
+.SH OPTIONS
+.TP
+.B \-\-project <name>
+Show stats for a specific project only
+.SH EXAMPLES
+.nf
+vv stats                       Show global stats
+vv stats \-\-project myproject   Show stats for one project
+.fi
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-index (1)

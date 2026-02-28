@@ -211,6 +211,43 @@ func TestIndexToolCountsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestIndexTokensRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	idx, _ := Load(dir)
+
+	entry := SessionEntry{
+		SessionID: "sess-tokens",
+		NotePath:  "Sessions/proj/2026-02-27-01.md",
+		Project:   "proj",
+		Date:      "2026-02-27",
+		Iteration: 1,
+		TokensIn:  12345,
+		TokensOut: 6789,
+		Messages:  42,
+	}
+
+	idx.Add(entry)
+	if err := idx.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	idx2, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	e := idx2.Entries["sess-tokens"]
+	if e.TokensIn != 12345 {
+		t.Errorf("TokensIn = %d, want 12345", e.TokensIn)
+	}
+	if e.TokensOut != 6789 {
+		t.Errorf("TokensOut = %d, want 6789", e.TokensOut)
+	}
+	if e.Messages != 42 {
+		t.Errorf("Messages = %d, want 42", e.Messages)
+	}
+}
+
 // --- Rebuild tests ---
 
 func writeNote(t *testing.T, dir, project, filename, content string) {
@@ -235,6 +272,9 @@ branch: feature/rebuild
 tags: [cortana-session, implementation]
 summary: "Built rebuild command"
 duration_minutes: 30
+tokens_in: 5000
+tokens_out: 2000
+messages: 15
 ---
 
 # Built rebuild command
@@ -291,6 +331,15 @@ func TestRebuild(t *testing.T) {
 	}
 	if len(e.FilesChanged) != 1 {
 		t.Errorf("FilesChanged len = %d, want 1", len(e.FilesChanged))
+	}
+	if e.TokensIn != 5000 {
+		t.Errorf("TokensIn = %d, want 5000", e.TokensIn)
+	}
+	if e.TokensOut != 2000 {
+		t.Errorf("TokensOut = %d, want 2000", e.TokensOut)
+	}
+	if e.Messages != 15 {
+		t.Errorf("Messages = %d, want 15", e.Messages)
 	}
 }
 

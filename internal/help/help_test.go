@@ -145,6 +145,26 @@ var expectedTerminal = map[string]string{
 		"  vv reprocess                       Reprocess all sessions\n" +
 		"  vv reprocess --project myproject   Reprocess one project only\n",
 
+	"stats": "vv stats \u2014 show session analytics and metrics\n" +
+		"\n" +
+		"Usage: vv stats [--project <name>]\n" +
+		"\n" +
+		"Flags:\n" +
+		"  --project <name>   Show stats for a specific project only\n" +
+		"\n" +
+		"Computes aggregate metrics from the session index and displays them\n" +
+		"in aligned terminal output. Shows overview totals, per-project and\n" +
+		"per-model breakdowns, activity tag distribution, monthly trends,\n" +
+		"and top files.\n" +
+		"\n" +
+		"All data is read from the session index \u2014 no note re-parsing needed.\n" +
+		"Run vv index first if token data appears incomplete (backfills token\n" +
+		"counts from note frontmatter).\n" +
+		"\n" +
+		"Examples:\n" +
+		"  vv stats                       Show global stats\n" +
+		"  vv stats --project myproject   Show stats for one project\n",
+
 	"version": "vv version \u2014 print version\n" +
 		"\n" +
 		"Usage: vv version\n",
@@ -178,6 +198,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv archive                   Compress transcripts into vault archive\n" +
 		"  vv reprocess [--project X]   Re-generate notes from transcripts\n" +
 		"  vv check                     Validate config, vault, and hook setup\n" +
+		"  vv stats [--project X]       Show session analytics and metrics\n" +
 		"  vv version                   Print version\n" +
 		"  vv help                      Show this help\n" +
 		"\n" +
@@ -196,7 +217,7 @@ func TestFormatUsage(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "process", "index",
-		"backfill", "archive", "reprocess", "check", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))

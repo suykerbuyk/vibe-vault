@@ -119,6 +119,17 @@ func Rebuild(sessionsDir, stateDir string) (*Index, int, error) {
 			entry.ToolUses, _ = strconv.Atoi(tu)
 		}
 
+		// Parse token/message counts from frontmatter
+		if ti, ok := note.Frontmatter["tokens_in"]; ok {
+			entry.TokensIn, _ = strconv.Atoi(ti)
+		}
+		if to, ok := note.Frontmatter["tokens_out"]; ok {
+			entry.TokensOut, _ = strconv.Atoi(to)
+		}
+		if msgs, ok := note.Frontmatter["messages"]; ok {
+			entry.Messages, _ = strconv.Atoi(msgs)
+		}
+
 		// Parse status: checkpoint flag
 		if status, ok := note.Frontmatter["status"]; ok && status == "checkpoint" {
 			entry.Checkpoint = true

@@ -219,6 +219,30 @@ Exit code 0 if all checks pass or warn, 1 if any check fails.`,
 	SeeAlso: []string{"vv(1)", "vv-init(1)"},
 }
 
+var CmdStats = Command{
+	Name:       "stats",
+	Synopsis:   "show session analytics and metrics",
+	Brief:      "Show session analytics and metrics",
+	Usage:      "vv stats [--project <name>]",
+	TableUsage: "vv stats [--project X]",
+	Flags: []Flag{
+		{Name: "--project <name>", Desc: "Show stats for a specific project only"},
+	},
+	Description: `Computes aggregate metrics from the session index and displays them
+in aligned terminal output. Shows overview totals, per-project and
+per-model breakdowns, activity tag distribution, monthly trends,
+and top files.
+
+All data is read from the session index — no note re-parsing needed.
+Run vv index first if token data appears incomplete (backfills token
+counts from note frontmatter).`,
+	Examples: []string{
+		"vv stats                       Show global stats",
+		"vv stats --project myproject   Show stats for one project",
+	},
+	SeeAlso: []string{"vv(1)", "vv-index(1)"},
+}
+
 var CmdVersion = Command{
 	Name:     "version",
 	Synopsis: "print version",
@@ -276,5 +300,6 @@ var Subcommands = []Command{
 	CmdArchive,
 	CmdReprocess,
 	CmdCheck,
+	CmdStats,
 	CmdVersion,
 }

@@ -31,6 +31,9 @@ type SessionEntry struct {
 	Checkpoint     bool           `json:"checkpoint,omitempty"`
 	ToolCounts     map[string]int `json:"tool_counts,omitempty"`
 	ToolUses       int            `json:"tool_uses,omitempty"`
+	TokensIn       int            `json:"tokens_in,omitempty"`
+	TokensOut      int            `json:"tokens_out,omitempty"`
+	Messages       int            `json:"messages,omitempty"`
 }
 
 // Index manages the session-index.json file.

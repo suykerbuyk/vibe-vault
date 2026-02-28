@@ -16,6 +16,7 @@ import (
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/scaffold"
 	"github.com/johns/vibe-vault/internal/session"
+	"github.com/johns/vibe-vault/internal/stats"
 )
 
 func main() {
@@ -48,6 +49,9 @@ func main() {
 
 	case "check":
 		runCheck()
+
+	case "stats":
+		runStats()
 
 	case "version":
 		if wantsHelp(os.Args[2:]) {
@@ -190,6 +194,24 @@ func runCheck() {
 	if report.HasFailures() {
 		os.Exit(1)
 	}
+}
+
+func runStats() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdStats))
+		return
+	}
+
+	cfg := mustLoadConfig()
+	project := flagValue(os.Args[2:], "--project")
+
+	idx, err := index.Load(cfg.StateDir())
+	if err != nil {
+		fatal("load index: %v", err)
+	}
+
+	summary := stats.Compute(idx.Entries, project)
+	fmt.Print(stats.Format(summary, project))
 }
 
 func runIndex() {

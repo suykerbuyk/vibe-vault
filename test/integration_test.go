@@ -444,7 +444,32 @@ func TestIntegration(t *testing.T) {
 		}
 	})
 
-	// 7. backfill
+	// 7b. stats
+	t.Run("stats", func(t *testing.T) {
+		stdout := mustRunVV(t, env, "stats")
+
+		// Should contain expected sections
+		assertContains(t, stdout, "Overview", "stats overview section")
+		assertContains(t, stdout, "sessions", "stats sessions label")
+		assertContains(t, stdout, "Averages", "stats averages section")
+		assertContains(t, stdout, "Models", "stats models section")
+		assertContains(t, stdout, "Monthly Trend", "stats monthly section")
+
+		// Non-zero values
+		assertContains(t, stdout, "4", "stats should show session count")
+		assertContains(t, stdout, "claude-opus-4-6", "stats should show model name")
+
+		// Project filter
+		projStdout := mustRunVV(t, env, "stats", "--project", "myproject")
+		assertContains(t, projStdout, "myproject", "project filter in header")
+		assertNotContains(t, projStdout, "\nProjects\n", "no Projects section when filtered")
+
+		// Help flag
+		_, helpStderr, _ := runVV(t, env, "stats", "--help")
+		assertContains(t, helpStderr, "stats", "stats help text")
+	})
+
+	// 8. backfill
 	t.Run("backfill", func(t *testing.T) {
 		// Set up backfill directory structure: basePath/project-x/{uuid}.jsonl
 		backfillDir := t.TempDir()
