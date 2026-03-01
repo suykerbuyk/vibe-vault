@@ -26,10 +26,11 @@ type Note struct {
 	Previous  string
 
 	// Body sections extracted from markdown
-	Decisions    []string // from ## Key Decisions
-	OpenThreads  []string // from ## Open Threads
-	FilesChanged []string // from ## What Changed
-	Commits      []string // from ## Commits
+	Decisions      []string // from ## Key Decisions
+	OpenThreads    []string // from ## Open Threads
+	FilesChanged   []string // from ## What Changed
+	Commits        []string // from ## Commits
+	KnowledgeNotes []string // from frontmatter knowledge_notes
 }
 
 // ParseFile reads and parses a session note from disk.
@@ -114,6 +115,11 @@ func Parse(r io.Reader) (*Note, error) {
 				break
 			}
 		}
+	}
+
+	// Parse knowledge_notes bracket list
+	if knRaw, ok := note.Frontmatter["knowledge_notes"]; ok {
+		note.KnowledgeNotes = parseBracketList(knRaw)
 	}
 
 	// Extract body sections

@@ -75,21 +75,22 @@ func Rebuild(projectsDir, stateDir string) (*Index, int, error) {
 		}
 
 		entry := SessionEntry{
-			SessionID:    note.SessionID,
-			NotePath:     relPath,
-			Project:      project,
-			Domain:       note.Domain,
-			Date:         note.Date,
-			Iteration:    iteration,
-			Title:        note.Frontmatter["type"],
-			Model:        note.Model,
-			Summary:      note.Summary,
-			Decisions:    note.Decisions,
-			OpenThreads:  note.OpenThreads,
-			Tag:          note.Tag,
-			FilesChanged: note.FilesChanged,
-			Branch:       note.Branch,
-			Commits:      note.Commits,
+			SessionID:      note.SessionID,
+			NotePath:       relPath,
+			Project:        project,
+			Domain:         note.Domain,
+			Date:           note.Date,
+			Iteration:      iteration,
+			Title:          note.Frontmatter["type"],
+			Model:          note.Model,
+			Summary:        note.Summary,
+			Decisions:      note.Decisions,
+			OpenThreads:    note.OpenThreads,
+			Tag:            note.Tag,
+			FilesChanged:   note.FilesChanged,
+			Branch:         note.Branch,
+			Commits:        note.Commits,
+			KnowledgeNotes: note.KnowledgeNotes,
 		}
 
 		// Extract title from frontmatter or first heading

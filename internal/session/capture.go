@@ -14,6 +14,7 @@ import (
 	"github.com/johns/vibe-vault/internal/enrichment"
 	"github.com/johns/vibe-vault/internal/friction"
 	"github.com/johns/vibe-vault/internal/index"
+	"github.com/johns/vibe-vault/internal/knowledge"
 	"github.com/johns/vibe-vault/internal/narrative"
 	"github.com/johns/vibe-vault/internal/prose"
 	"github.com/johns/vibe-vault/internal/render"
@@ -229,6 +230,59 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		}
 	}
 
+	// Knowledge extraction (separate LLM call, high-signal sessions only)
+	if !opts.SkipEnrichment && cfg.Enrichment.Enabled {
+		shouldExtract := (frictionResult != nil && frictionResult.Score >= 30) ||
+			len(noteData.Decisions) >= 2
+		if shouldExtract {
+			pairs := knowledge.PairCorrections(frictionResult, dialogue)
+
+			var kFilesChanged []string
+			for f := range t.Stats.FilesWritten {
+				kFilesChanged = append(kFilesChanged, f)
+			}
+			sort.Strings(kFilesChanged)
+
+			kInput := knowledge.ExtractInput{
+				UserText:      transcript.UserText(t),
+				AssistantText: transcript.AssistantText(t),
+				Corrections:   pairs,
+				Decisions:     noteData.Decisions,
+				FrictionScore: frictionScore(frictionResult),
+				Project:       info.Project,
+				FilesChanged:  kFilesChanged,
+			}
+
+			kTimeout := time.Duration(cfg.Enrichment.TimeoutSeconds) * time.Second
+			if kTimeout == 0 {
+				kTimeout = 10 * time.Second
+			}
+			kCtx, kCancel := context.WithTimeout(context.Background(), kTimeout)
+			defer kCancel()
+
+			sessionNoteName := filenameNoExt(render.NoteFilename(date, iteration))
+
+			notes, kErr := knowledge.Enrich(kCtx, cfg.Enrichment, kInput)
+			if kErr != nil {
+				log.Printf("warning: knowledge extraction failed: %v", kErr)
+			}
+			for _, note := range notes {
+				if note.Confidence < 0.7 {
+					continue
+				}
+				note.Date = date
+				note.Project = info.Project
+				note.SourceSession = sessionNoteName
+				kPath, wErr := knowledge.WriteNote(cfg.VaultPath, note)
+				if wErr != nil {
+					log.Printf("warning: write knowledge note: %v", wErr)
+					continue
+				}
+				noteData.KnowledgeNotes = append(noteData.KnowledgeNotes, kPath)
+			}
+		}
+	}
+
 	// Compute related sessions
 	relPath := render.NoteRelPath(info.Project, date, iteration)
 	candidateEntry := index.SessionEntry{
@@ -302,6 +356,7 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		Messages:       noteData.Messages,
 		Corrections:    frictionCorrections(frictionResult),
 		FrictionScore:  frictionScore(frictionResult),
+		KnowledgeNotes: noteData.KnowledgeNotes,
 	})
 
 	if err := idx.Save(); err != nil {
