@@ -144,6 +144,24 @@ capture infrastructure. It also writes a default config to
 
 ### Add Claude Code Hooks
 
+```bash
+vv hook install
+```
+
+This adds `SessionEnd` and `Stop` hook entries to `~/.claude/settings.json`,
+creating the file if it doesn't exist. A backup is saved to
+`settings.json.vv.bak` before any modification. The command is idempotent —
+running it again when hooks are already configured is a no-op.
+
+To remove the hooks later: `vv hook uninstall`
+
+The `SessionEnd` hook captures finalized session notes. The `Stop` hook captures
+mid-session checkpoints (provisional notes without LLM enrichment that get
+overwritten when the session ends).
+
+<details>
+<summary>Manual alternative</summary>
+
 Add this to `~/.claude/settings.json`:
 
 ```json
@@ -165,9 +183,7 @@ Add this to `~/.claude/settings.json`:
 }
 ```
 
-The `SessionEnd` hook captures finalized session notes. The `Stop` hook captures
-mid-session checkpoints (provisional notes without LLM enrichment that get
-overwritten when the session ends).
+</details>
 
 ### Verify Setup
 
@@ -255,7 +271,9 @@ deterministic heuristics rather than embeddings.
 | Command | Description |
 |---------|-------------|
 | `vv init [path] [--git]` | Create a new vault (default: `./vibe-vault`) |
-| `vv hook [--event <name>]` | Hook mode (reads stdin from Claude Code) |
+| `vv hook` | Hook mode (reads stdin from Claude Code) |
+| `vv hook install` | Register hooks in `~/.claude/settings.json` |
+| `vv hook uninstall` | Remove hooks from `~/.claude/settings.json` |
 | `vv process <file.jsonl>` | Process a single transcript file |
 | `vv index` | Rebuild session index from notes |
 | `vv backfill [path]` | Discover and process historical transcripts |
@@ -297,6 +315,13 @@ vv stats --project myproject   # stats for one project only
 ```bash
 vv friction                       # correction density, high-friction sessions
 vv friction --project myproject   # friction for one project only
+```
+
+**Track metric trends over time:**
+```bash
+vv trends                          # weekly metrics with anomaly detection
+vv trends --project myproject      # trends for one project only
+vv trends --weeks 8                # limit display to last 8 weeks
 ```
 
 **Set up vault-resident AI context for a project:**
@@ -446,7 +471,7 @@ written.
 
 ## Design Philosophy
 
-Five principles drawn from 16 iterations of development:
+Five principles drawn from 35 iterations of development:
 
 ### Transcript-first, no external state
 
@@ -531,9 +556,8 @@ built on data vv already captures.
 | 5 | Foundation — project namespacing, vault migration, man pages, stop hooks | Complete |
 | 6 | Session analytics — narrative extraction, prose dialogue, `vv stats`, semantic summaries | Complete |
 | 7 | Behavioral analysis — correction detection, friction scoring, `vv friction` | Complete |
-| 8 | Model comparison — model-vs-model stats, regression detection, trend analysis | Planned |
-| 9 | Provenance — git commit linkage, timeline export, signed notes | Partially complete |
-| 10 | Knowledge distillation — learning capture, knowledge notes, cross-project patterns | Planned |
+| 8 | Analytics & trends — dashboards, metric trends, `vv trends` | Complete |
+| 9 | Portable AI memory — vault-resident context, knowledge capture, cross-project patterns | Complete |
 
 ### Context as Code Connections
 
@@ -542,9 +566,9 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 | Knox's Principle | vibe-vault Implementation |
 |------------------|--------------------------|
 | **Observability** — log every context chunk, surface "missing context" signals | Tool usage tracking, friction detection, correction patterns, `vv stats`, `vv friction` |
-| **Testing** — statistical grading across runs, regression detection | Model comparison (Phase 8), trend analysis across sessions |
+| **Testing** — statistical grading across runs, regression detection | `vv trends` anomaly detection, weekly metric tracking, friction trend analysis |
 | **Version control** — context is versioned, auditable, diffable | Session notes are markdown in git, indexed and cross-linked |
-| **Reuse** — context registries, versioned modules | Per-project `history.md`, semantic summaries, knowledge notes (Phase 10) |
+| **Reuse** — context registries, versioned modules | Per-project `history.md`, semantic summaries, knowledge notes, `agentctx/` portable context |
 | **CI/CD** — automated context pipelines, auto-refresh | Backfill pipeline, reprocess on upgrade, index rebuild |
 
 ### What's Out of Scope
@@ -577,10 +601,11 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 ### Test Suite
 
-**330 tests** across 27 test files + **1 integration test** with 16
+**451 tests** across 33 test files + **1 integration test** with 19
 subtests. The integration test exercises the full pipeline:
 `init` → `process` → `index` → `knowledge injection` → `backfill` →
-`archive` → `reprocess` → `checkpoint lifecycle` → `stats` → `friction`.
+`archive` → `reprocess` → `checkpoint lifecycle` → `stats` → `friction` →
+`trends` → `context init/migrate`.
 
 ```bash
 make test          # unit tests only (~0.5s)
@@ -597,4 +622,4 @@ make check         # everything: vet + unit + integration
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Dual-licensed under [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) or [MIT](https://opensource.org/licenses/MIT), at your option. See [LICENSE](LICENSE) for details.

@@ -1,3 +1,6 @@
+// Copyright 2026 John Suykerbuyk <john@syketech.com>
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
 package friction
 
 // Correction represents a detected user correction in dialogue.

@@ -169,6 +169,18 @@ This walks all session notes, rebuilds `session-index.json`, and generates
 a `history.md` file for each project directory with a timeline, key
 decisions, open threads, and frequently-changed files.
 
+### Explore your data
+
+After backfilling, use the analytics commands to explore what you've captured:
+
+```bash
+vv stats                       # session counts, tokens, models, top projects
+vv friction                    # correction patterns and high-friction sessions
+vv trends                      # weekly metric trends with anomaly detection
+```
+
+All three accept `--project myproject` to filter to a single project.
+
 ## 5. Connect a Project
 
 vibe-vault detects projects automatically — there's no per-project
@@ -279,9 +291,10 @@ manually after verifying the migration.
 
 ## 7. Optional: Enable LLM Enrichment
 
-By default, notes contain extracted metadata and files changed but no
-narrative summary. To add LLM-generated summaries, decisions, and open
-threads:
+By default, notes contain extracted metadata, heuristic narrative summaries,
+dialogue excerpts, git commits, and friction signals — all derived from the
+transcript without any API calls. To add LLM-refined summaries, key decisions,
+and open threads:
 
 1. Edit `~/.config/vibe-vault/config.toml`:
 
@@ -328,6 +341,9 @@ vv reprocess --project myproject   # one project only
 | Backfill history | `vv backfill` |
 | Archive transcripts | `vv archive` |
 | Rebuild index | `vv index` |
+| Session analytics | `vv stats` |
+| Friction analysis | `vv friction` |
+| Metric trends | `vv trends` |
 | Reprocess notes | `vv reprocess` |
 | Init project context | `vv context init` |
 | Migrate local context | `vv context migrate` |
