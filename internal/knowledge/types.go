@@ -12,6 +12,7 @@ type Note struct {
 	Tags          []string
 	Confidence    float64  // 0.0-1.0 from LLM
 	Category      string   // e.g. "testing", "error-handling"
+	NotePath      string   // Relative vault path, populated by ReadNotes (not used by WriteNote)
 }
 
 // CorrectionPair links a user correction to what followed.

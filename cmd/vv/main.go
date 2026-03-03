@@ -17,6 +17,7 @@ import (
 	"github.com/johns/vibe-vault/internal/help"
 	"github.com/johns/vibe-vault/internal/hook"
 	"github.com/johns/vibe-vault/internal/index"
+	"github.com/johns/vibe-vault/internal/knowledge"
 	"github.com/johns/vibe-vault/internal/scaffold"
 	"github.com/johns/vibe-vault/internal/session"
 	"github.com/johns/vibe-vault/internal/stats"
@@ -357,10 +358,31 @@ func runIndex() {
 
 	fmt.Printf("indexed %d sessions\n", count)
 
+	// Read knowledge notes from vault
+	knowledgeNotes, err := knowledge.ReadNotes(cfg.VaultPath)
+	if err != nil {
+		log.Printf("warning: read knowledge notes: %v", err)
+	}
+
+	// Map knowledge.Note → index.KnowledgeSummary
+	var summaries []index.KnowledgeSummary
+	for _, n := range knowledgeNotes {
+		summaries = append(summaries, index.KnowledgeSummary{
+			Type:       n.Type,
+			Title:      n.Title,
+			Summary:    n.Summary,
+			Project:    n.Project,
+			Category:   n.Category,
+			Date:       n.Date,
+			Confidence: n.Confidence,
+			NotePath:   n.NotePath,
+		})
+	}
+
 	// Generate per-project context documents
 	projects := idx.Projects()
 	for _, project := range projects {
-		doc := idx.ProjectContext(project)
+		doc := idx.ProjectContext(project, summaries)
 		dir := filepath.Join(cfg.ProjectsDir(), project)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			log.Printf("warning: create dir for %s: %v", project, err)
@@ -372,6 +394,21 @@ func runIndex() {
 			continue
 		}
 		fmt.Printf("  context: %s\n", filepath.Join("Projects", project, "history.md"))
+	}
+
+	// Generate cross-project knowledge document
+	if len(summaries) > 0 {
+		crossDoc := index.CrossProjectKnowledge(summaries)
+		if crossDoc != "" {
+			crossPath := filepath.Join(cfg.VaultPath, "Knowledge", "_knowledge.md")
+			if err := os.MkdirAll(filepath.Dir(crossPath), 0o755); err != nil {
+				log.Printf("warning: create Knowledge dir: %v", err)
+			} else if err := os.WriteFile(crossPath, []byte(crossDoc), 0o644); err != nil {
+				log.Printf("warning: write cross-project knowledge: %v", err)
+			} else {
+				fmt.Println("  knowledge: Knowledge/_knowledge.md")
+			}
+		}
 	}
 }
 
@@ -619,7 +656,7 @@ func runReprocess() {
 	if len(affectedProjects) > 0 {
 		idx, _ = index.Load(cfg.StateDir())
 		for project := range affectedProjects {
-			doc := idx.ProjectContext(project)
+			doc := idx.ProjectContext(project, nil)
 			dir := filepath.Join(cfg.ProjectsDir(), project)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				log.Printf("warning: create dir for %s: %v", project, err)

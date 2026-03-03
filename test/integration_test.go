@@ -514,7 +514,114 @@ func TestIntegration(t *testing.T) {
 		}
 	})
 
-	// 7b. stats
+	// 7b. knowledge injection via vv index
+	t.Run("index_knowledge_injection", func(t *testing.T) {
+		// Write knowledge notes into the vault's Knowledge/ directories
+		knowledgeDir := filepath.Join(vaultPath, "Knowledge")
+
+		// Note 1: project-specific lesson for myproject, category error-handling
+		writeFixture(t, filepath.Join(knowledgeDir, "learnings"),
+			"2027-06-15-always-validate-input.md", `---
+type: lesson
+project: myproject
+category: error-handling
+summary: "Input validation prevents downstream errors"
+confidence: 0.9
+date: 2027-06-15
+status: active
+---
+
+# Always Validate Input
+
+Validate all user input at the boundary.
+`)
+
+		// Note 2: project-specific decision for other-project, SAME category (error-handling)
+		// This + Note 1 means error-handling spans 2 projects → cross-project
+		writeFixture(t, filepath.Join(knowledgeDir, "decisions"),
+			"2027-06-15-use-jwt-for-auth.md", `---
+type: decision
+project: other-project
+category: error-handling
+summary: "Use JWT tokens for API authentication"
+confidence: 0.85
+date: 2027-06-15
+status: active
+---
+
+# Use JWT for Auth
+
+JWT provides stateless authentication.
+`)
+
+		// Note 3: project-agnostic lesson, category workflow
+		writeFixture(t, filepath.Join(knowledgeDir, "learnings"),
+			"2027-06-15-universal-pattern.md", `---
+type: lesson
+project: ""
+category: workflow
+summary: "Always run tests before committing"
+confidence: 0.95
+date: 2027-06-15
+status: active
+---
+
+# Universal Pattern
+
+Run tests before every commit.
+`)
+
+		// Note 4: archived note (should be skipped entirely)
+		writeFixture(t, filepath.Join(knowledgeDir, "learnings"),
+			"2027-06-15-archived-note.md", `---
+type: lesson
+project: myproject
+category: error-handling
+summary: "This should not appear anywhere"
+confidence: 0.5
+date: 2027-06-15
+status: archived
+---
+
+# Archived Note
+
+This is archived and should be ignored.
+`)
+
+		// Run vv index — rebuilds index, reads knowledge, generates history.md + _knowledge.md
+		stdout := mustRunVV(t, env, "index")
+		assertContains(t, stdout, "indexed", "index stdout")
+
+		// --- Verify history.md for myproject ---
+		myprojectCtx := readFile(t, filepath.Join(vaultPath, "Projects", "myproject", "history.md"))
+		assertContains(t, myprojectCtx, "## Learned Patterns", "myproject learned patterns section")
+		assertContains(t, myprojectCtx, "[[2027-06-15-always-validate-input]]", "myproject has project-specific note")
+		assertContains(t, myprojectCtx, "[[2027-06-15-universal-pattern]]", "myproject has agnostic note")
+		assertNotContains(t, myprojectCtx, "[[2027-06-15-use-jwt-for-auth]]", "myproject should not have other-project note")
+		assertNotContains(t, myprojectCtx, "archived-note", "myproject should not have archived note")
+
+		// --- Verify history.md for other-project ---
+		otherCtx := readFile(t, filepath.Join(vaultPath, "Projects", "other-project", "history.md"))
+		assertContains(t, otherCtx, "## Learned Patterns", "other-project learned patterns section")
+		assertContains(t, otherCtx, "[[2027-06-15-use-jwt-for-auth]]", "other-project has project-specific note")
+		assertContains(t, otherCtx, "[[2027-06-15-universal-pattern]]", "other-project has agnostic note")
+		assertNotContains(t, otherCtx, "[[2027-06-15-always-validate-input]]", "other-project should not have myproject note")
+
+		// --- Verify Knowledge/_knowledge.md ---
+		crossPath := filepath.Join(vaultPath, "Knowledge", "_knowledge.md")
+		if !fileExists(crossPath) {
+			t.Fatal("Knowledge/_knowledge.md not created")
+		}
+		crossDoc := readFile(t, crossPath)
+		assertContains(t, crossDoc, "## error-handling", "cross-project error-handling category (spans 2 projects)")
+		assertContains(t, crossDoc, "## workflow", "cross-project workflow category (agnostic note)")
+		assertContains(t, crossDoc, "[[2027-06-15-always-validate-input]]", "cross-project has myproject note")
+		assertContains(t, crossDoc, "[[2027-06-15-use-jwt-for-auth]]", "cross-project has other-project note")
+		assertContains(t, crossDoc, "[[2027-06-15-universal-pattern]]", "cross-project has agnostic note")
+		assertNotContains(t, crossDoc, "archived-note", "cross-project should not have archived note")
+	})
+
+	// 7c. stats
 	t.Run("stats", func(t *testing.T) {
 		stdout := mustRunVV(t, env, "stats")
 

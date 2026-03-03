@@ -5,7 +5,7 @@ GOFLAGS := -trimpath -ldflags="$(LDFLAGS)"
 MANDIR  := man
 MANPREFIX := $(HOME)/.local/share/man
 
-.PHONY: all build man install test integration check vet clean
+.PHONY: all build man install test integration check vet clean pre-commit hooks
 
 all: build man
 
@@ -33,6 +33,11 @@ check:
 
 vet:
 	go vet ./...
+
+pre-commit: vet test integration
+
+hooks:
+	git config core.hooksPath .githooks
 
 clean:
 	rm -f $(BINARY)

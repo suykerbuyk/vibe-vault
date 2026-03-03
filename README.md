@@ -569,16 +569,18 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 | `make install` | Build + install binary and man pages to `~/.local/` |
 | `make test` | Run unit tests (`-short` skips integration) |
 | `make integration` | Run integration test suite |
-| `make check` | Run `go vet` + all unit tests + integration |
+| `make check` | Run `go vet` + all unit tests + integration (cache-busting) |
+| `make pre-commit` | Run `go vet` + unit tests + integration (cache-friendly) |
+| `make hooks` | Set `core.hooksPath` to `.githooks/` for pre-commit hook |
 | `make vet` | Run `go vet` only |
 | `make clean` | Remove binary and generated man pages |
 
 ### Test Suite
 
-**330 tests** across 27 test files + **1 integration test** with 15
+**330 tests** across 27 test files + **1 integration test** with 16
 subtests. The integration test exercises the full pipeline:
-`init` → `process` → `index` → `backfill` → `archive` → `reprocess` →
-`checkpoint lifecycle` → `stats` → `friction`.
+`init` → `process` → `index` → `knowledge injection` → `backfill` →
+`archive` → `reprocess` → `checkpoint lifecycle` → `stats` → `friction`.
 
 ```bash
 make test          # unit tests only (~0.5s)
