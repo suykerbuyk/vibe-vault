@@ -79,24 +79,49 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 		})
 	}
 
-	// Repo-side files
-	repoFiles := []struct {
+	// Vault-side commands (canonical location)
+	vaultCmds := []struct {
 		rel     string
 		content string
 	}{
-		{"CLAUDE.md", generateClaudeMD(compressedVault, project)},
-		{filepath.Join(".claude", "commands", "restart.md"), generateRestartMD(compressedVault, project)},
-		{filepath.Join(".claude", "commands", "wrap.md"), generateWrapMD(compressedVault, project)},
+		{"commands/restart.md", generateRestartMD(compressedVault, project)},
+		{"commands/wrap.md", generateWrapMD(compressedVault, project)},
 	}
-	for _, f := range repoFiles {
-		path := filepath.Join(cwd, f.rel)
+	for _, f := range vaultCmds {
+		path := filepath.Join(vaultProject, f.rel)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return nil, fmt.Errorf("create dir for %s: %w", f.rel, err)
 		}
 		action := safeWrite(path, f.content, opts.Force)
 		result.Actions = append(result.Actions, FileAction{
-			Path:   f.rel,
+			Path:   filepath.Join("Projects", project, f.rel),
 			Action: action,
+		})
+	}
+
+	// Repo-side CLAUDE.md (regular file)
+	claudeMDPath := filepath.Join(cwd, "CLAUDE.md")
+	action := safeWrite(claudeMDPath, generateClaudeMD(compressedVault, project), opts.Force)
+	result.Actions = append(result.Actions, FileAction{Path: "CLAUDE.md", Action: action})
+
+	// Repo-side command symlinks → vault
+	cmdLinks := []struct {
+		repoRel  string // relative to cwd
+		vaultRel string // relative to vaultProject
+	}{
+		{filepath.Join(".claude", "commands", "restart.md"), "commands/restart.md"},
+		{filepath.Join(".claude", "commands", "wrap.md"), "commands/wrap.md"},
+	}
+	for _, cl := range cmdLinks {
+		linkPath := filepath.Join(cwd, cl.repoRel)
+		target := filepath.Join(vaultProject, cl.vaultRel)
+		if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+			return nil, fmt.Errorf("create dir for %s: %w", cl.repoRel, err)
+		}
+		linkAction := safeSymlink(linkPath, target, opts.Force)
+		result.Actions = append(result.Actions, FileAction{
+			Path:   cl.repoRel,
+			Action: linkAction,
 		})
 	}
 
@@ -196,27 +221,50 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 		})
 	}
 
-	// Force-update repo-side files (must switch to vault pointer mode)
-	repoFiles := []struct {
+	// Force-update vault-side commands
+	vaultCmds := []struct {
 		rel     string
 		content string
 	}{
-		{"CLAUDE.md", generateClaudeMD(compressedVault, project)},
-		{filepath.Join(".claude", "commands", "restart.md"), generateRestartMD(compressedVault, project)},
-		{filepath.Join(".claude", "commands", "wrap.md"), generateWrapMD(compressedVault, project)},
+		{"commands/restart.md", generateRestartMD(compressedVault, project)},
+		{"commands/wrap.md", generateWrapMD(compressedVault, project)},
 	}
-	for _, f := range repoFiles {
-		path := filepath.Join(cwd, f.rel)
+	for _, f := range vaultCmds {
+		path := filepath.Join(vaultProject, f.rel)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return nil, fmt.Errorf("create dir for %s: %w", f.rel, err)
 		}
-		// Always overwrite repo-side files on migrate
-		action := safeWrite(path, f.content, true)
+		safeWrite(path, f.content, true)
 		result.Actions = append(result.Actions, FileAction{
-			Path:   f.rel,
+			Path:   filepath.Join("Projects", project, f.rel),
 			Action: "UPDATE",
 		})
-		_ = action
+	}
+
+	// Force-update repo-side CLAUDE.md
+	claudeMDPath := filepath.Join(cwd, "CLAUDE.md")
+	safeWrite(claudeMDPath, generateClaudeMD(compressedVault, project), true)
+	result.Actions = append(result.Actions, FileAction{Path: "CLAUDE.md", Action: "UPDATE"})
+
+	// Force-update repo-side command symlinks → vault
+	cmdLinks := []struct {
+		repoRel  string
+		vaultRel string
+	}{
+		{filepath.Join(".claude", "commands", "restart.md"), "commands/restart.md"},
+		{filepath.Join(".claude", "commands", "wrap.md"), "commands/wrap.md"},
+	}
+	for _, cl := range cmdLinks {
+		linkPath := filepath.Join(cwd, cl.repoRel)
+		target := filepath.Join(vaultProject, cl.vaultRel)
+		if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+			return nil, fmt.Errorf("create dir for %s: %w", cl.repoRel, err)
+		}
+		safeSymlink(linkPath, target, true)
+		result.Actions = append(result.Actions, FileAction{
+			Path:   cl.repoRel,
+			Action: "UPDATE",
+		})
 	}
 
 	// .gitignore
@@ -274,6 +322,23 @@ func safeWrite(path, content string, force bool) string {
 		return "SKIP"
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "SKIP"
+	}
+	return "CREATE"
+}
+
+// safeSymlink creates a symlink at linkPath pointing to target.
+// Returns "CREATE" if created, "SKIP" if it already exists and force is false,
+// "CREATE" (overwrite) if force is true.
+func safeSymlink(linkPath, target string, force bool) string {
+	if !force {
+		if _, err := os.Lstat(linkPath); err == nil {
+			return "SKIP"
+		}
+	}
+	// Remove existing file or symlink before creating
+	os.Remove(linkPath)
+	if err := os.Symlink(target, linkPath); err != nil {
 		return "SKIP"
 	}
 	return "CREATE"
@@ -393,6 +458,7 @@ All working context for this project lives in the vault:
 - **Resume**: %s/Projects/%s/resume.md
 - **Iterations**: %s/Projects/%s/iterations.md
 - **Tasks**: %s/Projects/%s/tasks/
+- **Commands**: %s/Projects/%s/commands/
 - **Sessions**: %s/Projects/%s/sessions/
 
 Read resume.md at session start for full project context.
@@ -409,6 +475,7 @@ Read resume.md at session start for full project context.
 - On /wrap: stage files, update commit.msg, update vault-side resume.md
   and tasks, but do not commit.
 `, compressedVault, project,
+		compressedVault, project,
 		compressedVault, project,
 		compressedVault, project,
 		compressedVault, project)

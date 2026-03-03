@@ -33,6 +33,8 @@ func TestInit_CreatesVaultFiles(t *testing.T) {
 	for _, rel := range []string{
 		"Projects/myproject/resume.md",
 		"Projects/myproject/iterations.md",
+		"Projects/myproject/commands/restart.md",
+		"Projects/myproject/commands/wrap.md",
 	} {
 		path := filepath.Join(vault, rel)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -73,6 +75,40 @@ func TestInit_CreatesRepoFiles(t *testing.T) {
 		path := filepath.Join(cwd, rel)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			t.Errorf("repo file not created: %s", rel)
+		}
+	}
+}
+
+func TestInit_CommandSymlinks(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	_, err := Init(cfg, cwd, Opts{Project: "myproject"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	for _, rel := range []string{
+		".claude/commands/restart.md",
+		".claude/commands/wrap.md",
+	} {
+		linkPath := filepath.Join(cwd, rel)
+		info, err := os.Lstat(linkPath)
+		if err != nil {
+			t.Errorf("command link not created: %s", rel)
+			continue
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("%s should be a symlink, got mode %v", rel, info.Mode())
+		}
+		target, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Errorf("readlink %s: %v", rel, err)
+			continue
+		}
+		if !strings.Contains(target, "commands") {
+			t.Errorf("symlink target %q should point to vault commands dir", target)
 		}
 	}
 }
