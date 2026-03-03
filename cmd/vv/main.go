@@ -361,56 +361,17 @@ func runIndex() {
 
 	fmt.Printf("indexed %d sessions\n", count)
 
-	// Read knowledge notes from vault
-	knowledgeNotes, err := knowledge.ReadNotes(cfg.VaultPath)
+	summaries := readKnowledgeSummaries(cfg.VaultPath)
+
+	genResult, err := index.GenerateContext(idx, cfg.VaultPath, summaries)
 	if err != nil {
-		log.Printf("warning: read knowledge notes: %v", err)
-	}
-
-	// Map knowledge.Note → index.KnowledgeSummary
-	var summaries []index.KnowledgeSummary
-	for _, n := range knowledgeNotes {
-		summaries = append(summaries, index.KnowledgeSummary{
-			Type:       n.Type,
-			Title:      n.Title,
-			Summary:    n.Summary,
-			Project:    n.Project,
-			Category:   n.Category,
-			Date:       n.Date,
-			Confidence: n.Confidence,
-			NotePath:   n.NotePath,
-		})
-	}
-
-	// Generate per-project context documents
-	projects := idx.Projects()
-	for _, project := range projects {
-		doc := idx.ProjectContext(project, summaries)
-		dir := filepath.Join(cfg.ProjectsDir(), project)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			log.Printf("warning: create dir for %s: %v", project, err)
-			continue
+		log.Printf("warning: generate context: %v", err)
+	} else {
+		for _, project := range idx.Projects() {
+			fmt.Printf("  context: %s\n", filepath.Join("Projects", project, "history.md"))
 		}
-		path := filepath.Join(dir, "history.md")
-		if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
-			log.Printf("warning: write context for %s: %v", project, err)
-			continue
-		}
-		fmt.Printf("  context: %s\n", filepath.Join("Projects", project, "history.md"))
-	}
-
-	// Generate cross-project knowledge document
-	if len(summaries) > 0 {
-		crossDoc := index.CrossProjectKnowledge(summaries)
-		if crossDoc != "" {
-			crossPath := filepath.Join(cfg.VaultPath, "Knowledge", "_knowledge.md")
-			if err := os.MkdirAll(filepath.Dir(crossPath), 0o755); err != nil {
-				log.Printf("warning: create Knowledge dir: %v", err)
-			} else if err := os.WriteFile(crossPath, []byte(crossDoc), 0o644); err != nil {
-				log.Printf("warning: write cross-project knowledge: %v", err)
-			} else {
-				fmt.Println("  knowledge: Knowledge/_knowledge.md")
-			}
+		if genResult.KnowledgeWritten {
+			fmt.Println("  knowledge: Knowledge/_knowledge.md")
 		}
 	}
 }
@@ -658,19 +619,17 @@ func runReprocess() {
 	// Regenerate context docs for affected projects
 	if len(affectedProjects) > 0 {
 		idx, _ = index.Load(cfg.StateDir())
-		for project := range affectedProjects {
-			doc := idx.ProjectContext(project, nil)
-			dir := filepath.Join(cfg.ProjectsDir(), project)
-			if err := os.MkdirAll(dir, 0o755); err != nil {
-				log.Printf("warning: create dir for %s: %v", project, err)
-				continue
+		summaries := readKnowledgeSummaries(cfg.VaultPath)
+		genResult, err := index.GenerateContext(idx, cfg.VaultPath, summaries)
+		if err != nil {
+			log.Printf("warning: generate context: %v", err)
+		} else {
+			for project := range affectedProjects {
+				fmt.Printf("  context: %s\n", filepath.Join("Projects", project, "history.md"))
 			}
-			path := filepath.Join(dir, "history.md")
-			if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
-				log.Printf("warning: write context for %s: %v", project, err)
-				continue
+			if genResult.KnowledgeWritten {
+				fmt.Println("  knowledge: Knowledge/_knowledge.md")
 			}
-			fmt.Printf("  context: %s\n", filepath.Join("Projects", project, "history.md"))
 		}
 	}
 
@@ -739,6 +698,28 @@ func removeFlag(args []string, flag string) []string {
 		}
 	}
 	return out
+}
+
+func readKnowledgeSummaries(vaultPath string) []index.KnowledgeSummary {
+	notes, err := knowledge.ReadNotes(vaultPath)
+	if err != nil {
+		log.Printf("warning: read knowledge notes: %v", err)
+		return nil
+	}
+	var summaries []index.KnowledgeSummary
+	for _, n := range notes {
+		summaries = append(summaries, index.KnowledgeSummary{
+			Type:       n.Type,
+			Title:      n.Title,
+			Summary:    n.Summary,
+			Project:    n.Project,
+			Category:   n.Category,
+			Date:       n.Date,
+			Confidence: n.Confidence,
+			NotePath:   n.NotePath,
+		})
+	}
+	return summaries
 }
 
 func fatal(format string, args ...interface{}) {

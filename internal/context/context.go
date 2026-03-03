@@ -612,21 +612,31 @@ what was last worked on) and ask what to work on.
 
 func generateWrapMD(compressedVault, project string) string {
 	agentctx := fmt.Sprintf("%s/Projects/%s/agentctx", compressedVault, project)
-	return fmt.Sprintf(`# Session Wrap
+	return fmt.Sprintf(`Update resume.md and its dependent documents to fully reflect the current
+state of the project. These files serve as the single source of truth for
+restoring AI thread context and resuming work on this codebase.
 
-End-of-session procedure:
+Specifically:
+- Ensure all code compiles without errors
+- Ensure all unit and integration tests pass
+- Read the current resume.md and compare against the actual codebase state
+  (files, tests, architecture)
+- Update all sections that are stale: file inventory, test counts, module
+  descriptions, architecture diagrams, design decisions, and test results
+- Append a new iteration narrative to iterations.md describing what changed
+  in this session and why (past tense, technical detail)
+- Add a corresponding summary row to the Project History table in resume.md
+- Retire completed tasks: check each file in %s/tasks/ (not tasks/done/)
+  against the session's work — if a task has been implemented, update its
+  status to "Done" and move it to tasks/done/
+- Rewrite the repo-root commit.msg to document all code changes made in
+  this session
+- Stage all modified and newly added project files (use git add with explicit
+  file paths — never use git add -A or git add .)
 
-1. Stage all changed files (git add with explicit paths, never git add -A)
-2. Write a descriptive commit message to commit.msg
-3. Update %s/resume.md:
-   - Reflect current project state
-   - Update "What Was Done" and "Open Threads" sections
-   - Keep it concise but complete enough to resume cold
-4. Move completed tasks from %s/tasks/ to tasks/done/
-5. Do NOT commit — the human will review and commit
-
-Report what you staged and what changed in resume.md.
-`, agentctx, agentctx)
+Do not ask for confirmation — just do the updates, stage the files, show what
+changed, and note that the user should review before committing.
+`, agentctx)
 }
 
 func generateResume(project string) string {

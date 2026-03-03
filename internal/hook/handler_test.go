@@ -161,17 +161,19 @@ func TestHandleInput_StopThenSessionEnd(t *testing.T) {
 		t.Fatalf("SessionEnd: %v", err)
 	}
 
-	// Verify only one note file exists (overwritten, not duplicated)
+	// Verify only one session note file exists (overwritten, not duplicated)
+	// Only count .md files inside sessions/ dirs (history.md is at project root)
 	projDir :=filepath.Join(cfg.VaultPath, "Projects")
 	var noteFiles []string
 	filepath.Walk(projDir, func(path string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() && filepath.Ext(path) == ".md" {
+		if err == nil && !info.IsDir() && filepath.Ext(path) == ".md" &&
+			filepath.Base(filepath.Dir(path)) == "sessions" {
 			noteFiles = append(noteFiles, path)
 		}
 		return nil
 	})
 	if len(noteFiles) != 1 {
-		t.Errorf("expected 1 note file, got %d: %v", len(noteFiles), noteFiles)
+		t.Errorf("expected 1 session note file, got %d: %v", len(noteFiles), noteFiles)
 	}
 
 	// Read the note and verify status is completed (finalized)
@@ -249,6 +251,38 @@ func TestHandleInput_EmptyEvent(t *testing.T) {
 	err := handleInput(input, "", cfg)
 	if err != nil {
 		t.Fatalf("handleInput empty event: %v", err)
+	}
+}
+
+func TestHandleInput_SessionEnd_RefreshesContext(t *testing.T) {
+	cfg := testConfig(t)
+	transcriptPath := writeTranscript(t, minimalTranscript)
+
+	input := &Input{
+		SessionID:      "test-sess-ctx",
+		TranscriptPath: transcriptPath,
+		HookEventName:  "SessionEnd",
+		CWD:            "/tmp/proj",
+	}
+
+	if err := handleInput(input, "", cfg); err != nil {
+		t.Fatalf("handleInput: %v", err)
+	}
+
+	// Find the project directory that was created
+	projDir := filepath.Join(cfg.VaultPath, "Projects")
+	entries, err := os.ReadDir(projDir)
+	if err != nil {
+		t.Fatalf("read projects dir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one project directory")
+	}
+
+	// Verify history.md was written by the auto-refresh
+	historyPath := filepath.Join(projDir, entries[0].Name(), "history.md")
+	if _, err := os.Stat(historyPath); err != nil {
+		t.Errorf("expected history.md to exist after session end: %v", err)
 	}
 }
 
