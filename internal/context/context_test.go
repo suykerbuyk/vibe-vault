@@ -29,12 +29,13 @@ func TestInit_CreatesVaultFiles(t *testing.T) {
 		t.Errorf("project = %q, want %q", result.Project, "myproject")
 	}
 
-	// Vault-side files
+	// Vault-side files (inside agentctx/)
 	for _, rel := range []string{
-		"Projects/myproject/resume.md",
-		"Projects/myproject/iterations.md",
-		"Projects/myproject/commands/restart.md",
-		"Projects/myproject/commands/wrap.md",
+		"Projects/myproject/agentctx/CLAUDE.md",
+		"Projects/myproject/agentctx/resume.md",
+		"Projects/myproject/agentctx/iterations.md",
+		"Projects/myproject/agentctx/commands/restart.md",
+		"Projects/myproject/agentctx/commands/wrap.md",
 	} {
 		path := filepath.Join(vault, rel)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -44,8 +45,9 @@ func TestInit_CreatesVaultFiles(t *testing.T) {
 
 	// Vault-side dirs
 	for _, rel := range []string{
-		"Projects/myproject/tasks",
-		"Projects/myproject/tasks/done",
+		"Projects/myproject/agentctx/tasks",
+		"Projects/myproject/agentctx/tasks/done",
+		"Projects/myproject/agentctx/commands",
 	} {
 		path := filepath.Join(vault, rel)
 		info, err := os.Stat(path)
@@ -67,19 +69,21 @@ func TestInit_CreatesRepoFiles(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	for _, rel := range []string{
-		"CLAUDE.md",
-		".claude/commands/restart.md",
-		".claude/commands/wrap.md",
-	} {
-		path := filepath.Join(cwd, rel)
+	// CLAUDE.md should be a regular file
+	if _, err := os.Stat(filepath.Join(cwd, "CLAUDE.md")); os.IsNotExist(err) {
+		t.Error("repo CLAUDE.md not created")
+	}
+
+	// Commands should be accessible through the directory symlink
+	for _, name := range []string{"restart.md", "wrap.md"} {
+		path := filepath.Join(cwd, ".claude", "commands", name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			t.Errorf("repo file not created: %s", rel)
+			t.Errorf("command not accessible: .claude/commands/%s", name)
 		}
 	}
 }
 
-func TestInit_CommandSymlinks(t *testing.T) {
+func TestInit_CommandsDirectorySymlink(t *testing.T) {
 	vault := t.TempDir()
 	cwd := t.TempDir()
 	cfg := testConfig(vault)
@@ -89,27 +93,60 @@ func TestInit_CommandSymlinks(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	for _, rel := range []string{
-		".claude/commands/restart.md",
-		".claude/commands/wrap.md",
-	} {
-		linkPath := filepath.Join(cwd, rel)
-		info, err := os.Lstat(linkPath)
-		if err != nil {
-			t.Errorf("command link not created: %s", rel)
-			continue
+	// .claude/commands should be a symlink to the directory, not individual files
+	cmdsPath := filepath.Join(cwd, ".claude", "commands")
+	info, err := os.Lstat(cmdsPath)
+	if err != nil {
+		t.Fatalf("commands link not created: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf(".claude/commands should be a symlink, got mode %v", info.Mode())
+	}
+	target, err := os.Readlink(cmdsPath)
+	if err != nil {
+		t.Fatalf("readlink .claude/commands: %v", err)
+	}
+	if !strings.Contains(target, "agentctx/commands") {
+		t.Errorf("symlink target %q should point to agentctx/commands", target)
+	}
+
+	// Commands should be accessible through the symlink
+	for _, name := range []string{"restart.md", "wrap.md"} {
+		path := filepath.Join(cmdsPath, name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Errorf("command %s not accessible through symlink", name)
 		}
-		if info.Mode()&os.ModeSymlink == 0 {
-			t.Errorf("%s should be a symlink, got mode %v", rel, info.Mode())
-		}
-		target, err := os.Readlink(linkPath)
-		if err != nil {
-			t.Errorf("readlink %s: %v", rel, err)
-			continue
-		}
-		if !strings.Contains(target, "commands") {
-			t.Errorf("symlink target %q should point to vault commands dir", target)
-		}
+	}
+}
+
+func TestInit_AgentCtxCLAUDE(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	_, err := Init(cfg, cwd, Opts{Project: "myproject"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(vault, "Projects", "myproject", "agentctx", "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read agentctx/CLAUDE.md: %v", err)
+	}
+	content := string(data)
+
+	// Should contain behavioral rules
+	if !strings.Contains(content, "Pair Programming") {
+		t.Error("agentctx/CLAUDE.md missing pair programming section")
+	}
+	if !strings.Contains(content, "Plan Mode") {
+		t.Error("agentctx/CLAUDE.md missing plan mode section")
+	}
+	if !strings.Contains(content, "resume.md") {
+		t.Error("agentctx/CLAUDE.md missing file references")
+	}
+	if !strings.Contains(content, "myproject") {
+		t.Error("agentctx/CLAUDE.md missing project name")
 	}
 }
 
@@ -201,10 +238,10 @@ func TestInit_ProjectOverride(t *testing.T) {
 		t.Errorf("project = %q, want %q", result.Project, "custom-name")
 	}
 
-	// Files should be under custom-name
-	path := filepath.Join(vault, "Projects", "custom-name", "resume.md")
+	// Files should be under custom-name/agentctx/
+	path := filepath.Join(vault, "Projects", "custom-name", "agentctx", "resume.md")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		t.Error("resume.md not created under custom-name project")
+		t.Error("resume.md not created under custom-name/agentctx/")
 	}
 }
 
@@ -237,14 +274,16 @@ func TestInit_ClaudeMDContent(t *testing.T) {
 	}
 	content := string(data)
 
-	if !strings.Contains(content, "resume.md") {
-		t.Error("CLAUDE.md missing resume.md reference")
+	// Thin pointer — should reference agentctx path
+	if !strings.Contains(content, "agentctx") {
+		t.Error("CLAUDE.md missing agentctx reference")
 	}
 	if !strings.Contains(content, "myproject") {
 		t.Error("CLAUDE.md missing project name")
 	}
-	if !strings.Contains(content, "Never commit") {
-		t.Error("CLAUDE.md missing workflow rules")
+	// Should NOT contain full behavioral rules (those are in agentctx/CLAUDE.md)
+	if strings.Contains(content, "Pair Programming") {
+		t.Error("CLAUDE.md should be thin pointer, not contain behavioral rules")
 	}
 }
 
@@ -333,13 +372,13 @@ func TestMigrate_CopiesResume(t *testing.T) {
 		t.Errorf("project = %q, want %q", result.Project, "myproject")
 	}
 
-	// Vault file should exist with same content
-	data, err := os.ReadFile(filepath.Join(vault, "Projects", "myproject", "resume.md"))
+	// Vault file should exist in agentctx/ with same content
+	data, err := os.ReadFile(filepath.Join(vault, "Projects", "myproject", "agentctx", "resume.md"))
 	if err != nil {
-		t.Fatalf("read vault resume.md: %v", err)
+		t.Fatalf("read vault agentctx/resume.md: %v", err)
 	}
 	if string(data) != "# My Resume\nProject state." {
-		t.Errorf("vault resume.md content = %q", string(data))
+		t.Errorf("vault agentctx/resume.md content = %q", string(data))
 	}
 
 	// Original preserved
@@ -360,12 +399,12 @@ func TestMigrate_CopiesHistory(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(vault, "Projects", "myproject", "iterations.md"))
+	data, err := os.ReadFile(filepath.Join(vault, "Projects", "myproject", "agentctx", "iterations.md"))
 	if err != nil {
-		t.Fatalf("read vault iterations.md: %v", err)
+		t.Fatalf("read vault agentctx/iterations.md: %v", err)
 	}
 	if string(data) != "# History" {
-		t.Errorf("vault iterations.md content = %q", string(data))
+		t.Errorf("vault agentctx/iterations.md content = %q", string(data))
 	}
 }
 
@@ -385,8 +424,8 @@ func TestMigrate_CopiesTasks(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	// Check vault files
-	data, err := os.ReadFile(filepath.Join(vault, "Projects", "myproject", "tasks", "001-feature.md"))
+	// Check vault files in agentctx/tasks/
+	data, err := os.ReadFile(filepath.Join(vault, "Projects", "myproject", "agentctx", "tasks", "001-feature.md"))
 	if err != nil {
 		t.Fatalf("read vault task: %v", err)
 	}
@@ -394,12 +433,98 @@ func TestMigrate_CopiesTasks(t *testing.T) {
 		t.Errorf("vault task content = %q", string(data))
 	}
 
-	data, err = os.ReadFile(filepath.Join(vault, "Projects", "myproject", "tasks", "done", "000-setup.md"))
+	data, err = os.ReadFile(filepath.Join(vault, "Projects", "myproject", "agentctx", "tasks", "done", "000-setup.md"))
 	if err != nil {
 		t.Fatalf("read vault done task: %v", err)
 	}
 	if string(data) != "done task" {
 		t.Errorf("vault done task content = %q", string(data))
+	}
+}
+
+func TestMigrate_CopiesLocalCommands(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	// Create local .claude/commands/ as a real directory with regular files
+	cmdDir := filepath.Join(cwd, ".claude", "commands")
+	os.MkdirAll(cmdDir, 0o755)
+	os.WriteFile(filepath.Join(cmdDir, "restart.md"), []byte("# Rich restart command"), 0o644)
+	os.WriteFile(filepath.Join(cmdDir, "wrap.md"), []byte("# Rich wrap command"), 0o644)
+	os.WriteFile(filepath.Join(cmdDir, "custom.md"), []byte("# Custom command"), 0o644)
+
+	_, err := Migrate(cfg, cwd, Opts{Project: "myproject"})
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// Local commands should be copied to agentctx/commands/
+	for _, tc := range []struct {
+		name    string
+		content string
+	}{
+		{"restart.md", "# Rich restart command"},
+		{"wrap.md", "# Rich wrap command"},
+		{"custom.md", "# Custom command"},
+	} {
+		data, err := os.ReadFile(filepath.Join(vault, "Projects", "myproject", "agentctx", "commands", tc.name))
+		if err != nil {
+			t.Errorf("read vault %s: %v", tc.name, err)
+			continue
+		}
+		if string(data) != tc.content {
+			t.Errorf("vault %s content = %q, want %q", tc.name, string(data), tc.content)
+		}
+	}
+
+	// .claude/commands should now be a directory symlink
+	cmdsPath := filepath.Join(cwd, ".claude", "commands")
+	info, err := os.Lstat(cmdsPath)
+	if err != nil {
+		t.Fatalf("lstat .claude/commands: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Error(".claude/commands should be a symlink after migrate")
+	}
+	target, _ := os.Readlink(cmdsPath)
+	if !strings.Contains(target, "agentctx/commands") {
+		t.Errorf("symlink target %q should point to agentctx/commands", target)
+	}
+
+	// All commands should be accessible through the symlink
+	for _, name := range []string{"restart.md", "wrap.md", "custom.md"} {
+		if _, err := os.Stat(filepath.Join(cmdsPath, name)); os.IsNotExist(err) {
+			t.Errorf("command %s not accessible through symlink", name)
+		}
+	}
+}
+
+func TestMigrate_SkipsAlreadySymlinkedCommands(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	// First init creates the directory symlink
+	_, err := Init(cfg, cwd, Opts{Project: "myproject"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Now migrate — should handle the existing symlink gracefully
+	_, err = Migrate(cfg, cwd, Opts{Project: "myproject"})
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// .claude/commands should still be a directory symlink
+	cmdsPath := filepath.Join(cwd, ".claude", "commands")
+	info, err := os.Lstat(cmdsPath)
+	if err != nil {
+		t.Fatalf("lstat .claude/commands: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Error(".claude/commands should still be a symlink")
 	}
 }
 
@@ -433,7 +558,7 @@ func TestMigrate_SkipsExistingVaultFiles(t *testing.T) {
 
 	// Create local and vault files
 	os.WriteFile(filepath.Join(cwd, "RESUME.md"), []byte("local resume"), 0o644)
-	vaultResume := filepath.Join(vault, "Projects", "myproject", "resume.md")
+	vaultResume := filepath.Join(vault, "Projects", "myproject", "agentctx", "resume.md")
 	os.MkdirAll(filepath.Dir(vaultResume), 0o755)
 	os.WriteFile(vaultResume, []byte("vault resume"), 0o644)
 
@@ -455,7 +580,7 @@ func TestMigrate_ForceOverwrite(t *testing.T) {
 	cfg := testConfig(vault)
 
 	os.WriteFile(filepath.Join(cwd, "RESUME.md"), []byte("local resume"), 0o644)
-	vaultResume := filepath.Join(vault, "Projects", "myproject", "resume.md")
+	vaultResume := filepath.Join(vault, "Projects", "myproject", "agentctx", "resume.md")
 	os.MkdirAll(filepath.Dir(vaultResume), 0o755)
 	os.WriteFile(vaultResume, []byte("vault resume"), 0o644)
 
@@ -483,11 +608,11 @@ func TestMigrate_UpdatesRepoFiles(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	// CLAUDE.md should be force-updated to vault pointer
+	// CLAUDE.md should be force-updated to thin pointer
 	data, _ := os.ReadFile(filepath.Join(cwd, "CLAUDE.md"))
 	content := string(data)
-	if !strings.Contains(content, "resume.md") {
-		t.Error("CLAUDE.md not updated to vault pointer")
+	if !strings.Contains(content, "agentctx") {
+		t.Error("CLAUDE.md not updated to agentctx pointer")
 	}
 	if strings.Contains(content, "old content") {
 		t.Error("CLAUDE.md still has old content")

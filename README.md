@@ -301,9 +301,9 @@ vv friction --project myproject   # friction for one project only
 
 **Set up vault-resident AI context for a project:**
 ```bash
-vv context init                       # scaffold from current directory
+vv context init                       # scaffold agentctx/ from current directory
 vv context init --project myproject   # specify project name
-vv context migrate                    # copy existing RESUME.md/HISTORY.md/tasks/ to vault
+vv context migrate                    # copy existing RESUME.md/HISTORY.md/tasks/commands to vault
 ```
 
 **Diagnose issues:**
@@ -358,6 +358,12 @@ it to enable enrichment or customize domain paths.
 vibe-vault/
 ├── Projects/                   # Project-centric organization
 │   └── {project}/
+│       ├── agentctx/           # AI context package (vv context init)
+│       │   ├── CLAUDE.md       # Behavioral rules and file pointers
+│       │   ├── resume.md       # Project state, architecture, decisions
+│       │   ├── iterations.md   # Iteration narratives and history
+│       │   ├── commands/       # Slash commands (/restart, /wrap)
+│       │   └── tasks/          # Active and completed tasks
 │       ├── sessions/           # Session notes (auto-generated)
 │       │   └── YYYY-MM-DD-NN.md
 │       └── history.md          # Per-project context doc (auto-generated)
@@ -501,11 +507,12 @@ how a project was built: what was decided, what was attempted, what failed, what
 was deferred. This is the history that git commits try to be but rarely are —
 decisions in full context, with the reasoning preserved.
 
-**2. Portable AI Memory** — `vv context init` scaffolds vault-resident context
-files (resume, iterations, tasks) for a project, and `vv context migrate` moves
-existing repo-local files (RESUME.md, HISTORY.md, tasks/) into the vault. This
-makes project context survive machine migrations, searchable across the
-portfolio, and accessible to any session that knows the project name.
+**2. Portable AI Memory** — `vv context init` scaffolds a self-contained
+`agentctx/` directory per project in the vault, containing behavioral rules,
+project state, iteration history, slash commands, and tasks. `vv context migrate`
+moves existing repo-local files into `agentctx/`. The repo gets a thin CLAUDE.md
+pointer and symlinked commands. This makes project context survive machine
+migrations, searchable across the portfolio, and accessible to any session.
 
 **3. AI Behavioral Observability** — Every transcript logs which tools the AI
 used, how many tokens it consumed, whether it needed corrections. Aggregating

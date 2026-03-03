@@ -220,9 +220,10 @@ frontmatter. This powers the domain-filtered dashboards in Obsidian.
 
 ## 6. Optional: Vault-Resident AI Context
 
-AI workflow files (resume, iteration history, tasks) can live in the vault
-instead of as untracked repo-local files. This makes them portable, searchable
-in Obsidian, and accessible to any session.
+AI workflow files (resume, iteration history, tasks, slash commands) can live
+in the vault instead of as untracked repo-local files. Everything goes into a
+single `agentctx/` directory per project — portable, searchable in Obsidian,
+and synced across machines.
 
 ### New project (no existing context files)
 
@@ -233,9 +234,15 @@ vv context init
 ```
 
 This creates:
-- **Vault-side**: `Projects/{project}/resume.md`, `iterations.md`, `tasks/`
-- **Repo-side**: `CLAUDE.md` (vault pointer), `.claude/commands/restart.md`,
-  `.claude/commands/wrap.md`
+- **Vault-side** (`Projects/{project}/agentctx/`):
+  - `CLAUDE.md` — behavioral rules (pair programming, plan mode, verification)
+  - `resume.md` — project state scaffold
+  - `iterations.md` — iteration history
+  - `commands/restart.md`, `commands/wrap.md` — slash commands
+  - `tasks/`, `tasks/done/` — task tracking
+- **Repo-side**:
+  - `CLAUDE.md` — thin pointer to the agentctx directory
+  - `.claude/commands/*.md` — symlinks to `agentctx/commands/`
 - Updates `.gitignore` to exclude `CLAUDE.md` and `commit.msg`
 
 The project name is auto-detected from the git remote. To override:
@@ -253,18 +260,21 @@ vv context migrate
 ```
 
 This copies:
-- `RESUME.md` → `Projects/{project}/resume.md`
-- `HISTORY.md` → `Projects/{project}/iterations.md`
-- `tasks/` → `Projects/{project}/tasks/` (recursive)
+- `RESUME.md` → `Projects/{project}/agentctx/resume.md`
+- `HISTORY.md` → `Projects/{project}/agentctx/iterations.md`
+- `tasks/` → `Projects/{project}/agentctx/tasks/` (recursive)
+- `.claude/commands/*.md` → `Projects/{project}/agentctx/commands/` (regular files only)
 
-Then rewrites the repo-side files to point at the vault. Local originals
-are preserved — remove them manually after verifying the migration.
+Then rewrites the repo-side CLAUDE.md to point at the vault and replaces
+local commands with symlinks. Local originals are preserved — remove them
+manually after verifying the migration.
 
 ### How it works after setup
 
-- `/restart` reads `resume.md` from the vault (not `./RESUME.md`)
-- `/wrap` updates vault-side files (resume, tasks)
-- `CLAUDE.md` in the repo is a lightweight pointer with workflow rules
+- `/restart` reads `resume.md` from the vault's `agentctx/` directory
+- `/wrap` updates vault-side files (resume, tasks) in `agentctx/`
+- `CLAUDE.md` in the repo is a 5-line pointer to the agentctx path
+- `agentctx/CLAUDE.md` has behavioral rules (always loaded by Claude Code)
 - Everything is searchable in Obsidian alongside session notes
 
 ## 7. Optional: Enable LLM Enrichment

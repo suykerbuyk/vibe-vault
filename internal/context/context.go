@@ -37,6 +37,22 @@ type MigrateResult struct {
 
 // Init scaffolds vault-resident context for a project and writes repo-side
 // bootstrap files (CLAUDE.md, .claude/commands/).
+//
+// Vault layout:
+//
+//	Projects/{project}/agentctx/       — all AI context for this project
+//	  CLAUDE.md                        — behavioral rules and file pointers
+//	  resume.md                        — project state
+//	  iterations.md                    — iteration history
+//	  commands/{restart,wrap}.md       — slash commands
+//	  tasks/, tasks/done/              — task tracking
+//	Projects/{project}/sessions/       — auto-generated (by vv hook)
+//	Projects/{project}/history.md      — auto-generated (by vv index)
+//
+// Repo layout:
+//
+//	CLAUDE.md                          — thin pointer to agentctx
+//	.claude/commands/                  — symlink to agentctx/commands/
 func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 	if err := validateVault(cfg.VaultPath); err != nil {
 		return nil, err
@@ -48,82 +64,58 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 	}
 
 	result := &InitResult{Project: project}
-	vaultProject := filepath.Join(cfg.VaultPath, "Projects", project)
+	agentctx := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx")
 	compressedVault := config.CompressHome(cfg.VaultPath)
 
 	// Vault-side directories
 	for _, dir := range []string{
-		vaultProject,
-		filepath.Join(vaultProject, "tasks"),
-		filepath.Join(vaultProject, "tasks", "done"),
+		agentctx,
+		filepath.Join(agentctx, "commands"),
+		filepath.Join(agentctx, "tasks"),
+		filepath.Join(agentctx, "tasks", "done"),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create dir %s: %w", dir, err)
 		}
 	}
 
-	// Vault-side templates
+	// Vault-side templates (inside agentctx/)
 	vaultFiles := []struct {
 		rel     string
 		content string
 	}{
+		{"CLAUDE.md", generateAgentCtxCLAUDE(project)},
 		{"resume.md", generateResume(project)},
 		{"iterations.md", generateIterations(project)},
-	}
-	for _, f := range vaultFiles {
-		path := filepath.Join(vaultProject, f.rel)
-		action := safeWrite(path, f.content, opts.Force)
-		result.Actions = append(result.Actions, FileAction{
-			Path:   filepath.Join("Projects", project, f.rel),
-			Action: action,
-		})
-	}
-
-	// Vault-side commands (canonical location)
-	vaultCmds := []struct {
-		rel     string
-		content string
-	}{
 		{"commands/restart.md", generateRestartMD(compressedVault, project)},
 		{"commands/wrap.md", generateWrapMD(compressedVault, project)},
 	}
-	for _, f := range vaultCmds {
-		path := filepath.Join(vaultProject, f.rel)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return nil, fmt.Errorf("create dir for %s: %w", f.rel, err)
-		}
+	for _, f := range vaultFiles {
+		path := filepath.Join(agentctx, f.rel)
 		action := safeWrite(path, f.content, opts.Force)
 		result.Actions = append(result.Actions, FileAction{
-			Path:   filepath.Join("Projects", project, f.rel),
+			Path:   filepath.Join("Projects", project, "agentctx", f.rel),
 			Action: action,
 		})
 	}
 
-	// Repo-side CLAUDE.md (regular file)
+	// Repo-side CLAUDE.md (thin pointer to agentctx)
 	claudeMDPath := filepath.Join(cwd, "CLAUDE.md")
 	action := safeWrite(claudeMDPath, generateClaudeMD(compressedVault, project), opts.Force)
 	result.Actions = append(result.Actions, FileAction{Path: "CLAUDE.md", Action: action})
 
-	// Repo-side command symlinks → vault
-	cmdLinks := []struct {
-		repoRel  string // relative to cwd
-		vaultRel string // relative to vaultProject
-	}{
-		{filepath.Join(".claude", "commands", "restart.md"), "commands/restart.md"},
-		{filepath.Join(".claude", "commands", "wrap.md"), "commands/wrap.md"},
+	// Repo-side .claude/commands/ → symlink to agentctx/commands/
+	dotClaude := filepath.Join(cwd, ".claude")
+	if err := os.MkdirAll(dotClaude, 0o755); err != nil {
+		return nil, fmt.Errorf("create .claude/: %w", err)
 	}
-	for _, cl := range cmdLinks {
-		linkPath := filepath.Join(cwd, cl.repoRel)
-		target := filepath.Join(vaultProject, cl.vaultRel)
-		if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
-			return nil, fmt.Errorf("create dir for %s: %w", cl.repoRel, err)
-		}
-		linkAction := safeSymlink(linkPath, target, opts.Force)
-		result.Actions = append(result.Actions, FileAction{
-			Path:   cl.repoRel,
-			Action: linkAction,
-		})
-	}
+	cmdsLink := filepath.Join(dotClaude, "commands")
+	cmdsTarget := filepath.Join(agentctx, "commands")
+	linkAction := safeSymlink(cmdsLink, cmdsTarget, opts.Force)
+	result.Actions = append(result.Actions, FileAction{
+		Path:   ".claude/commands",
+		Action: linkAction,
+	})
 
 	// .gitignore
 	giAction, err := gitignoreEnsure(filepath.Join(cwd, ".gitignore"), "CLAUDE.md")
@@ -138,15 +130,14 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 		return nil, err
 	}
 	if giAction2 != "" && giAction == "" {
-		// Only report once if both were added
 		result.Actions = append(result.Actions, FileAction{Path: ".gitignore", Action: giAction2})
 	}
 
 	return result, nil
 }
 
-// Migrate copies existing local context files to the vault, then performs
-// the same repo-side updates as Init.
+// Migrate copies existing local context files to the vault's agentctx/
+// directory, then performs the same repo-side updates as Init.
 func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 	if err := validateVault(cfg.VaultPath); err != nil {
 		return nil, err
@@ -158,34 +149,35 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 	}
 
 	result := &MigrateResult{Project: project}
-	vaultProject := filepath.Join(cfg.VaultPath, "Projects", project)
+	agentctx := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx")
 	compressedVault := config.CompressHome(cfg.VaultPath)
 
 	// Ensure vault dirs exist
 	for _, dir := range []string{
-		vaultProject,
-		filepath.Join(vaultProject, "tasks"),
-		filepath.Join(vaultProject, "tasks", "done"),
+		agentctx,
+		filepath.Join(agentctx, "commands"),
+		filepath.Join(agentctx, "tasks"),
+		filepath.Join(agentctx, "tasks", "done"),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create dir %s: %w", dir, err)
 		}
 	}
 
-	// Copy local files to vault
+	// Copy local files to vault agentctx/
 	migrations := []struct {
 		src string // relative to cwd
-		dst string // relative to vaultProject
+		dst string // relative to agentctx
 	}{
 		{"RESUME.md", "resume.md"},
 		{"HISTORY.md", "iterations.md"},
 	}
 	for _, m := range migrations {
 		srcPath := filepath.Join(cwd, m.src)
-		dstPath := filepath.Join(vaultProject, m.dst)
+		dstPath := filepath.Join(agentctx, m.dst)
 		if _, err := os.Stat(srcPath); os.IsNotExist(err) {
 			result.Actions = append(result.Actions, FileAction{
-				Path:   m.src + " → " + filepath.Join("Projects", project, m.dst),
+				Path:   m.src + " → " + filepath.Join("Projects", project, "agentctx", m.dst),
 				Action: "SKIP",
 			})
 			continue
@@ -195,14 +187,14 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 			return nil, fmt.Errorf("copy %s: %w", m.src, err)
 		}
 		result.Actions = append(result.Actions, FileAction{
-			Path:   m.src + " → " + filepath.Join("Projects", project, m.dst),
+			Path:   m.src + " → " + filepath.Join("Projects", project, "agentctx", m.dst),
 			Action: action,
 		})
 	}
 
 	// Copy tasks/ directory
 	srcTasks := filepath.Join(cwd, "tasks")
-	dstTasks := filepath.Join(vaultProject, "tasks")
+	dstTasks := filepath.Join(agentctx, "tasks")
 	if info, err := os.Stat(srcTasks); err == nil && info.IsDir() {
 		actions, err := copyDir(srcTasks, dstTasks, opts.Force)
 		if err != nil {
@@ -210,62 +202,90 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 		}
 		for _, a := range actions {
 			result.Actions = append(result.Actions, FileAction{
-				Path:   "tasks/" + a.Path + " → " + filepath.Join("Projects", project, "tasks", a.Path),
+				Path:   "tasks/" + a.Path + " → " + filepath.Join("Projects", project, "agentctx", "tasks", a.Path),
 				Action: a.Action,
 			})
 		}
 	} else {
 		result.Actions = append(result.Actions, FileAction{
-			Path:   "tasks/ → " + filepath.Join("Projects", project, "tasks/"),
+			Path:   "tasks/ → " + filepath.Join("Projects", project, "agentctx", "tasks/"),
 			Action: "SKIP",
 		})
 	}
 
-	// Force-update vault-side commands
-	vaultCmds := []struct {
-		rel     string
-		content string
-	}{
-		{"commands/restart.md", generateRestartMD(compressedVault, project)},
-		{"commands/wrap.md", generateWrapMD(compressedVault, project)},
-	}
-	for _, f := range vaultCmds {
-		path := filepath.Join(vaultProject, f.rel)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return nil, fmt.Errorf("create dir for %s: %w", f.rel, err)
+	// Copy local commands to vault agentctx/commands/ (if they're regular files)
+	// then remove the directory so it can be replaced with a symlink.
+	localCmds := filepath.Join(cwd, ".claude", "commands")
+	if info, err := os.Lstat(localCmds); err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+		entries, _ := os.ReadDir(localCmds)
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+				continue
+			}
+			srcPath := filepath.Join(localCmds, entry.Name())
+			// Skip symlinks — they're already vault-managed
+			if fi, err := os.Lstat(srcPath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+				continue
+			}
+			dstPath := filepath.Join(agentctx, "commands", entry.Name())
+			action, err := copyFileAction(srcPath, dstPath, opts.Force)
+			if err != nil {
+				return nil, fmt.Errorf("copy command %s: %w", entry.Name(), err)
+			}
+			result.Actions = append(result.Actions, FileAction{
+				Path:   ".claude/commands/" + entry.Name() + " → " + filepath.Join("Projects", project, "agentctx", "commands", entry.Name()),
+				Action: action,
+			})
 		}
-		safeWrite(path, f.content, true)
-		result.Actions = append(result.Actions, FileAction{
-			Path:   filepath.Join("Projects", project, f.rel),
-			Action: "UPDATE",
-		})
+		// Remove the directory (and any remaining files) so it can be
+		// replaced with a symlink to agentctx/commands/
+		os.RemoveAll(localCmds)
 	}
 
-	// Force-update repo-side CLAUDE.md
+	// Write agentctx/CLAUDE.md (behavioral rules)
+	agentCLAUDE := filepath.Join(agentctx, "CLAUDE.md")
+	safeWrite(agentCLAUDE, generateAgentCtxCLAUDE(project), true)
+	result.Actions = append(result.Actions, FileAction{
+		Path:   filepath.Join("Projects", project, "agentctx", "CLAUDE.md"),
+		Action: "UPDATE",
+	})
+
+	// Force-update vault-side commands (only if not already present from local copy)
+	for _, cmd := range []struct {
+		name    string
+		content string
+	}{
+		{"restart.md", generateRestartMD(compressedVault, project)},
+		{"wrap.md", generateWrapMD(compressedVault, project)},
+	} {
+		path := filepath.Join(agentctx, "commands", cmd.name)
+		// Write default only if file doesn't exist (local copy takes precedence)
+		action := safeWrite(path, cmd.content, false)
+		if action != "SKIP" {
+			result.Actions = append(result.Actions, FileAction{
+				Path:   filepath.Join("Projects", project, "agentctx", "commands", cmd.name),
+				Action: action,
+			})
+		}
+	}
+
+	// Force-update repo-side CLAUDE.md (thin pointer)
 	claudeMDPath := filepath.Join(cwd, "CLAUDE.md")
 	safeWrite(claudeMDPath, generateClaudeMD(compressedVault, project), true)
 	result.Actions = append(result.Actions, FileAction{Path: "CLAUDE.md", Action: "UPDATE"})
 
-	// Force-update repo-side command symlinks → vault
-	cmdLinks := []struct {
-		repoRel  string
-		vaultRel string
-	}{
-		{filepath.Join(".claude", "commands", "restart.md"), "commands/restart.md"},
-		{filepath.Join(".claude", "commands", "wrap.md"), "commands/wrap.md"},
+	// Force-update repo-side .claude/commands/ → symlink to agentctx/commands/
+	dotClaude := filepath.Join(cwd, ".claude")
+	if err := os.MkdirAll(dotClaude, 0o755); err != nil {
+		return nil, fmt.Errorf("create .claude/: %w", err)
 	}
-	for _, cl := range cmdLinks {
-		linkPath := filepath.Join(cwd, cl.repoRel)
-		target := filepath.Join(vaultProject, cl.vaultRel)
-		if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
-			return nil, fmt.Errorf("create dir for %s: %w", cl.repoRel, err)
-		}
-		safeSymlink(linkPath, target, true)
-		result.Actions = append(result.Actions, FileAction{
-			Path:   cl.repoRel,
-			Action: "UPDATE",
-		})
-	}
+	cmdsLink := filepath.Join(dotClaude, "commands")
+	cmdsTarget := filepath.Join(agentctx, "commands")
+	safeSymlink(cmdsLink, cmdsTarget, true)
+	result.Actions = append(result.Actions, FileAction{
+		Path:   ".claude/commands",
+		Action: "UPDATE",
+	})
 
 	// .gitignore
 	giAction, err := gitignoreEnsure(filepath.Join(cwd, ".gitignore"), "CLAUDE.md")
@@ -329,15 +349,26 @@ func safeWrite(path, content string, force bool) string {
 
 // safeSymlink creates a symlink at linkPath pointing to target.
 // Returns "CREATE" if created, "SKIP" if it already exists and force is false,
-// "CREATE" (overwrite) if force is true.
+// "CREATE" (overwrite) if force is true. Handles existing files, symlinks, and
+// directories (empty directories are removed; non-empty directories are skipped
+// to avoid data loss — use migrate to move contents first).
 func safeSymlink(linkPath, target string, force bool) string {
 	if !force {
 		if _, err := os.Lstat(linkPath); err == nil {
 			return "SKIP"
 		}
 	}
-	// Remove existing file or symlink before creating
-	os.Remove(linkPath)
+	// Remove existing file, symlink, or empty directory before creating
+	if info, err := os.Lstat(linkPath); err == nil {
+		if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+			// Real directory — only remove if empty
+			if err := os.Remove(linkPath); err != nil {
+				return "SKIP" // non-empty dir, don't destroy contents
+			}
+		} else {
+			os.Remove(linkPath)
+		}
+	}
 	if err := os.Symlink(target, linkPath); err != nil {
 		return "SKIP"
 	}
@@ -448,71 +479,151 @@ func copyDir(src, dst string, force bool) ([]FileAction, error) {
 
 // --- template generators ---
 
+// generateClaudeMD produces the thin repo-side CLAUDE.md that points to
+// the vault's agentctx directory. This is the only AI context file that
+// lives in the source tree.
 func generateClaudeMD(compressedVault, project string) string {
 	return fmt.Sprintf(`# CLAUDE.md
 
-## Project Context
+All project context, behavioral rules, and workflow commands live in the vault:
 
-All working context for this project lives in the vault:
+  %s/Projects/%s/agentctx/
 
-- **Resume**: %s/Projects/%s/resume.md
-- **Iterations**: %s/Projects/%s/iterations.md
-- **Tasks**: %s/Projects/%s/tasks/
-- **Commands**: %s/Projects/%s/commands/
-- **Sessions**: %s/Projects/%s/sessions/
+Read agentctx/CLAUDE.md at session start for full context and behavioral rules.
 
-Read resume.md at session start for full project context.
+Do not commit this file, commit.msg, or anything under .claude/.
+`, compressedVault, project)
+}
+
+// generateAgentCtxCLAUDE produces the vault-side CLAUDE.md that lives inside
+// agentctx/ and contains the behavioral rules, workflow standards, and file
+// pointers. This is what the AI actually reads for context.
+func generateAgentCtxCLAUDE(project string) string {
+	return fmt.Sprintf(`# %s — AI Context
+
+## Files
+
+- **resume.md** — project state, architecture, design decisions
+- **iterations.md** — iteration narratives and project history
+- **tasks/** — active tasks; **tasks/done/** — completed
+- **commands/** — slash commands (/restart, /wrap)
 
 ## Workflow Rules
 
-- **Never commit without explicit human permission.** You may stage files
-  and update commit.msg freely, but the actual git commit requires the
-  human to say so.
+- **Never commit without explicit human permission.** Stage files and
+  update commit.msg freely, but the actual git commit requires human approval.
 - **Never commit AI context files.** CLAUDE.md, commit.msg, and anything
-  under .claude/commands/ are local-only — they must never appear in git.
+  under .claude/ are local-only.
 - **Git commit messages are the project's history.** Write them to be
   clear, detailed, and self-sufficient.
-- On /wrap: stage files, update commit.msg, update vault-side resume.md
-  and tasks, but do not commit.
-`, compressedVault, project,
-		compressedVault, project,
-		compressedVault, project,
-		compressedVault, project,
-		compressedVault, project)
+
+## The Pair Programming Paradigm
+
+### The AI's Role: Expert Implementation
+
+- Expert coder with deep technical knowledge
+- Investigate problems thoroughly BEFORE implementing fixes
+- Present findings and action plans for review
+- Implement solutions only after architectural approval
+
+### The Human's Role: Architectural Vision
+
+- Context that spans the entire project across many days and iterations
+- Understanding of long-term maintainability goals
+- Guide architectural decisions and approve implementation approaches
+
+### Critical Anti-Pattern: Premature Implementation
+
+Never jump to coding short-term fixes without investigation.
+
+## Investigation-First Workflow
+
+### 1. Plan Mode Default
+
+- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
+- If something goes sideways, STOP and re-plan immediately
+- Write detailed specs upfront to reduce ambiguity
+
+### 2. Subagent Strategy
+
+- Use subagents liberally to keep main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- One tack per subagent for focused execution
+
+### 3. Self-Improvement Loop
+
+- After ANY correction from the user: update lessons with the pattern
+- Write rules that prevent the same mistake
+- Review lessons at session start
+
+### 4. Verification Before Done
+
+- Never mark a task complete without proving it works
+- No task is "done" until the user says it is and does the actual commit
+- Run tests, check logs, demonstrate correctness
+- Ask yourself: "Would a staff engineer approve this?"
+- No warnings or diagnostic messages in committed code
+
+### 5. Demand Elegance (Balanced)
+
+- For non-trivial changes: pause and ask "is there a more elegant way?"
+- Skip this for simple, obvious fixes — don't over-engineer
+
+### 6. Autonomous Bug Fixing
+
+- When given a bug report: generate a plan and review with the user
+- Point at logs, errors, failing tests — then plan to resolve them
+- Never fix a test without understanding the root cause
+
+## Task Management
+
+1. Write plan to tasks/<task_name>.md with checkable items
+2. Check in before starting implementation
+3. Track progress and explain changes at each step
+4. Add review section to the task file
+5. When complete: update and move to tasks/done/
+
+## Core Principles
+
+- **Simplicity First**: Make every change as simple as possible but no simpler
+- **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
+- **Minimal Impact**: Changes should only touch what's necessary
+- **Test Coverage**: Ensure close to 80%% unit test coverage for code changes
+`, project)
 }
 
 func generateRestartMD(compressedVault, project string) string {
+	agentctx := fmt.Sprintf("%s/Projects/%s/agentctx", compressedVault, project)
 	return fmt.Sprintf(`# Session Restart
 
-Read the following files to restore context:
+Read the following files to restore full project context:
 
-1. %s/Projects/%s/resume.md — current project state, architecture, decisions
-2. %s/Projects/%s/iterations.md — iteration narratives and history
-3. %s/Projects/%s/tasks/ — active task files (skip tasks/done/)
+1. %s/CLAUDE.md — behavioral rules and workflow standards
+2. %s/resume.md — current project state, architecture, decisions
+3. %s/tasks/ — active task files (skip tasks/done/)
 
-After reading, briefly summarize your understanding and ask what to work on.
-`, compressedVault, project,
-		compressedVault, project,
-		compressedVault, project)
+After reading, briefly confirm what you loaded (test count, open tasks,
+what was last worked on) and ask what to work on.
+`, agentctx, agentctx, agentctx)
 }
 
 func generateWrapMD(compressedVault, project string) string {
+	agentctx := fmt.Sprintf("%s/Projects/%s/agentctx", compressedVault, project)
 	return fmt.Sprintf(`# Session Wrap
 
 End-of-session procedure:
 
-1. Stage all changed files (git add)
+1. Stage all changed files (git add with explicit paths, never git add -A)
 2. Write a descriptive commit message to commit.msg
-3. Update %s/Projects/%s/resume.md:
+3. Update %s/resume.md:
    - Reflect current project state
    - Update "What Was Done" and "Open Threads" sections
    - Keep it concise but complete enough to resume cold
-4. Move completed tasks from %s/Projects/%s/tasks/ to tasks/done/
+4. Move completed tasks from %s/tasks/ to tasks/done/
 5. Do NOT commit — the human will review and commit
 
 Report what you staged and what changed in resume.md.
-`, compressedVault, project,
-		compressedVault, project)
+`, agentctx, agentctx)
 }
 
 func generateResume(project string) string {

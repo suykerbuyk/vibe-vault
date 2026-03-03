@@ -130,6 +130,11 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
+func isSymlink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&os.ModeSymlink != 0
+}
+
 func readIndex(t *testing.T, stateDir string) map[string]map[string]any {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(stateDir, "session-index.json"))
@@ -735,73 +740,169 @@ func TestIntegration(t *testing.T) {
 
 	// 10d. context init + migrate
 	t.Run("context_init_and_migrate", func(t *testing.T) {
-		// Use a temp dir as the "repo" for context commands
+		agentctxDir := filepath.Join(vaultPath, "Projects", "ctx-project", "agentctx")
+
+		// --- Section 1: context init — verify agentctx artifacts ---
 		repoCwd := t.TempDir()
 
-		// context init (run from repoCwd)
 		stdout := mustRunVVInDir(t, env, repoCwd, "context", "init", "--project", "ctx-project")
 		assertContains(t, stdout, "Context initialized", "context init stdout")
 		assertContains(t, stdout, "ctx-project", "context init project name")
 
-		// Vault files created
-		if !fileExists(filepath.Join(vaultPath, "Projects", "ctx-project", "resume.md")) {
-			t.Error("vault resume.md not created by context init")
+		// Vault-side agentctx structure
+		if !fileExists(filepath.Join(agentctxDir, "CLAUDE.md")) {
+			t.Error("vault agentctx/CLAUDE.md not created")
+		} else {
+			content := readFile(t, filepath.Join(agentctxDir, "CLAUDE.md"))
+			assertContains(t, content, "Pair Programming", "agentctx/CLAUDE.md behavioral rules")
 		}
-		if !fileExists(filepath.Join(vaultPath, "Projects", "ctx-project", "iterations.md")) {
-			t.Error("vault iterations.md not created by context init")
+		if !fileExists(filepath.Join(agentctxDir, "resume.md")) {
+			t.Error("vault agentctx/resume.md not created")
 		}
-		if !dirExists(filepath.Join(vaultPath, "Projects", "ctx-project", "tasks")) {
-			t.Error("vault tasks/ not created by context init")
+		if !fileExists(filepath.Join(agentctxDir, "iterations.md")) {
+			t.Error("vault agentctx/iterations.md not created")
 		}
-		if !dirExists(filepath.Join(vaultPath, "Projects", "ctx-project", "tasks", "done")) {
-			t.Error("vault tasks/done/ not created by context init")
+		if !fileExists(filepath.Join(agentctxDir, "commands", "restart.md")) {
+			t.Error("vault agentctx/commands/restart.md not created")
+		}
+		if !fileExists(filepath.Join(agentctxDir, "commands", "wrap.md")) {
+			t.Error("vault agentctx/commands/wrap.md not created")
+		}
+		if !dirExists(filepath.Join(agentctxDir, "tasks")) {
+			t.Error("vault agentctx/tasks/ not created")
+		}
+		if !dirExists(filepath.Join(agentctxDir, "tasks", "done")) {
+			t.Error("vault agentctx/tasks/done/ not created")
 		}
 
-		// Repo files created
+		// Repo-side: CLAUDE.md is a thin pointer to agentctx
 		if !fileExists(filepath.Join(repoCwd, "CLAUDE.md")) {
 			t.Error("repo CLAUDE.md not created by context init")
-		}
-		if !fileExists(filepath.Join(repoCwd, ".claude", "commands", "restart.md")) {
-			t.Error("repo restart.md not created by context init")
+		} else {
+			claudeContent := readFile(t, filepath.Join(repoCwd, "CLAUDE.md"))
+			assertContains(t, claudeContent, "agentctx", "CLAUDE.md points to agentctx")
 		}
 
-		// CLAUDE.md has vault pointer
-		claudeContent := readFile(t, filepath.Join(repoCwd, "CLAUDE.md"))
-		assertContains(t, claudeContent, "resume.md", "CLAUDE.md vault pointer")
+		// Repo-side: .claude/commands is a directory symlink
+		cmdsPath := filepath.Join(repoCwd, ".claude", "commands")
+		if !isSymlink(cmdsPath) {
+			t.Error(".claude/commands is not a symlink after context init")
+		} else {
+			target, err := os.Readlink(cmdsPath)
+			if err != nil {
+				t.Errorf("readlink .claude/commands: %v", err)
+			} else {
+				assertContains(t, target, filepath.Join("agentctx", "commands"), "symlink target points to agentctx/commands")
+			}
+		}
 
-		// context migrate — set up local files in a different temp dir
+		// Symlink resolves: commands are readable through it
+		if !fileExists(filepath.Join(cmdsPath, "restart.md")) {
+			t.Error("restart.md not readable through .claude/commands symlink")
+		}
+		if !fileExists(filepath.Join(cmdsPath, "wrap.md")) {
+			t.Error("wrap.md not readable through .claude/commands symlink")
+		}
+
+		// .gitignore contains expected entries
+		gitignoreContent := readFile(t, filepath.Join(repoCwd, ".gitignore"))
+		assertContains(t, gitignoreContent, "CLAUDE.md", ".gitignore contains CLAUDE.md")
+		assertContains(t, gitignoreContent, "commit.msg", ".gitignore contains commit.msg")
+
+		// --- Section 2: context init idempotent re-run ---
+		stdout2 := mustRunVVInDir(t, env, repoCwd, "context", "init", "--project", "ctx-project")
+		assertContains(t, stdout2, "Context initialized", "idempotent context init stdout")
+
+		// Vault files still exist
+		if !fileExists(filepath.Join(agentctxDir, "CLAUDE.md")) {
+			t.Error("vault agentctx/CLAUDE.md missing after re-run")
+		}
+		if !fileExists(filepath.Join(agentctxDir, "resume.md")) {
+			t.Error("vault agentctx/resume.md missing after re-run")
+		}
+		if !fileExists(filepath.Join(agentctxDir, "iterations.md")) {
+			t.Error("vault agentctx/iterations.md missing after re-run")
+		}
+
+		// Repo-side CLAUDE.md content unchanged
+		claudeAfter := readFile(t, filepath.Join(repoCwd, "CLAUDE.md"))
+		assertContains(t, claudeAfter, "agentctx", "CLAUDE.md still points to agentctx after re-run")
+
+		// .claude/commands still a valid symlink
+		if !isSymlink(cmdsPath) {
+			t.Error(".claude/commands not a symlink after idempotent re-run")
+		}
+
+		// --- Section 3: context migrate — verify file copy + symlink replacement ---
 		migrateDir := t.TempDir()
 		writeFixture(t, migrateDir, "RESUME.md", "# My Resume\nProject state.")
 		writeFixture(t, migrateDir, "HISTORY.md", "# Iteration History")
 		writeFixture(t, filepath.Join(migrateDir, "tasks"), "001-feature.md", "Feature task")
+		// Simulate a local command file (regular file, not symlink)
+		writeFixture(t, filepath.Join(migrateDir, ".claude", "commands"), "custom.md", "# Custom Command")
 
 		migrateStdout := mustRunVVInDir(t, env, migrateDir, "context", "migrate", "--project", "migrate-test")
 		assertContains(t, migrateStdout, "Context migrated", "context migrate stdout")
 
-		// Verify vault contents from migrate
-		migrateResume := filepath.Join(vaultPath, "Projects", "migrate-test", "resume.md")
+		migrateAgentctx := filepath.Join(vaultPath, "Projects", "migrate-test", "agentctx")
+
+		// Vault-side: migrated content in agentctx/
+		migrateResume := filepath.Join(migrateAgentctx, "resume.md")
 		if !fileExists(migrateResume) {
-			t.Error("vault resume.md not created by context migrate")
+			t.Error("vault agentctx/resume.md not created by migrate")
 		} else {
 			content := readFile(t, migrateResume)
 			assertContains(t, content, "My Resume", "migrated resume content")
 		}
 
-		migrateIter := filepath.Join(vaultPath, "Projects", "migrate-test", "iterations.md")
+		migrateIter := filepath.Join(migrateAgentctx, "iterations.md")
 		if !fileExists(migrateIter) {
-			t.Error("vault iterations.md not created by context migrate")
+			t.Error("vault agentctx/iterations.md not created by migrate")
 		} else {
 			content := readFile(t, migrateIter)
 			assertContains(t, content, "Iteration History", "migrated iterations content")
 		}
 
-		// Migrated task file in vault
-		migrateTask := filepath.Join(vaultPath, "Projects", "migrate-test", "tasks", "001-feature.md")
+		migrateTask := filepath.Join(migrateAgentctx, "tasks", "001-feature.md")
 		if !fileExists(migrateTask) {
-			t.Error("vault task not created by context migrate")
+			t.Error("vault agentctx/tasks/001-feature.md not created by migrate")
 		} else {
 			content := readFile(t, migrateTask)
 			assertContains(t, content, "Feature task", "migrated task content")
+		}
+
+		// Local command was copied to vault agentctx/commands/
+		if !fileExists(filepath.Join(migrateAgentctx, "commands", "custom.md")) {
+			t.Error("vault agentctx/commands/custom.md not migrated")
+		} else {
+			content := readFile(t, filepath.Join(migrateAgentctx, "commands", "custom.md"))
+			assertContains(t, content, "Custom Command", "migrated custom command content")
+		}
+
+		// Default commands generated
+		if !fileExists(filepath.Join(migrateAgentctx, "commands", "restart.md")) {
+			t.Error("vault agentctx/commands/restart.md not created by migrate")
+		}
+		if !fileExists(filepath.Join(migrateAgentctx, "commands", "wrap.md")) {
+			t.Error("vault agentctx/commands/wrap.md not created by migrate")
+		}
+
+		// Behavioral rules present
+		if !fileExists(filepath.Join(migrateAgentctx, "CLAUDE.md")) {
+			t.Error("vault agentctx/CLAUDE.md not created by migrate")
+		} else {
+			content := readFile(t, filepath.Join(migrateAgentctx, "CLAUDE.md"))
+			assertContains(t, content, "Pair Programming", "migrate agentctx/CLAUDE.md behavioral rules")
+		}
+
+		// Repo-side: CLAUDE.md updated to thin pointer
+		migrateClaudeContent := readFile(t, filepath.Join(migrateDir, "CLAUDE.md"))
+		assertContains(t, migrateClaudeContent, "agentctx", "migrated CLAUDE.md points to agentctx")
+
+		// Repo-side: .claude/commands is now a symlink (directory was replaced)
+		migrateCmdsPath := filepath.Join(migrateDir, ".claude", "commands")
+		if !isSymlink(migrateCmdsPath) {
+			t.Error(".claude/commands is not a symlink after migrate")
 		}
 
 		// Local originals preserved
@@ -811,10 +912,6 @@ func TestIntegration(t *testing.T) {
 		if !fileExists(filepath.Join(migrateDir, "HISTORY.md")) {
 			t.Error("local HISTORY.md deleted by migrate")
 		}
-
-		// Repo-side files updated by migrate
-		migrateClaudeContent := readFile(t, filepath.Join(migrateDir, "CLAUDE.md"))
-		assertContains(t, migrateClaudeContent, "resume.md", "migrated CLAUDE.md vault pointer")
 
 		// Help flags work
 		_, helpStderr, _ := runVV(t, env, "context", "--help")
