@@ -258,7 +258,7 @@ vv context init
 
 This creates:
 - **Vault-side** (`Projects/{project}/agentctx/`):
-  - `CLAUDE.md` — behavioral rules (pair programming, plan mode, verification)
+  - `workflow.md` — behavioral rules (pair programming, plan mode, verification)
   - `resume.md` — project state scaffold
   - `iterations.md` — iteration history
   - `commands/restart.md`, `commands/wrap.md` — slash commands
@@ -297,7 +297,7 @@ manually after verifying the migration.
 - `/restart` reads `resume.md` from the vault's `agentctx/` directory
 - `/wrap` updates vault-side files (resume, tasks) in `agentctx/`
 - `CLAUDE.md` in the repo is a 5-line pointer to the agentctx path
-- `agentctx/CLAUDE.md` has behavioral rules (always loaded by Claude Code)
+- `agentctx/workflow.md` has behavioral rules (loaded via CLAUDE.md → workflow.md chain)
 - Everything is searchable in Obsidian alongside session notes
 
 ## 7. Optional: Enable LLM Enrichment

@@ -404,7 +404,7 @@ vibe-vault/
 ├── Projects/                   # Project-centric organization
 │   └── {project}/
 │       ├── agentctx/           # AI context package (vv context init)
-│       │   ├── CLAUDE.md       # Behavioral rules and file pointers
+│       │   ├── workflow.md     # Behavioral rules and workflow standards
 │       │   ├── resume.md       # Project state, architecture, decisions
 │       │   ├── iterations.md   # Iteration narratives and history
 │       │   ├── commands/       # Slash commands (/restart, /wrap)
