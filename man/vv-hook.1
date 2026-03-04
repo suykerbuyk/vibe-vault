@@ -1,18 +1,18 @@
-.TH VV-HOOK 1 "2026-03-03" "vv v0.4.0-4-g875ed64-dirty" "Vibe-Vault Manual"
+.TH VV-HOOK 1 "2026-03-03" "vv v0.5.0-2-ga51c202-dirty" "Vibe-Vault Manual"
 .SH NAME
 vv-hook \- Claude Code hook handler
 .SH SYNOPSIS
 .B vv hook [install | uninstall | \-\-event <name>]
 .SH DESCRIPTION
 Reads a JSON payload from stdin as delivered by Claude Code's hook
-system. Handles two event types:
+system. Handles three event types:
 .PP
   SessionEnd — parses transcript, writes a finalized session note
   Stop       — captures a mid\-session checkpoint (no LLM enrichment)
+  PreCompact — captures a checkpoint before context compaction
 .PP
-Checkpoint notes are provisional: a subsequent Stop overwrites the
-previous checkpoint, and SessionEnd finalizes it. Clear events and
-unknown events are silently ignored.
+Checkpoint notes are provisional: a subsequent Stop or PreCompact
+overwrites the previous checkpoint, and SessionEnd finalizes it.
 .PP
 This command is meant to be called by Claude Code, not directly.
 .PP

@@ -63,14 +63,17 @@ Register vv as a Claude Code hook so every session is automatically captured:
 vv hook install
 ```
 
-This adds `SessionEnd` and `Stop` hook entries to `~/.claude/settings.json`,
-creating the file if it doesn't exist. A backup is saved to
-`settings.json.vv.bak` before any modification. The command is idempotent —
-running it again when hooks are already configured is a no-op.
+This adds `SessionEnd`, `Stop`, and `PreCompact` hook entries to
+`~/.claude/settings.json`, creating the file if it doesn't exist. A backup is
+saved to `settings.json.vv.bak` before any modification. The command is
+idempotent — running it again when hooks are already configured is a no-op.
 
-- **SessionEnd** captures finalized notes when a session completes
+- **SessionEnd** captures finalized notes when a session completes (including
+  `/clear` events)
 - **Stop** captures mid-session checkpoints (provisional notes that get
   overwritten when the session ends)
+- **PreCompact** captures a checkpoint before context compaction, preserving
+  full context before it gets summarized
 
 To remove the hooks later: `vv hook uninstall`
 
@@ -89,6 +92,12 @@ into) the `hooks` object:
       }
     ],
     "Stop": [
+      {
+        "matcher": "",
+        "hooks": [{"type": "command", "command": "vv hook"}]
+      }
+    ],
+    "PreCompact": [
       {
         "matcher": "",
         "hooks": [{"type": "command", "command": "vv hook"}]
@@ -177,9 +186,11 @@ After backfilling, use the analytics commands to explore what you've captured:
 vv stats                       # session counts, tokens, models, top projects
 vv friction                    # correction patterns and high-friction sessions
 vv trends                      # weekly metric trends with anomaly detection
+vv inject                      # session-start context payload
 ```
 
-All three accept `--project myproject` to filter to a single project.
+All four accept `--project myproject` to filter to a single project.
+`vv inject` also supports `--format json`, `--sections`, and `--max-tokens`.
 
 ## 5. Connect a Project
 
@@ -344,6 +355,7 @@ vv reprocess --project myproject   # one project only
 | Session analytics | `vv stats` |
 | Friction analysis | `vv friction` |
 | Metric trends | `vv trends` |
+| Inject context | `vv inject` |
 | Reprocess notes | `vv reprocess` |
 | Init project context | `vv context init` |
 | Migrate local context | `vv context migrate` |

@@ -17,7 +17,7 @@ import (
 const hookCommand = "vv hook"
 
 // hookEvents are the Claude Code events vv registers for.
-var hookEvents = []string{"SessionEnd", "Stop"}
+var hookEvents = []string{"SessionEnd", "Stop", "PreCompact"}
 
 // SettingsPath returns the path to ~/.claude/settings.json.
 func SettingsPath() (string, error) {

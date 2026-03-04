@@ -845,7 +845,47 @@ This is archived and should be ignored.
 		assertContains(t, helpStderr, "trends", "trends help text")
 	})
 
-	// 10d. context init + migrate
+	// 10d. inject
+	t.Run("inject", func(t *testing.T) {
+		// Default markdown output for myproject
+		stdout := mustRunVV(t, env, "inject", "--project", "myproject")
+		assertContains(t, stdout, "# Context: myproject", "inject context header")
+		assertContains(t, stdout, "## Recent Sessions", "inject sessions section")
+
+		// JSON format
+		jsonStdout := mustRunVV(t, env, "inject", "--project", "myproject", "--format", "json")
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(jsonStdout), &parsed); err != nil {
+			t.Fatalf("invalid JSON from inject: %v\noutput: %s", err, jsonStdout)
+		}
+		if parsed["project"] != "myproject" {
+			t.Errorf("JSON project = %v, want myproject", parsed["project"])
+		}
+
+		// Sections filter
+		sectionsStdout := mustRunVV(t, env, "inject", "--project", "myproject", "--sections", "summary,sessions")
+		assertContains(t, sectionsStdout, "# Context: myproject", "sections filter has header")
+		assertNotContains(t, sectionsStdout, "## Open Threads", "sections filter excludes threads")
+		assertNotContains(t, sectionsStdout, "## Decisions", "sections filter excludes decisions")
+
+		// Max tokens (very low)
+		smallStdout := mustRunVV(t, env, "inject", "--project", "myproject", "--max-tokens", "50")
+		assertContains(t, smallStdout, "# Context: myproject", "small budget has header")
+
+		// Help flag
+		_, helpStderr, _ := runVV(t, env, "inject", "--help")
+		assertContains(t, helpStderr, "inject", "inject help text")
+
+		// Warning for unknown project
+		_, warnStderr, _ := runVV(t, env, "inject", "--project", "nonexistent")
+		assertContains(t, warnStderr, "no sessions found", "warning for unknown project")
+
+		// Knowledge injection: rebuild index with knowledge to verify inject picks it up
+		knowledgeStdout := mustRunVV(t, env, "inject", "--project", "myproject", "--sections", "knowledge")
+		assertContains(t, knowledgeStdout, "## Knowledge", "inject has knowledge section")
+	})
+
+	// 10e. context init + migrate
 	t.Run("context_init_and_migrate", func(t *testing.T) {
 		agentctxDir := filepath.Join(vaultPath, "Projects", "ctx-project", "agentctx")
 

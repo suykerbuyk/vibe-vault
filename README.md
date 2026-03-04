@@ -148,16 +148,18 @@ capture infrastructure. It also writes a default config to
 vv hook install
 ```
 
-This adds `SessionEnd` and `Stop` hook entries to `~/.claude/settings.json`,
-creating the file if it doesn't exist. A backup is saved to
-`settings.json.vv.bak` before any modification. The command is idempotent —
-running it again when hooks are already configured is a no-op.
+This adds `SessionEnd`, `Stop`, and `PreCompact` hook entries to
+`~/.claude/settings.json`, creating the file if it doesn't exist. A backup is
+saved to `settings.json.vv.bak` before any modification. The command is
+idempotent — running it again when hooks are already configured is a no-op.
 
 To remove the hooks later: `vv hook uninstall`
 
-The `SessionEnd` hook captures finalized session notes. The `Stop` hook captures
-mid-session checkpoints (provisional notes without LLM enrichment that get
-overwritten when the session ends).
+- **SessionEnd** captures finalized session notes (including `/clear` events)
+- **Stop** captures mid-session checkpoints (provisional notes without LLM
+  enrichment that get overwritten when the session ends)
+- **PreCompact** captures a checkpoint before context compaction, preserving
+  full context that would otherwise be lost to summarization
 
 <details>
 <summary>Manual alternative</summary>
@@ -174,6 +176,12 @@ Add this to `~/.claude/settings.json`:
       }
     ],
     "Stop": [
+      {
+        "matcher": "",
+        "hooks": [{"type": "command", "command": "vv hook"}]
+      }
+    ],
+    "PreCompact": [
       {
         "matcher": "",
         "hooks": [{"type": "command", "command": "vv hook"}]
@@ -258,9 +266,11 @@ origin` (stable across worktrees, renames, and machines), falling back to
 **Session dedup** uses the session index to skip already-processed transcripts
 and assign same-day iteration numbers (`-01`, `-02`, etc.).
 
-**Checkpoint capture** from Stop events creates provisional notes (no enrichment,
-`status: checkpoint`). A subsequent Stop overwrites the previous checkpoint.
-SessionEnd finalizes with full enrichment and `status: completed`.
+**Checkpoint capture** from Stop and PreCompact events creates provisional notes
+(no enrichment, `status: checkpoint`). A subsequent checkpoint overwrites the
+previous one. SessionEnd (including `/clear`) finalizes with full enrichment and
+`status: completed`. PreCompact checkpoints preserve full context before
+compaction summarizes it away.
 
 **Cross-session linking** scores related sessions across four signals — shared
 files, thread-to-resolution matching, same branch, and same activity tag — using
@@ -283,6 +293,7 @@ deterministic heuristics rather than embeddings.
 | `vv stats [--project X]` | Show session analytics and metrics |
 | `vv friction [--project X]` | Show friction analysis and correction patterns |
 | `vv trends [--project X]` | Show metric trends over time |
+| `vv inject [--project X]` | Output session-start context payload |
 | `vv context [init \| migrate]` | Manage vault-resident AI context files |
 | `vv version` | Print version |
 
@@ -322,6 +333,15 @@ vv friction --project myproject   # friction for one project only
 vv trends                          # weekly metrics with anomaly detection
 vv trends --project myproject      # trends for one project only
 vv trends --weeks 8                # limit display to last 8 weeks
+```
+
+**Inject session-start context:**
+```bash
+vv inject                                   # context for auto-detected project
+vv inject --project myproject               # context for a specific project
+vv inject --format json                      # output as JSON
+vv inject --sections summary,sessions        # only specific sections
+vv inject --max-tokens 500                   # compact output
 ```
 
 **Set up vault-resident AI context for a project:**
@@ -575,12 +595,11 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 - **Parallel eval / stress testing** — vv is a post-hoc observer, not an agent
   orchestrator. It captures what happened; it doesn't control what runs.
-- **Pre-flight validation** — vv runs after the session ends. It has no hook
-  into session start.
 - **Multi-agent access controls** — vv is single-user, single-machine.
   Multi-agent coordination is an orchestration concern.
-- **Real-time agent intervention** — mid-session intervention requires hooks
-  that don't exist in Claude Code's current model.
+- **Real-time agent intervention** — vv captures checkpoints at natural
+  boundaries (stop, compaction, clear) but does not modify agent behavior
+  mid-turn.
 
 ## Development
 
@@ -601,11 +620,11 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 ### Test Suite
 
-**451 tests** across 33 test files + **1 integration test** with 19
+**507 tests** across 35 test files + **1 integration test** with 20
 subtests. The integration test exercises the full pipeline:
-`init` → `process` → `index` → `knowledge injection` → `backfill` →
-`archive` → `reprocess` → `checkpoint lifecycle` → `stats` → `friction` →
-`trends` → `context init/migrate`.
+`init` → `process` → `index` → `knowledge injection` → `stats` →
+`backfill` → `archive` → `checkpoint lifecycle` → `friction` →
+`trends` → `inject` → `context init/migrate` → `reprocess`.
 
 ```bash
 make test          # unit tests only (~0.5s)

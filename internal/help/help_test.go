@@ -37,14 +37,14 @@ var expectedTerminal = map[string]string{
 		"  --event <name>   Override the hook event type (default: read from stdin)\n" +
 		"\n" +
 		"Reads a JSON payload from stdin as delivered by Claude Code's hook\n" +
-		"system. Handles two event types:\n" +
+		"system. Handles three event types:\n" +
 		"\n" +
 		"  SessionEnd \u2014 parses transcript, writes a finalized session note\n" +
 		"  Stop       \u2014 captures a mid-session checkpoint (no LLM enrichment)\n" +
+		"  PreCompact \u2014 captures a checkpoint before context compaction\n" +
 		"\n" +
-		"Checkpoint notes are provisional: a subsequent Stop overwrites the\n" +
-		"previous checkpoint, and SessionEnd finalizes it. Clear events and\n" +
-		"unknown events are silently ignored.\n" +
+		"Checkpoint notes are provisional: a subsequent Stop or PreCompact\n" +
+		"overwrites the previous checkpoint, and SessionEnd finalizes it.\n" +
 		"\n" +
 		"This command is meant to be called by Claude Code, not directly.\n" +
 		"\n" +
@@ -224,6 +224,39 @@ var expectedTerminal = map[string]string{
 		"  vv context init      Scaffold vault-resident context for current project\n" +
 		"  vv context migrate   Copy existing local files to vault\n",
 
+	"inject": "vv inject \u2014 output session-start context payload\n" +
+		"\n" +
+		"Usage: vv inject [--project <name>] [--format <md|json>] [--sections <list>] [--max-tokens <n>]\n" +
+		"\n" +
+		"Flags:\n" +
+		"  --project <name>     Project to inject context for (default: auto-detect)\n" +
+		"  --format <md|json>   Output format (default: md)\n" +
+		"  --sections <list>    Comma-separated sections to include (default: all)\n" +
+		"  --max-tokens <n>     Token budget for output (default: 2000)\n" +
+		"\n" +
+		"Outputs a condensed, token-budgeted context payload for a project.\n" +
+		"Assembles recent sessions, open threads, decisions, friction trends,\n" +
+		"and knowledge notes into a single document suitable for injection at\n" +
+		"session start.\n" +
+		"\n" +
+		"Available sections (in priority order):\n" +
+		"  summary      Most recent session summary\n" +
+		"  sessions     Last 5 sessions, newest first\n" +
+		"  threads      Open threads from last 5 sessions (resolved filtered out)\n" +
+		"  decisions    Decisions from last 30 days (deduped)\n" +
+		"  friction     Friction trend direction and rolling average\n" +
+		"  knowledge    Relevant knowledge notes (project + agnostic)\n" +
+		"\n" +
+		"When output exceeds --max-tokens, lowest-priority sections are dropped\n" +
+		"until the budget is met.\n" +
+		"\n" +
+		"Examples:\n" +
+		"  vv inject                                   Inject context for auto-detected project\n" +
+		"  vv inject --project myproject                Inject context for a specific project\n" +
+		"  vv inject --format json                      Output as JSON\n" +
+		"  vv inject --sections summary,sessions        Only summary and sessions\n" +
+		"  vv inject --max-tokens 500                   Compact output\n",
+
 	"version": "vv version \u2014 print version\n" +
 		"\n" +
 		"Usage: vv version\n",
@@ -261,6 +294,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv stats [--project X]       Show session analytics and metrics\n" +
 		"  vv friction [--project X]    Show friction analysis and correction patterns\n" +
 		"  vv trends [--project X]      Show metric trends over time\n" +
+		"  vv inject [--project X]      Output session-start context payload\n" +
 		"  vv version                   Print version\n" +
 		"  vv help                      Show this help\n" +
 		"\n" +
@@ -279,7 +313,7 @@ func TestFormatUsage(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "context", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))

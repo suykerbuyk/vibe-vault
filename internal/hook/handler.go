@@ -43,15 +43,10 @@ func handleInput(input *Input, event string, cfg config.Config) error {
 		input.HookEventName = event
 	}
 
-	// Skip context clears
-	if input.Reason == "clear" {
-		return nil
-	}
-
 	switch input.HookEventName {
 	case "SessionEnd", "":
 		return handleSessionEnd(input, cfg)
-	case "Stop":
+	case "Stop", "PreCompact":
 		return handleStop(input, cfg)
 	default:
 		return fmt.Errorf("unknown hook event: %s", input.HookEventName)

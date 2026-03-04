@@ -20,6 +20,7 @@ import (
 	"github.com/johns/vibe-vault/internal/help"
 	"github.com/johns/vibe-vault/internal/hook"
 	"github.com/johns/vibe-vault/internal/index"
+	"github.com/johns/vibe-vault/internal/inject"
 	"github.com/johns/vibe-vault/internal/knowledge"
 	"github.com/johns/vibe-vault/internal/scaffold"
 	"github.com/johns/vibe-vault/internal/session"
@@ -69,6 +70,9 @@ func main() {
 
 	case "trends":
 		runTrends()
+
+	case "inject":
+		runInject()
 
 	case "version":
 		if wantsHelp(os.Args[2:]) {
@@ -341,6 +345,76 @@ func runTrends() {
 	result := trends.Compute(idx.Entries, project, weeks)
 	result.AlertThreshold = cfg.Friction.AlertThreshold
 	fmt.Print(trends.Format(result))
+}
+
+func runInject() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdInject))
+		return
+	}
+
+	cfg := mustLoadConfig()
+
+	project := flagValue(os.Args[2:], "--project")
+	if project == "" {
+		cwd, err := os.Getwd()
+		if err == nil {
+			project = session.DetectProject(cwd)
+		}
+	}
+
+	format := flagValue(os.Args[2:], "--format")
+	if format == "" {
+		format = "md"
+	}
+
+	var sections []string
+	if s := flagValue(os.Args[2:], "--sections"); s != "" {
+		sections = strings.Split(s, ",")
+	}
+
+	maxTokens := 2000
+	if mt := flagValue(os.Args[2:], "--max-tokens"); mt != "" {
+		n, err := strconv.Atoi(mt)
+		if err != nil || n < 1 {
+			fatal("--max-tokens must be a positive integer")
+		}
+		maxTokens = n
+	}
+
+	idx, err := index.Load(cfg.StateDir())
+	if err != nil {
+		fatal("load index: %v", err)
+	}
+
+	// Check if project has sessions
+	hasProject := false
+	for _, e := range idx.Entries {
+		if e.Project == project {
+			hasProject = true
+			break
+		}
+	}
+	if !hasProject {
+		fmt.Fprintf(os.Stderr, "vv: no sessions found for project %q\n", project)
+	}
+
+	summaries := readKnowledgeSummaries(cfg.VaultPath)
+	trendResult := trends.Compute(idx.Entries, project, 4)
+
+	opts := inject.Opts{
+		Project:   project,
+		Format:    format,
+		Sections:  sections,
+		MaxTokens: maxTokens,
+	}
+
+	result := inject.Build(idx.Entries, summaries, trendResult, opts)
+	output, err := inject.Render(result, opts)
+	if err != nil {
+		fatal("render: %v", err)
+	}
+	fmt.Print(output)
 }
 
 func runIndex() {

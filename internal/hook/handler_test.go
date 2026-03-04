@@ -97,12 +97,16 @@ func TestHandleInput_EventOverride(t *testing.T) {
 
 func TestHandleInput_ClearReason(t *testing.T) {
 	cfg := testConfig(t)
+	transcriptPath := writeTranscript(t, minimalTranscriptWithTools)
+
 	input := &Input{
-		SessionID:     "test-sess",
-		HookEventName: "SessionEnd",
-		Reason:        "clear",
+		SessionID:      "test-sess-clear",
+		TranscriptPath: transcriptPath,
+		HookEventName:  "SessionEnd",
+		Reason:         "clear",
 	}
 
+	// Clear reason should be processed normally (not skipped)
 	err := handleInput(input, "", cfg)
 	if err != nil {
 		t.Fatalf("handleInput with clear reason: %v", err)

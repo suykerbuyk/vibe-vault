@@ -1,0 +1,46 @@
+.TH VV-INJECT 1 "2026-03-03" "vv v0.5.0-2-ga51c202-dirty" "Vibe-Vault Manual"
+.SH NAME
+vv-inject \- output session\-start context payload
+.SH SYNOPSIS
+.B vv inject [\-\-project <name>] [\-\-format <md|json>] [\-\-sections <list>] [\-\-max\-tokens <n>]
+.SH DESCRIPTION
+Outputs a condensed, token\-budgeted context payload for a project.
+Assembles recent sessions, open threads, decisions, friction trends,
+and knowledge notes into a single document suitable for injection at
+session start.
+.PP
+Available sections (in priority order):
+  summary      Most recent session summary
+  sessions     Last 5 sessions, newest first
+  threads      Open threads from last 5 sessions (resolved filtered out)
+  decisions    Decisions from last 30 days (deduped)
+  friction     Friction trend direction and rolling average
+  knowledge    Relevant knowledge notes (project + agnostic)
+.PP
+When output exceeds \-\-max\-tokens, lowest\-priority sections are dropped
+until the budget is met.
+.SH OPTIONS
+.TP
+.B \-\-project <name>
+Project to inject context for (default: auto\-detect)
+.TP
+.B \-\-format <md|json>
+Output format (default: md)
+.TP
+.B \-\-sections <list>
+Comma\-separated sections to include (default: all)
+.TP
+.B \-\-max\-tokens <n>
+Token budget for output (default: 2000)
+.SH EXAMPLES
+.nf
+vv inject                                   Inject context for auto\-detected project
+vv inject \-\-project myproject                Inject context for a specific project
+vv inject \-\-format json                      Output as JSON
+vv inject \-\-sections summary,sessions        Only summary and sessions
+vv inject \-\-max\-tokens 500                   Compact output
+.fi
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-stats (1),
+.BR vv\-trends (1)

@@ -92,14 +92,14 @@ var CmdHook = Command{
 		{Name: "--event <name>", Desc: "Override the hook event type (default: read from stdin)"},
 	},
 	Description: `Reads a JSON payload from stdin as delivered by Claude Code's hook
-system. Handles two event types:
+system. Handles three event types:
 
   SessionEnd — parses transcript, writes a finalized session note
   Stop       — captures a mid-session checkpoint (no LLM enrichment)
+  PreCompact — captures a checkpoint before context compaction
 
-Checkpoint notes are provisional: a subsequent Stop overwrites the
-previous checkpoint, and SessionEnd finalizes it. Clear events and
-unknown events are silently ignored.
+Checkpoint notes are provisional: a subsequent Stop or PreCompact
+overwrites the previous checkpoint, and SessionEnd finalizes it.
 
 This command is meant to be called by Claude Code, not directly.
 
@@ -301,6 +301,43 @@ its rolling average are flagged as anomalies (spikes or dips).`,
 	SeeAlso: []string{"vv(1)", "vv-stats(1)", "vv-friction(1)"},
 }
 
+var CmdInject = Command{
+	Name:       "inject",
+	Synopsis:   "output session-start context payload",
+	Brief:      "Output session-start context payload",
+	Usage:      "vv inject [--project <name>] [--format <md|json>] [--sections <list>] [--max-tokens <n>]",
+	TableUsage: "vv inject [--project X]",
+	Flags: []Flag{
+		{Name: "--project <name>", Desc: "Project to inject context for (default: auto-detect)"},
+		{Name: "--format <md|json>", Desc: "Output format (default: md)"},
+		{Name: "--sections <list>", Desc: "Comma-separated sections to include (default: all)"},
+		{Name: "--max-tokens <n>", Desc: "Token budget for output (default: 2000)"},
+	},
+	Description: `Outputs a condensed, token-budgeted context payload for a project.
+Assembles recent sessions, open threads, decisions, friction trends,
+and knowledge notes into a single document suitable for injection at
+session start.
+
+Available sections (in priority order):
+  summary      Most recent session summary
+  sessions     Last 5 sessions, newest first
+  threads      Open threads from last 5 sessions (resolved filtered out)
+  decisions    Decisions from last 30 days (deduped)
+  friction     Friction trend direction and rolling average
+  knowledge    Relevant knowledge notes (project + agnostic)
+
+When output exceeds --max-tokens, lowest-priority sections are dropped
+until the budget is met.`,
+	Examples: []string{
+		"vv inject                                   Inject context for auto-detected project",
+		"vv inject --project myproject                Inject context for a specific project",
+		"vv inject --format json                      Output as JSON",
+		"vv inject --sections summary,sessions        Only summary and sessions",
+		"vv inject --max-tokens 500                   Compact output",
+	},
+	SeeAlso: []string{"vv(1)", "vv-stats(1)", "vv-trends(1)"},
+}
+
 var CmdVersion = Command{
 	Name:     "version",
 	Synopsis: "print version",
@@ -446,5 +483,6 @@ var Subcommands = []Command{
 	CmdStats,
 	CmdFriction,
 	CmdTrends,
+	CmdInject,
 	CmdVersion,
 }
