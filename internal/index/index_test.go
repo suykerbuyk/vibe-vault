@@ -317,6 +317,68 @@ func TestIndexFrictionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestIndexParentUUIDRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	idx, _ := Load(dir)
+
+	entry := SessionEntry{
+		SessionID:  "sess-continued",
+		NotePath:   "Projects/proj/sessions/2026-03-01-01.md",
+		Project:    "proj",
+		Date:       "2026-03-01",
+		Iteration:  1,
+		ParentUUID: "external-prev-uuid-abc",
+	}
+
+	idx.Add(entry)
+	if err := idx.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	idx2, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	e := idx2.Entries["sess-continued"]
+	if e.ParentUUID != "external-prev-uuid-abc" {
+		t.Errorf("ParentUUID = %q, want %q", e.ParentUUID, "external-prev-uuid-abc")
+	}
+}
+
+func TestIndexParentUUIDOmitEmpty(t *testing.T) {
+	dir := t.TempDir()
+	idx, _ := Load(dir)
+
+	entry := SessionEntry{
+		SessionID: "sess-no-parent",
+		NotePath:  "Projects/proj/sessions/2026-03-01-01.md",
+		Project:   "proj",
+		Date:      "2026-03-01",
+		Iteration: 1,
+	}
+
+	idx.Add(entry)
+	if err := idx.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Read raw JSON and verify parent_uuid is not present
+	data, err := os.ReadFile(filepath.Join(dir, "session-index.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw map[string]map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, exists := raw["sess-no-parent"]["parent_uuid"]; exists {
+		t.Error("parent_uuid should be omitted when empty")
+	}
+}
+
 // --- Rebuild tests ---
 
 func writeNote(t *testing.T, dir, project, filename, content string) {
@@ -704,6 +766,30 @@ func TestProjectContextTimeline(t *testing.T) {
 	}
 	if !contains(doc, "sessions: 2") {
 		t.Error("missing session count")
+	}
+}
+
+func TestProjectContextContinuedSession(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+
+	idx.Entries["s1"] = SessionEntry{
+		SessionID: "s1", Project: "proj", Date: "2026-02-20",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-02-20-01.md",
+		Summary: "Initial session",
+	}
+	idx.Entries["s2"] = SessionEntry{
+		SessionID: "s2", Project: "proj", Date: "2026-02-20",
+		Iteration: 2, NotePath: "Projects/proj/sessions/2026-02-20-02.md",
+		Summary: "Continued work", ParentUUID: "external-uuid-xyz",
+	}
+
+	doc := idx.ProjectContext("proj", nil, 0)
+
+	if !contains(doc, "[[2026-02-20-02]] ↩continued") {
+		t.Error("continued session should have ↩continued marker in timeline")
+	}
+	if contains(doc, "[[2026-02-20-01]] ↩continued") {
+		t.Error("non-continued session should NOT have ↩continued marker")
 	}
 }
 

@@ -397,6 +397,94 @@ func TestTruncateStr(t *testing.T) {
 	}
 }
 
+func TestExtractActivitiesWithHistory_WriteToKnownFile(t *testing.T) {
+	knownFiles := map[string]bool{"/home/dev/project/src/handler.go": true}
+	entries := []transcript.Entry{
+		makeEntry("assistant", "Updating file.", transcript.ContentBlock{
+			Type: "tool_use", ID: "tu1", Name: "Write",
+			Input: map[string]interface{}{"file_path": "/home/dev/project/src/handler.go"},
+		}),
+		makeToolResult("tu1", false, "ok"),
+	}
+	activities := extractActivitiesWithHistory(entries, "/home/dev/project", knownFiles)
+	if len(activities) != 1 {
+		t.Fatalf("expected 1 activity, got %d", len(activities))
+	}
+	if activities[0].Kind != KindFileModify {
+		t.Errorf("kind = %d, want KindFileModify (write to known file)", activities[0].Kind)
+	}
+}
+
+func TestExtractActivitiesWithHistory_WriteToNewFile(t *testing.T) {
+	knownFiles := map[string]bool{"/home/dev/project/src/handler.go": true}
+	entries := []transcript.Entry{
+		makeEntry("assistant", "Creating file.", transcript.ContentBlock{
+			Type: "tool_use", ID: "tu1", Name: "Write",
+			Input: map[string]interface{}{"file_path": "/home/dev/project/src/new_file.go"},
+		}),
+		makeToolResult("tu1", false, "ok"),
+	}
+	activities := extractActivitiesWithHistory(entries, "/home/dev/project", knownFiles)
+	if len(activities) != 1 {
+		t.Fatalf("expected 1 activity, got %d", len(activities))
+	}
+	if activities[0].Kind != KindFileCreate {
+		t.Errorf("kind = %d, want KindFileCreate (write to new file)", activities[0].Kind)
+	}
+}
+
+func TestExtractActivitiesWithHistory_SecondWriteSameFile(t *testing.T) {
+	entries := []transcript.Entry{
+		makeEntry("assistant", "First write.", transcript.ContentBlock{
+			Type: "tool_use", ID: "tu1", Name: "Write",
+			Input: map[string]interface{}{"file_path": "/home/dev/project/src/new.go"},
+		}),
+		makeToolResult("tu1", false, "ok"),
+		makeEntry("assistant", "Second write.", transcript.ContentBlock{
+			Type: "tool_use", ID: "tu2", Name: "Write",
+			Input: map[string]interface{}{"file_path": "/home/dev/project/src/new.go"},
+		}),
+		makeToolResult("tu2", false, "ok"),
+	}
+	activities := extractActivitiesWithHistory(entries, "/home/dev/project", nil)
+	if len(activities) != 2 {
+		t.Fatalf("expected 2 activities, got %d", len(activities))
+	}
+	if activities[0].Kind != KindFileCreate {
+		t.Errorf("first write should be create, got %d", activities[0].Kind)
+	}
+	if activities[1].Kind != KindFileModify {
+		t.Errorf("second write should be modify, got %d", activities[1].Kind)
+	}
+}
+
+func TestExtractKnownFiles(t *testing.T) {
+	entries := []transcript.Entry{
+		{
+			Type: "file-history-snapshot",
+			Message: &transcript.Message{
+				Role: "user",
+				Content: []interface{}{
+					map[string]interface{}{
+						"type": "text",
+						"input": map[string]interface{}{
+							"/home/dev/project/a.go": "content-a",
+							"/home/dev/project/b.go": "content-b",
+						},
+					},
+				},
+			},
+		},
+	}
+	known := extractKnownFiles(entries)
+	if len(known) != 2 {
+		t.Errorf("expected 2 known files, got %d", len(known))
+	}
+	if !known["/home/dev/project/a.go"] {
+		t.Error("expected a.go to be known")
+	}
+}
+
 func TestFirstLine(t *testing.T) {
 	if got := firstLine("line1\nline2"); got != "line1" {
 		t.Errorf("got %q", got)

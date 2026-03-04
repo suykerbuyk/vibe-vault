@@ -87,6 +87,37 @@ func TestFirstUserMessage_SkipsResume(t *testing.T) {
 	}
 }
 
+func TestParseParentUUID_ContinuedSession(t *testing.T) {
+	// First entry has parentUuid pointing to an external UUID (not in this transcript)
+	input := `{"type":"user","uuid":"u1","parentUuid":"external-prev-uuid","timestamp":"2026-02-22T10:00:00Z","sessionId":"continued-session","cwd":"/tmp","message":{"role":"user","content":"Continue where we left off"}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-02-22T10:00:05Z","sessionId":"continued-session","cwd":"/tmp","message":{"role":"assistant","model":"claude-opus-4-6","content":"Continuing...","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+{"type":"user","uuid":"u2","parentUuid":"a1","timestamp":"2026-02-22T10:00:10Z","sessionId":"continued-session","cwd":"/tmp","message":{"role":"user","content":"Great, now fix the tests"}}`
+
+	tr, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if tr.Stats.ParentUUID != "external-prev-uuid" {
+		t.Errorf("ParentUUID = %q, want %q", tr.Stats.ParentUUID, "external-prev-uuid")
+	}
+}
+
+func TestParseParentUUID_NoContinuation(t *testing.T) {
+	// All parentUuids reference UUIDs within this transcript — no continuation
+	input := `{"type":"user","uuid":"u1","timestamp":"2026-02-22T10:00:00Z","sessionId":"fresh-session","cwd":"/tmp","message":{"role":"user","content":"Start fresh"}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-02-22T10:00:05Z","sessionId":"fresh-session","cwd":"/tmp","message":{"role":"assistant","model":"claude-opus-4-6","content":"Starting.","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`
+
+	tr, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if tr.Stats.ParentUUID != "" {
+		t.Errorf("ParentUUID = %q, want empty (no continuation)", tr.Stats.ParentUUID)
+	}
+}
+
 func TestContentBlocks_StringContent(t *testing.T) {
 	msg := &Message{Content: "hello world"}
 	blocks := ContentBlocks(msg)

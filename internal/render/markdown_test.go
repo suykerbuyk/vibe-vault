@@ -436,6 +436,27 @@ func TestSessionNote_FrictionSignals(t *testing.T) {
 	}
 }
 
+func TestSessionNote_ParentSession(t *testing.T) {
+	d := NoteData{
+		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",
+		ParentSession: "external-parent-uuid-abc",
+	}
+	out := SessionNote(d)
+	if !strings.Contains(out, `parent_session: "external-parent-uuid-abc"`) {
+		t.Error("missing parent_session in frontmatter")
+	}
+}
+
+func TestSessionNote_NoParentSession(t *testing.T) {
+	d := NoteData{
+		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",
+	}
+	out := SessionNote(d)
+	if strings.Contains(out, "parent_session:") {
+		t.Error("should not have parent_session when empty")
+	}
+}
+
 func TestSessionNote_NoFriction(t *testing.T) {
 	d := NoteData{
 		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",

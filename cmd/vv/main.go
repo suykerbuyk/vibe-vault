@@ -75,6 +75,9 @@ func main() {
 	case "inject":
 		runInject()
 
+	case "export":
+		runExport()
+
 	case "version":
 		if wantsHelp(os.Args[2:]) {
 			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVersion))
@@ -426,6 +429,45 @@ func runInject() {
 	if err != nil {
 		fatal("render: %v", err)
 	}
+	fmt.Print(output)
+}
+
+func runExport() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdExport))
+		return
+	}
+
+	cfg := mustLoadConfig()
+
+	format := flagValue(os.Args[2:], "--format")
+	if format == "" {
+		format = "json"
+	}
+	if format != "json" && format != "csv" {
+		fatal("--format must be json or csv")
+	}
+
+	project := flagValue(os.Args[2:], "--project")
+
+	idx, err := index.Load(cfg.StateDir())
+	if err != nil {
+		fatal("load index: %v", err)
+	}
+
+	entries := stats.ExportEntries(idx.Entries, project)
+
+	var output string
+	switch format {
+	case "json":
+		output, err = stats.ExportJSON(entries)
+	case "csv":
+		output, err = stats.ExportCSV(entries)
+	}
+	if err != nil {
+		fatal("export: %v", err)
+	}
+
 	fmt.Print(output)
 }
 

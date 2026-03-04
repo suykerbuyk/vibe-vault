@@ -60,13 +60,28 @@ func DetectCorrections(dialogue *prose.Dialogue) []Correction {
 
 // matchCorrectionPattern returns the pattern name if text matches a correction pattern.
 func matchCorrectionPattern(lower string) string {
-	// Negation patterns
-	negations := []string{
+	// Negation patterns — prefix-only for "i said " and "i meant " to avoid
+	// mid-sentence false positives; exempt decision-like negation ("no, i think...")
+	prefixNegations := []string{
 		"no, ", "no that's", "not what i", "i said ", "i meant ",
 		"that's not", "no i ",
 	}
-	for _, p := range negations {
-		if strings.HasPrefix(lower, p) || strings.Contains(lower, p) {
+	for _, p := range prefixNegations {
+		if strings.HasPrefix(lower, p) {
+			if strings.HasPrefix(lower, "no, ") || strings.HasPrefix(lower, "no ") {
+				if isExemptNegation(lower) {
+					break
+				}
+			}
+			return "negation"
+		}
+	}
+	// Contains-match for patterns safe from mid-sentence false positives
+	containsNegations := []string{
+		"no that's", "not what i", "that's not", "no i ",
+	}
+	for _, p := range containsNegations {
+		if strings.Contains(lower, p) {
 			return "negation"
 		}
 	}
@@ -113,6 +128,21 @@ func matchCorrectionPattern(lower string) string {
 	}
 
 	return ""
+}
+
+// isExemptNegation returns true when a "no, " prefix is actually a decision or
+// preference rather than a correction (e.g. "No, I think we should...").
+func isExemptNegation(lower string) bool {
+	exemptions := []string{
+		"no, i don't", "no, i think", "no, we should", "no, let's",
+		"no, thanks", "no, i'd prefer", "no, i would",
+	}
+	for _, e := range exemptions {
+		if strings.HasPrefix(lower, e) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchShortNegation checks for negation at the start of a short message.

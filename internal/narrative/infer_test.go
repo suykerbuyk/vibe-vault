@@ -256,6 +256,48 @@ func TestInferSubject_EmptyTitle(t *testing.T) {
 	}
 }
 
+func TestInferIntentPrefix_MultipleCommits_UsesLast(t *testing.T) {
+	commits := []Commit{
+		{SHA: "aaa", Message: "chore: scaffold project"},
+		{SHA: "bbb", Message: "feat: add JWT authentication"},
+	}
+	got := inferIntentPrefix(nil, commits)
+	if got != "feat" {
+		t.Errorf("got %q, want feat (from last commit)", got)
+	}
+}
+
+func TestInferSubject_MultipleCommits_UsesLast(t *testing.T) {
+	commits := []Commit{
+		{SHA: "aaa", Message: "chore: scaffold project"},
+		{SHA: "bbb", Message: "feat: add JWT authentication"},
+	}
+	got := inferSubject("Session", commits)
+	if got != "add JWT authentication" {
+		t.Errorf("got %q, want %q (from last commit)", got, "add JWT authentication")
+	}
+}
+
+func TestInferSummary_MultipleCommits_UsesLast(t *testing.T) {
+	segments := []Segment{
+		{Activities: []Activity{
+			{Kind: KindFileCreate},
+			{Kind: KindTestRun},
+		}},
+	}
+	commits := []Commit{
+		{SHA: "aaa", Message: "chore: initial scaffold"},
+		{SHA: "bbb", Message: "feat: implement login flow"},
+	}
+	got := inferSummary(segments, "Do the work", commits)
+	if !strings.Contains(got, "feat:") {
+		t.Errorf("expected feat prefix from last commit, got %q", got)
+	}
+	if !strings.Contains(got, "implement login flow") {
+		t.Errorf("expected last commit subject, got %q", got)
+	}
+}
+
 func TestExtractConventionalPrefix(t *testing.T) {
 	tests := []struct {
 		msg  string
@@ -463,6 +505,65 @@ func TestExtractDecisions(t *testing.T) {
 	}
 	if got[0] != "Which database should we use?" {
 		t.Errorf("decision[0]: got %q", got[0])
+	}
+}
+
+func TestTitleFromActivities_Planning(t *testing.T) {
+	segments := []Segment{
+		{Activities: []Activity{
+			{Kind: KindPlanMode},
+			{Kind: KindExplore},
+		}},
+	}
+	got := titleFromActivities(segments)
+	if got != "Planning session" {
+		t.Errorf("got %q, want %q", got, "Planning session")
+	}
+}
+
+func TestTitleFromActivities_FileCreate(t *testing.T) {
+	segments := []Segment{
+		{Activities: []Activity{
+			{Kind: KindFileCreate, Description: "Created `src/handler.go`"},
+			{Kind: KindTestRun},
+		}},
+	}
+	got := titleFromActivities(segments)
+	if got != "Work on `src/handler.go`" {
+		t.Errorf("got %q, want %q", got, "Work on `src/handler.go`")
+	}
+}
+
+func TestTitleFromActivities_Exploration(t *testing.T) {
+	segments := []Segment{
+		{Activities: []Activity{
+			{Kind: KindExplore},
+			{Kind: KindExplore},
+			{Kind: KindExplore},
+		}},
+	}
+	got := titleFromActivities(segments)
+	if got != "Codebase exploration" {
+		t.Errorf("got %q, want %q", got, "Codebase exploration")
+	}
+}
+
+func TestExtractBacktickContent(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Created `src/handler.go`", "src/handler.go"},
+		{"Modified `internal/auth/handler.go`", "internal/auth/handler.go"},
+		{"No backticks here", ""},
+		{"Single `backtick", ""},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		got := extractBacktickContent(tc.input)
+		if got != tc.want {
+			t.Errorf("extractBacktickContent(%q) = %q, want %q", tc.input, got, tc.want)
+		}
 	}
 }
 

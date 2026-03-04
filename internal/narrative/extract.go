@@ -18,11 +18,15 @@ func Extract(t *transcript.Transcript, cwd string) *Narrative {
 		return nil
 	}
 
+	// Build known-files set from file-history-snapshot entries (ground truth for
+	// distinguishing Write-as-create vs Write-as-modify).
+	knownFiles := extractKnownFiles(t.Entries)
+
 	rawSegments := SegmentEntries(t.Entries)
 
 	var segments []Segment
 	for i, raw := range rawSegments {
-		activities := extractActivities(raw, cwd)
+		activities := extractActivitiesWithHistory(raw, cwd, knownFiles)
 		activities = aggregateExploration(activities)
 		detectRecoveries(activities)
 
@@ -105,9 +109,38 @@ func BuildToolResultMap(entries []transcript.Entry) map[string]*ToolResult {
 	return results
 }
 
-// extractActivities processes entries from one segment into activities.
-func extractActivities(entries []transcript.Entry, cwd string) []Activity {
+// extractKnownFiles scans file-history-snapshot entries to build a set of files
+// that existed before the session started. Used to distinguish Write-as-create
+// from Write-as-modify.
+func extractKnownFiles(entries []transcript.Entry) map[string]bool {
+	known := make(map[string]bool)
+	for _, e := range entries {
+		if e.Type != "file-history-snapshot" {
+			continue
+		}
+		if e.Message == nil {
+			continue
+		}
+		blocks := transcript.ContentBlocks(e.Message)
+		for _, b := range blocks {
+			if b.Input == nil {
+				continue
+			}
+			if m, ok := b.Input.(map[string]interface{}); ok {
+				for k := range m {
+					known[k] = true
+				}
+			}
+		}
+	}
+	return known
+}
+
+// extractActivitiesWithHistory processes entries from one segment into
+// activities, using knownFiles to distinguish Write-create vs Write-modify.
+func extractActivitiesWithHistory(entries []transcript.Entry, cwd string, knownFiles map[string]bool) []Activity {
 	resultMap := BuildToolResultMap(entries)
+	writtenFiles := make(map[string]bool)
 	var activities []Activity
 
 	for _, e := range entries {
@@ -120,12 +153,26 @@ func extractActivities(entries []transcript.Entry, cwd string) []Activity {
 			result := resultMap[tu.ID]
 			act := classifyToolUse(tu, result, e.Timestamp, cwd)
 			if act != nil {
+				// Reclassify Write to known or already-written file as modify
+				if tu.Name == "Write" && act.Kind == KindFileCreate {
+					path := inputStr(tu.Input, "file_path")
+					if knownFiles[path] || writtenFiles[path] {
+						act.Kind = KindFileModify
+						act.Description = fmt.Sprintf("Modified `%s`", shortenPath(path, cwd))
+					}
+					writtenFiles[path] = true
+				}
 				activities = append(activities, *act)
 			}
 		}
 	}
 
 	return activities
+}
+
+// extractActivities processes entries from one segment into activities.
+func extractActivities(entries []transcript.Entry, cwd string) []Activity {
+	return extractActivitiesWithHistory(entries, cwd, nil)
 }
 
 // classifyToolUse maps a tool call to an Activity.

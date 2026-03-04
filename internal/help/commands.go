@@ -338,6 +338,35 @@ until the budget is met.`,
 	SeeAlso: []string{"vv(1)", "vv-stats(1)", "vv-trends(1)"},
 }
 
+var CmdExport = Command{
+	Name:       "export",
+	Synopsis:   "export session data for external analysis",
+	Brief:      "Export session data (JSON or CSV)",
+	Usage:      "vv export [--format <json|csv>] [--project <name>]",
+	TableUsage: "vv export [--format X]",
+	Flags: []Flag{
+		{Name: "--format <json|csv>", Desc: "Output format (default: json)"},
+		{Name: "--project <name>", Desc: "Export only sessions for this project"},
+	},
+	Description: `Serializes session index entries for external analysis tools. Outputs
+all sessions (or a project subset) in JSON or CSV format.
+
+JSON outputs a flat array of session objects with key fields. CSV
+outputs a header row followed by one row per session, with columns:
+date, project, session_id, title, tag, model, branch, duration_minutes,
+tokens_in, tokens_out, messages, tool_uses, friction_score, corrections,
+estimated_cost_usd.
+
+Output is sorted by date, then session ID.`,
+	Examples: []string{
+		"vv export                              Export all sessions as JSON",
+		"vv export --format csv                 Export as CSV",
+		"vv export --project myproject          Export one project as JSON",
+		"vv export --format csv > sessions.csv  Export to file",
+	},
+	SeeAlso: []string{"vv(1)", "vv-stats(1)"},
+}
+
 var CmdVersion = Command{
 	Name:     "version",
 	Synopsis: "print version",
@@ -484,5 +513,6 @@ var Subcommands = []Command{
 	CmdFriction,
 	CmdTrends,
 	CmdInject,
+	CmdExport,
 	CmdVersion,
 }

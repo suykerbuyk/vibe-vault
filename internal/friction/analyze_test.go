@@ -78,10 +78,11 @@ func TestAnalyze_NarrativeSignals(t *testing.T) {
 }
 
 func TestAnalyze_RecurringThreads(t *testing.T) {
+	// Exact same thread wording → Jaccard = 1.0
 	narr := &narrative.Narrative{
-		OpenThreads: []string{"fix authentication system error"},
+		OpenThreads: []string{"authentication system broken"},
 	}
-	priorThreads := []string{"fix authentication system problem"}
+	priorThreads := []string{"authentication system broken"}
 
 	result := Analyze(nil, narr, transcript.Stats{}, priorThreads)
 	if !result.Signals.RecurringThreads {
@@ -91,9 +92,9 @@ func TestAnalyze_RecurringThreads(t *testing.T) {
 
 func TestAnalyze_NoRecurringThreads(t *testing.T) {
 	narr := &narrative.Narrative{
-		OpenThreads: []string{"add unit tests"},
+		OpenThreads: []string{"unit tests"},
 	}
-	priorThreads := []string{"fix authentication system"}
+	priorThreads := []string{"authentication system"}
 
 	result := Analyze(nil, narr, transcript.Stats{}, priorThreads)
 	if result.Signals.RecurringThreads {
@@ -131,7 +132,7 @@ func TestAnalyze_Combined(t *testing.T) {
 		OutputTokens: 5000,
 		FilesWritten: map[string]bool{"a.go": true},
 	}
-	priorThreads := []string{"fix broken build system"}
+	priorThreads := []string{"broken build system"}
 
 	result := Analyze(dialogue, narr, stats, priorThreads)
 	if result.Score == 0 {
@@ -161,10 +162,23 @@ func TestAnalyze_BuildSummary(t *testing.T) {
 }
 
 func TestHasRecurringThreads(t *testing.T) {
-	prior := []string{"implement authentication system"}
-	current := []string{"authentication system still broken"}
+	// Same core thread: "fix authentication system" vs "authentication system error"
+	// Jaccard: intersection=2 (authentication, system) / union=3 (fix, authentication, system, error)=4 → 0.5
+	prior := []string{"fix authentication system"}
+	current := []string{"authentication system error"}
 	if !hasRecurringThreads(prior, current) {
 		t.Error("expected recurring thread match")
+	}
+}
+
+func TestHasRecurringThreads_DifferentContext(t *testing.T) {
+	// Different contexts: "implement authentication" vs "authentication system performance"
+	// Jaccard too low to match
+	prior := []string{"implement authentication system"}
+	current := []string{"authentication system still broken"}
+	// intersection=2 / union=5 = 0.4 < 0.5 — correctly NOT recurring
+	if hasRecurringThreads(prior, current) {
+		t.Error("expected no recurring thread match (Jaccard too low)")
 	}
 }
 
@@ -179,8 +193,70 @@ func TestHasRecurringThreads_NoMatch(t *testing.T) {
 func TestSignificantWords(t *testing.T) {
 	words := significantWords("the authentication system for users")
 	// "the" < 4 chars, "for" < 4 chars
-	// Should get: "authentication", "system", "users"
+	// "system" is not a stop word, so should get: "authentication", "system", "users"
 	if len(words) != 3 {
 		t.Errorf("expected 3 words, got %d: %v", len(words), words)
+	}
+}
+
+func TestSignificantWords_StopWordFiltering(t *testing.T) {
+	words := significantWords("that which should have been done before")
+	// All words are either < 4 chars or stop words: "that", "which", "should", "have", "been", "done", "before"
+	if len(words) != 0 {
+		t.Errorf("expected 0 words (all stop words), got %d: %v", len(words), words)
+	}
+}
+
+func TestSignificantWords_PunctuationTrimming(t *testing.T) {
+	words := significantWords("authentication, system! error.")
+	// Should strip punctuation: "authentication", "system", "error"
+	if len(words) != 3 {
+		t.Errorf("expected 3 words, got %d: %v", len(words), words)
+	}
+}
+
+func TestJaccardSimilarity_Identical(t *testing.T) {
+	a := []string{"authentication", "system"}
+	b := []string{"authentication", "system"}
+	got := jaccardSimilarity(a, b)
+	if got != 1.0 {
+		t.Errorf("jaccardSimilarity(identical) = %f, want 1.0", got)
+	}
+}
+
+func TestJaccardSimilarity_NoOverlap(t *testing.T) {
+	a := []string{"authentication", "system"}
+	b := []string{"database", "migration"}
+	got := jaccardSimilarity(a, b)
+	if got != 0.0 {
+		t.Errorf("jaccardSimilarity(disjoint) = %f, want 0.0", got)
+	}
+}
+
+func TestJaccardSimilarity_Partial(t *testing.T) {
+	a := []string{"authentication", "system", "error"}
+	b := []string{"authentication", "system", "problem"}
+	got := jaccardSimilarity(a, b)
+	// intersection=2 (authentication, system), union=4 (authentication, system, error, problem)
+	expected := 0.5
+	if got != expected {
+		t.Errorf("jaccardSimilarity(partial) = %f, want %f", got, expected)
+	}
+}
+
+func TestJaccardSimilarity_BelowThreshold(t *testing.T) {
+	a := []string{"authentication", "system", "performance"}
+	b := []string{"authentication", "database", "migration", "tools"}
+	got := jaccardSimilarity(a, b)
+	// intersection=1, union=6 → 0.167 < 0.5
+	if got >= 0.5 {
+		t.Errorf("jaccardSimilarity(low overlap) = %f, should be < 0.5", got)
+	}
+}
+
+func TestJaccardSimilarity_Empty(t *testing.T) {
+	got := jaccardSimilarity(nil, nil)
+	if got != 0 {
+		t.Errorf("jaccardSimilarity(empty) = %f, want 0", got)
 	}
 }

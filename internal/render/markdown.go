@@ -66,6 +66,7 @@ type NoteData struct {
 	Timeline            string   // rendered timeline section
 	EstimatedCostUSD    float64  // estimated session cost in USD
 	ToolEffectiveness   string   // rendered tool effectiveness section (empty = skip)
+	ParentSession       string   // parent entry UUID (non-empty = /continue session)
 }
 
 // SessionNote renders a full Obsidian markdown note from NoteData.
@@ -152,6 +153,9 @@ func SessionNote(d NoteData) string {
 	b.WriteString(fmt.Sprintf("summary: \"%s\"\n", escapeYAML(d.Summary)))
 	if d.PreviousNote != "" {
 		b.WriteString(fmt.Sprintf("previous: \"[[%s]]\"\n", d.PreviousNote))
+	}
+	if d.ParentSession != "" {
+		b.WriteString(fmt.Sprintf("parent_session: \"%s\"\n", d.ParentSession))
 	}
 	if len(d.RelatedNotes) > 0 {
 		b.WriteString("related: [")

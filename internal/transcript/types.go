@@ -112,6 +112,9 @@ type Stats struct {
 	CCVersion        string   // Claude Code version
 	Branches         []string // all unique git branches observed
 	AutoCompactions  int      // count of auto-triggered compactions
+
+	// Session continuity (/continue detection)
+	ParentUUID string // UUID of an entry outside this transcript (indicates continuation)
 }
 
 // Transcript holds the fully parsed result of a JSONL transcript.

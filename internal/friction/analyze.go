@@ -12,6 +12,15 @@ import (
 	"github.com/johns/vibe-vault/internal/transcript"
 )
 
+// Analysis thresholds for signal detection and summary generation.
+const (
+	retryThreshold         = 3      // file modifications before counting as retry
+	wordOverlapMinLen      = 4      // minimum word length for significance
+	summaryTokensPerFile   = 20000  // tokens/file threshold for summary mention
+	summaryFileRetryPct    = 0.2    // file retry density threshold for summary mention
+	summaryErrorCyclePct   = 0.1    // error cycle density threshold for summary mention
+)
+
 // Analyze performs full friction analysis from prose dialogue, narrative, and stats.
 // All parameters are optional (nil-safe).
 func Analyze(
@@ -46,6 +55,7 @@ func Analyze(
 		Corrections:       corrections,
 		CorrectionDensity: float64(corrections) / float64(userTurns),
 		TokensPerFile:     float64(totalTokens) / float64(filesChanged),
+		DurationMinutes:   int(stats.Duration.Minutes()),
 	}
 
 	// File retry density from narrative
@@ -70,7 +80,7 @@ func Analyze(
 		retryFiles := 0
 		totalFiles := len(fileMods)
 		for _, count := range fileMods {
-			if count >= 3 {
+			if count >= retryThreshold {
 				retryFiles++
 			}
 		}
@@ -98,14 +108,13 @@ func Analyze(
 	return result
 }
 
-// hasRecurringThreads checks if any prior threads appear again.
+// hasRecurringThreads checks if any prior threads appear again using Jaccard similarity.
 func hasRecurringThreads(prior, current []string) bool {
 	for _, p := range prior {
 		pWords := significantWords(p)
 		for _, c := range current {
 			cWords := significantWords(c)
-			overlap := wordOverlap(pWords, cWords)
-			if overlap >= 2 {
+			if jaccardSimilarity(pWords, cWords) >= 0.5 {
 				return true
 			}
 		}
@@ -113,31 +122,61 @@ func hasRecurringThreads(prior, current []string) bool {
 	return false
 }
 
-// significantWords extracts lowercase words >= 4 chars.
+// jaccardSimilarity computes |intersection| / |union| for two word sets.
+func jaccardSimilarity(a, b []string) float64 {
+	if len(a) == 0 && len(b) == 0 {
+		return 0
+	}
+	setA := make(map[string]bool, len(a))
+	for _, w := range a {
+		setA[w] = true
+	}
+	setB := make(map[string]bool, len(b))
+	for _, w := range b {
+		setB[w] = true
+	}
+
+	intersection := 0
+	for w := range setA {
+		if setB[w] {
+			intersection++
+		}
+	}
+
+	union := len(setA) + len(setB) - intersection
+	if union == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
+}
+
+// stopWords are common words filtered from thread comparison to reduce false positives.
+var stopWords = map[string]bool{
+	"that": true, "this": true, "with": true, "from": true,
+	"have": true, "been": true, "were": true, "will": true,
+	"would": true, "could": true, "should": true, "what": true,
+	"when": true, "where": true, "which": true, "their": true,
+	"there": true, "these": true, "those": true, "them": true,
+	"then": true, "than": true, "some": true, "also": true,
+	"into": true, "each": true, "make": true, "like": true,
+	"just": true, "over": true, "such": true, "only": true,
+	"very": true, "more": true, "most": true, "other": true,
+	"about": true, "after": true, "before": true, "being": true,
+	"between": true, "does": true, "doing": true, "done": true,
+}
+
+// significantWords extracts lowercase words >= 4 chars, with stop-word filtering
+// and punctuation trimming.
 func significantWords(s string) []string {
 	words := strings.Fields(strings.ToLower(s))
 	var result []string
 	for _, w := range words {
-		if len(w) >= 4 {
+		w = strings.Trim(w, ".,;:!?\"'`()[]{}—-")
+		if len(w) >= wordOverlapMinLen && !stopWords[w] {
 			result = append(result, w)
 		}
 	}
 	return result
-}
-
-// wordOverlap counts shared words between two sets.
-func wordOverlap(a, b []string) int {
-	set := make(map[string]bool, len(a))
-	for _, w := range a {
-		set[w] = true
-	}
-	count := 0
-	for _, w := range b {
-		if set[w] {
-			count++
-		}
-	}
-	return count
 }
 
 // buildSummary generates human-readable signal descriptions.
@@ -149,15 +188,15 @@ func buildSummary(s Signals, corrections, userTurns int) []string {
 			corrections, userTurns, s.CorrectionDensity*100))
 	}
 
-	if s.TokensPerFile > 20000 {
+	if s.TokensPerFile > summaryTokensPerFile {
 		lines = append(lines, fmt.Sprintf("%.0fK tokens/file changed", s.TokensPerFile/1000))
 	}
 
-	if s.FileRetryDensity > 0.2 {
-		lines = append(lines, fmt.Sprintf("%.0f%% of files required 3+ edits", s.FileRetryDensity*100))
+	if s.FileRetryDensity > summaryFileRetryPct {
+		lines = append(lines, fmt.Sprintf("%.0f%% of files required %d+ edits", s.FileRetryDensity*100, retryThreshold))
 	}
 
-	if s.ErrorCycleDensity > 0.1 {
+	if s.ErrorCycleDensity > summaryErrorCyclePct {
 		lines = append(lines, fmt.Sprintf("%.0f%% of activities were unresolved errors", s.ErrorCycleDensity*100))
 	}
 

@@ -34,6 +34,15 @@ var AllSections = []string{
 	SectionKnowledge,
 }
 
+// Inject configuration constants.
+const (
+	recentSessionCap  = 5     // max recent sessions in output
+	decisionDaysWindow = 30   // days to look back for decisions
+	decisionCap       = 10    // max decisions in output
+	threadCap         = 10    // max open threads in output
+	defaultMaxTokens  = 2000  // default token budget for output
+)
+
 // Opts configures the inject build.
 type Opts struct {
 	Project   string
@@ -85,8 +94,8 @@ func Build(entries map[string]index.SessionEntry, knowledge []index.KnowledgeSum
 		r.Summary = projectEntries[0].Summary
 	}
 
-	// Sessions: last 5, newest first (already sorted newest first)
-	cap := 5
+	// Sessions: last N, newest first (already sorted newest first)
+	cap := recentSessionCap
 	if len(projectEntries) < cap {
 		cap = len(projectEntries)
 	}
@@ -99,11 +108,11 @@ func Build(entries map[string]index.SessionEntry, knowledge []index.KnowledgeSum
 		})
 	}
 
-	// Open threads from last 5 sessions, resolved filtered out
-	r.Threads = openThreads(projectEntries, 5)
+	// Open threads from recent sessions, resolved filtered out
+	r.Threads = openThreads(projectEntries, recentSessionCap)
 
-	// Decisions from last 30 days, deduped
-	r.Decisions = recentDecisions(projectEntries, 30)
+	// Decisions from recent window, deduped
+	r.Decisions = recentDecisions(projectEntries, decisionDaysWindow)
 
 	// Friction from trends
 	r.Friction = frictionFromTrends(trendResult)
@@ -192,7 +201,7 @@ func Render(r Result, opts Opts) (string, error) {
 	}
 	maxTokens := opts.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = 2000
+		maxTokens = defaultMaxTokens
 	}
 
 	sections := opts.Sections
@@ -268,11 +277,10 @@ func recentDecisions(entries []index.SessionEntry, days int) []string {
 		}
 	}
 
-	cap := 10
-	if len(decisions) < cap {
-		cap = len(decisions)
+	if len(decisions) < decisionCap {
+		return decisions
 	}
-	return decisions[:cap]
+	return decisions[:decisionCap]
 }
 
 func openThreads(entries []index.SessionEntry, n int) []string {
@@ -305,9 +313,8 @@ func openThreads(entries []index.SessionEntry, n int) []string {
 		}
 	}
 
-	threadCap := 10
 	if len(threads) < threadCap {
-		threadCap = len(threads)
+		return threads
 	}
 	return threads[:threadCap]
 }

@@ -70,6 +70,9 @@ func (idx *Index) ProjectContext(project string, knowledge []KnowledgeSummary, a
 	for _, e := range entries {
 		noteName := filenameNoExt(e.NotePath)
 		line := fmt.Sprintf("- [[%s]]", noteName)
+		if e.ParentUUID != "" {
+			line += " ↩continued"
+		}
 		if e.Tag != "" {
 			line += fmt.Sprintf(" #%s", e.Tag)
 		}

@@ -10,6 +10,14 @@ import (
 	"github.com/johns/vibe-vault/internal/transcript"
 )
 
+// Inference thresholds and limits.
+const (
+	maxTitleLen     = 80  // maximum title length before truncation
+	truncatedTitleLen = 77  // truncated title length (leaves room for "...")
+	maxThreads     = 5   // cap on open threads
+	maxDecisions   = 5   // cap on extracted decisions
+)
+
 // inferTitle picks the best session title from segment user requests and transcript.
 func inferTitle(segments []Segment, t *transcript.Transcript) string {
 	// Walk segments, use first meaningful user request
@@ -26,15 +34,87 @@ func inferTitle(segments []Segment, t *transcript.Transcript) string {
 		if idx := strings.IndexByte(first, '\n'); idx > 0 {
 			first = first[:idx]
 		}
-		if len(first) > 80 {
-			first = first[:77] + "..."
+		if len(first) > maxTitleLen {
+			first = first[:truncatedTitleLen] + "..."
 		}
 		if !IsNoiseMessage(first) {
 			return first
 		}
 	}
 
+	// Fall back to activity-derived title before generic "Session"
+	if title := titleFromActivities(segments); title != "" {
+		return title
+	}
+
 	return "Session"
+}
+
+// titleFromActivities derives a fallback title from activity patterns when user
+// request and first message are both absent or noise.
+func titleFromActivities(segments []Segment) string {
+	var planModes, creates, modifies, reads, total int
+	var firstFile string
+
+	for _, seg := range segments {
+		for _, a := range seg.Activities {
+			total++
+			switch a.Kind {
+			case KindPlanMode:
+				planModes++
+			case KindFileCreate:
+				creates++
+				if firstFile == "" {
+					firstFile = extractBacktickContent(a.Description)
+				}
+			case KindFileModify:
+				modifies++
+				if firstFile == "" {
+					firstFile = extractBacktickContent(a.Description)
+				}
+			case KindExplore:
+				reads++
+			}
+		}
+	}
+
+	if total == 0 {
+		return ""
+	}
+
+	// Planning session: plan mode dominant, few writes
+	if planModes > 0 && (creates+modifies) <= 2 {
+		return "Planning session"
+	}
+
+	// File work: mention the first file touched
+	if creates > 0 && firstFile != "" {
+		return fmt.Sprintf("Work on `%s`", firstFile)
+	}
+	if modifies > 0 && firstFile != "" {
+		return fmt.Sprintf("Work on `%s`", firstFile)
+	}
+
+	// Read-only: exploration
+	if reads > 0 && creates == 0 && modifies == 0 {
+		return "Codebase exploration"
+	}
+
+	return ""
+}
+
+// extractBacktickContent extracts content between backticks from a string.
+// Returns the first backtick-enclosed content, or empty string if none.
+func extractBacktickContent(s string) string {
+	start := strings.IndexByte(s, '`')
+	if start < 0 {
+		return ""
+	}
+	end := strings.IndexByte(s[start+1:], '`')
+	if end < 0 {
+		return ""
+	}
+	return s[start+1 : start+1+end]
 }
 
 // inferSummary builds a semantic summary: "prefix: subject (outcomes)"
@@ -74,9 +154,9 @@ func inferSummary(segments []Segment, title string, commits []Commit) string {
 
 // inferIntentPrefix determines the conventional commit prefix from commits or activity patterns.
 func inferIntentPrefix(segments []Segment, commits []Commit) string {
-	// Priority 1: conventional prefix from first commit message
+	// Priority 1: conventional prefix from last commit message (the deliverable)
 	if len(commits) > 0 {
-		msg := commits[0].Message
+		msg := commits[len(commits)-1].Message
 		if p := extractConventionalPrefix(msg); p != "" {
 			return p
 		}
@@ -150,18 +230,18 @@ func extractConventionalPrefix(msg string) string {
 
 // inferSubject determines the best subject for the summary.
 func inferSubject(title string, commits []Commit) string {
-	// Priority 1: first commit message body (stripped of prefix)
+	// Priority 1: last commit message body (stripped of prefix) — the deliverable
 	if len(commits) > 0 {
-		msg := commits[0].Message
+		msg := commits[len(commits)-1].Message
 		subject := stripConventionalPrefix(msg)
 		if subject != "" {
-			return truncateStr(subject, 80)
+			return truncateStr(subject, maxTitleLen)
 		}
 	}
 
 	// Priority 2: title from user request
 	if title != "" && title != "Session" {
-		return truncateStr(title, 80)
+		return truncateStr(title, maxTitleLen)
 	}
 
 	return ""
@@ -333,9 +413,8 @@ func inferOpenThreads(segments []Segment) []string {
 		}
 	}
 
-	// Cap at 5
-	if len(threads) > 5 {
-		threads = threads[:5]
+	if len(threads) > maxThreads {
+		threads = threads[:maxThreads]
 	}
 
 	return threads
@@ -353,9 +432,8 @@ func extractDecisions(segments []Segment, entries []transcript.Entry) []string {
 		}
 	}
 
-	// Cap at 5
-	if len(decisions) > 5 {
-		decisions = decisions[:5]
+	if len(decisions) > maxDecisions {
+		decisions = decisions[:maxDecisions]
 	}
 
 	return decisions

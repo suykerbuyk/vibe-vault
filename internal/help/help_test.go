@@ -257,6 +257,31 @@ var expectedTerminal = map[string]string{
 		"  vv inject --sections summary,sessions        Only summary and sessions\n" +
 		"  vv inject --max-tokens 500                   Compact output\n",
 
+	"export": "vv export \u2014 export session data for external analysis\n" +
+		"\n" +
+		"Usage: vv export [--format <json|csv>] [--project <name>]\n" +
+		"\n" +
+		"Flags:\n" +
+		"  --format <json|csv>   Output format (default: json)\n" +
+		"  --project <name>      Export only sessions for this project\n" +
+		"\n" +
+		"Serializes session index entries for external analysis tools. Outputs\n" +
+		"all sessions (or a project subset) in JSON or CSV format.\n" +
+		"\n" +
+		"JSON outputs a flat array of session objects with key fields. CSV\n" +
+		"outputs a header row followed by one row per session, with columns:\n" +
+		"date, project, session_id, title, tag, model, branch, duration_minutes,\n" +
+		"tokens_in, tokens_out, messages, tool_uses, friction_score, corrections,\n" +
+		"estimated_cost_usd.\n" +
+		"\n" +
+		"Output is sorted by date, then session ID.\n" +
+		"\n" +
+		"Examples:\n" +
+		"  vv export                              Export all sessions as JSON\n" +
+		"  vv export --format csv                 Export as CSV\n" +
+		"  vv export --project myproject          Export one project as JSON\n" +
+		"  vv export --format csv > sessions.csv  Export to file\n",
+
 	"version": "vv version \u2014 print version\n" +
 		"\n" +
 		"Usage: vv version\n",
@@ -295,6 +320,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv friction [--project X]    Show friction analysis and correction patterns\n" +
 		"  vv trends [--project X]      Show metric trends over time\n" +
 		"  vv inject [--project X]      Output session-start context payload\n" +
+		"  vv export [--format X]       Export session data (JSON or CSV)\n" +
 		"  vv version                   Print version\n" +
 		"  vv help                      Show this help\n" +
 		"\n" +
@@ -313,7 +339,7 @@ func TestFormatUsage(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "context", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))

@@ -42,6 +42,7 @@ type SessionEntry struct {
 	FrictionScore  int            `json:"friction_score,omitempty"`
 	KnowledgeNotes   []string       `json:"knowledge_notes,omitempty"`
 	EstimatedCostUSD float64        `json:"estimated_cost_usd,omitempty"`
+	ParentUUID       string         `json:"parent_uuid,omitempty"` // external entry UUID (continuation)
 }
 
 // Index manages the session-index.json file.

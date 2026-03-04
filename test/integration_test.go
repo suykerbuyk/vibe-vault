@@ -40,43 +40,17 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// --- Fixtures ---
+// --- Fixtures (loaded from testdata/) ---
 
-// fixtureSessionA1: normal session, project "myproject", branch "feat/login",
-// 3 user + 3 assistant messages, 2 tool uses (Write, Edit), sessionId session-aaa-001
-const fixtureSessionA1 = `{"type":"user","uuid":"u1","sessionId":"session-aaa-001","timestamp":"2027-06-15T10:00:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/login","message":{"role":"user","content":"Implement the login page with OAuth support"}}
-{"type":"assistant","uuid":"a1","sessionId":"session-aaa-001","timestamp":"2027-06-15T10:01:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/login","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll implement the login page."},{"type":"tool_use","id":"tu1","name":"Write","input":{"file_path":"/home/dev/myproject/src/login.tsx","content":"// login page"}}],"usage":{"input_tokens":500,"output_tokens":200,"cache_creation_input_tokens":100,"cache_read_input_tokens":50}}}
-{"type":"user","uuid":"u2","sessionId":"session-aaa-001","timestamp":"2027-06-15T10:02:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/login","message":{"role":"user","content":"Now add the OAuth callback handler"}}
-{"type":"assistant","uuid":"a2","sessionId":"session-aaa-001","timestamp":"2027-06-15T10:03:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/login","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Adding OAuth callback."},{"type":"tool_use","id":"tu2","name":"Edit","input":{"file_path":"/home/dev/myproject/src/auth.ts","old_string":"// TODO","new_string":"handleCallback()"}}],"usage":{"input_tokens":400,"output_tokens":150,"cache_creation_input_tokens":0,"cache_read_input_tokens":200}}}
-{"type":"user","uuid":"u3","sessionId":"session-aaa-001","timestamp":"2027-06-15T10:04:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/login","message":{"role":"user","content":"Add error handling for the OAuth flow"}}
-{"type":"assistant","uuid":"a3","sessionId":"session-aaa-001","timestamp":"2027-06-15T10:05:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/login","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Done! The login page now has full OAuth support with error handling."}],"usage":{"input_tokens":300,"output_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":100}}}
-`
-
-// fixtureSessionA2: same project/date as A1, 2 user + 2 assistant, sessionId session-aaa-002
-const fixtureSessionA2 = `{"type":"user","uuid":"u1","sessionId":"session-aaa-002","timestamp":"2027-06-15T14:00:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/login","message":{"role":"user","content":"Add unit tests for the login page"}}
-{"type":"assistant","uuid":"a1","sessionId":"session-aaa-002","timestamp":"2027-06-15T14:01:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/login","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll write tests for the login page."}],"usage":{"input_tokens":300,"output_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
-{"type":"user","uuid":"u2","sessionId":"session-aaa-002","timestamp":"2027-06-15T14:02:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/login","message":{"role":"user","content":"Make sure to test the error cases too"}}
-{"type":"assistant","uuid":"a2","sessionId":"session-aaa-002","timestamp":"2027-06-15T14:03:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/login","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Added comprehensive tests including error cases."}],"usage":{"input_tokens":200,"output_tokens":80,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
-`
-
-// fixtureTrivial: 1 user + 1 assistant (skipped: < 2 messages each)
-const fixtureTrivial = `{"type":"user","uuid":"u1","sessionId":"session-trivial-001","timestamp":"2027-06-15T12:00:00Z","cwd":"/home/dev/myproject","message":{"role":"user","content":"hello"}}
-{"type":"assistant","uuid":"a1","sessionId":"session-trivial-001","timestamp":"2027-06-15T12:01:00Z","cwd":"/home/dev/myproject","message":{"role":"assistant","model":"claude-opus-4-6","content":"Hi there!","usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
-`
-
-// fixtureSessionB: different project "other-project", 2 user + 2 assistant
-const fixtureSessionB = `{"type":"user","uuid":"u1","sessionId":"session-bbb-001","timestamp":"2027-06-15T16:00:00Z","cwd":"/home/dev/other-project","gitBranch":"main","message":{"role":"user","content":"Set up the CI pipeline for this project"}}
-{"type":"assistant","uuid":"a1","sessionId":"session-bbb-001","timestamp":"2027-06-15T16:01:00Z","cwd":"/home/dev/other-project","gitBranch":"main","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll set up the CI pipeline."}],"usage":{"input_tokens":200,"output_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
-{"type":"user","uuid":"u2","sessionId":"session-bbb-001","timestamp":"2027-06-15T16:02:00Z","cwd":"/home/dev/other-project","gitBranch":"main","message":{"role":"user","content":"Add a deploy step too"}}
-{"type":"assistant","uuid":"a2","sessionId":"session-bbb-001","timestamp":"2027-06-15T16:03:00Z","cwd":"/home/dev/other-project","gitBranch":"main","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Done. CI pipeline with deploy step is ready."}],"usage":{"input_tokens":150,"output_tokens":80,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
-`
-
-// fixtureBackfill: UUID session ID for discover.Discover(), project "project-x"
-const fixtureBackfill = `{"type":"user","uuid":"u1","sessionId":"abcdef01-2345-6789-abcd-ef0123456789","timestamp":"2027-06-15T18:00:00Z","cwd":"/home/dev/project-x","gitBranch":"main","message":{"role":"user","content":"Initialize the database schema for the new service"}}
-{"type":"assistant","uuid":"a1","sessionId":"abcdef01-2345-6789-abcd-ef0123456789","timestamp":"2027-06-15T18:01:00Z","cwd":"/home/dev/project-x","gitBranch":"main","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll create the database schema."}],"usage":{"input_tokens":200,"output_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
-{"type":"user","uuid":"u2","sessionId":"abcdef01-2345-6789-abcd-ef0123456789","timestamp":"2027-06-15T18:02:00Z","cwd":"/home/dev/project-x","gitBranch":"main","message":{"role":"user","content":"Add migration support as well"}}
-{"type":"assistant","uuid":"a2","sessionId":"abcdef01-2345-6789-abcd-ef0123456789","timestamp":"2027-06-15T18:03:00Z","cwd":"/home/dev/project-x","gitBranch":"main","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Database schema with migration support is ready."}],"usage":{"input_tokens":150,"output_tokens":80,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
-`
+// readTestdata loads a test fixture file from the testdata/ directory.
+func readTestdata(t *testing.T, filename string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", filename))
+	if err != nil {
+		t.Fatalf("read testdata/%s: %v", filename, err)
+	}
+	return string(data)
+}
 
 // --- Helpers ---
 
@@ -204,42 +178,6 @@ func runVVWithStdin(t *testing.T, env []string, stdin string, args ...string) (s
 	return outBuf.String(), errBuf.String(), err
 }
 
-// fixtureStopSession: session with tool usage for Stop/checkpoint testing.
-// 3 user + 3 assistant, 2 tool uses (Write, Edit), sessionId session-stop-001
-const fixtureStopSession = `{"type":"user","uuid":"u1","sessionId":"session-stop-001","timestamp":"2027-07-01T10:00:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/stop","message":{"role":"user","content":"Implement the stop hook feature"}}
-{"type":"assistant","uuid":"a1","sessionId":"session-stop-001","timestamp":"2027-07-01T10:01:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/stop","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll implement the stop hook."},{"type":"tool_use","id":"tu1","name":"Write","input":{"file_path":"/home/dev/myproject/handler.go","content":"// stop handler"}}],"usage":{"input_tokens":500,"output_tokens":200,"cache_creation_input_tokens":100,"cache_read_input_tokens":50}}}
-{"type":"user","uuid":"u2","sessionId":"session-stop-001","timestamp":"2027-07-01T10:02:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/stop","message":{"role":"user","content":"Add checkpoint capture logic"}}
-{"type":"assistant","uuid":"a2","sessionId":"session-stop-001","timestamp":"2027-07-01T10:03:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/stop","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Adding checkpoint capture."},{"type":"tool_use","id":"tu2","name":"Edit","input":{"file_path":"/home/dev/myproject/capture.go","old_string":"// TODO","new_string":"captureCheckpoint()"}}],"usage":{"input_tokens":400,"output_tokens":150,"cache_creation_input_tokens":0,"cache_read_input_tokens":200}}}
-{"type":"user","uuid":"u3","sessionId":"session-stop-001","timestamp":"2027-07-01T10:04:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/stop","message":{"role":"user","content":"Great, that looks good"}}
-{"type":"assistant","uuid":"a3","sessionId":"session-stop-001","timestamp":"2027-07-01T10:05:00Z","cwd":"/home/dev/myproject","gitBranch":"feat/stop","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Done! The stop hook feature is complete."}],"usage":{"input_tokens":300,"output_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":100}}}
-`
-
-// fixtureNarrativeSession: session with Write, Bash test, and Bash git commit tool calls
-// for testing narrative extraction. Includes tool results. sessionId session-narr-001
-const fixtureNarrativeSession = `{"type":"user","uuid":"u1","sessionId":"session-narr-001","timestamp":"2027-08-10T09:00:00Z","cwd":"/home/dev/narr-project","gitBranch":"feat/auth","message":{"role":"user","content":"Add JWT authentication to the API"}}
-{"type":"assistant","uuid":"a1","sessionId":"session-narr-001","timestamp":"2027-08-10T09:01:00Z","cwd":"/home/dev/narr-project","gitBranch":"feat/auth","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll create the JWT handler."},{"type":"tool_use","id":"ntu1","name":"Write","input":{"file_path":"/home/dev/narr-project/internal/auth/handler.go","content":"package auth\n\nfunc Handler() {}"}}],"usage":{"input_tokens":500,"output_tokens":200,"cache_creation_input_tokens":100,"cache_read_input_tokens":50}}}
-{"type":"user","uuid":"u1r","sessionId":"session-narr-001","timestamp":"2027-08-10T09:01:30Z","cwd":"/home/dev/narr-project","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ntu1","content":"File created successfully"}]}}
-{"type":"assistant","uuid":"a2","sessionId":"session-narr-001","timestamp":"2027-08-10T09:02:00Z","cwd":"/home/dev/narr-project","gitBranch":"feat/auth","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Now let me run the tests."},{"type":"tool_use","id":"ntu2","name":"Bash","input":{"command":"go test ./..."}}],"usage":{"input_tokens":400,"output_tokens":150,"cache_creation_input_tokens":0,"cache_read_input_tokens":200}}}
-{"type":"user","uuid":"u2r","sessionId":"session-narr-001","timestamp":"2027-08-10T09:02:30Z","cwd":"/home/dev/narr-project","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ntu2","content":"ok  \tgithub.com/dev/narr-project\t0.5s\nPASS"}]}}
-{"type":"user","uuid":"u2","sessionId":"session-narr-001","timestamp":"2027-08-10T09:03:00Z","cwd":"/home/dev/narr-project","gitBranch":"feat/auth","message":{"role":"user","content":"Great, now commit the changes"}}
-{"type":"assistant","uuid":"a3","sessionId":"session-narr-001","timestamp":"2027-08-10T09:04:00Z","cwd":"/home/dev/narr-project","gitBranch":"feat/auth","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Committing the changes."},{"type":"tool_use","id":"ntu3","name":"Bash","input":{"command":"git commit -m \"feat: add JWT authentication\""}}],"usage":{"input_tokens":300,"output_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":100}}}
-{"type":"user","uuid":"u3r","sessionId":"session-narr-001","timestamp":"2027-08-10T09:04:30Z","cwd":"/home/dev/narr-project","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ntu3","content":"[feat/auth abc1234] feat: add JWT authentication\n 1 file changed"}]}}
-{"type":"assistant","uuid":"a4","sessionId":"session-narr-001","timestamp":"2027-08-10T09:05:00Z","cwd":"/home/dev/narr-project","gitBranch":"feat/auth","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Done! JWT authentication has been added and committed."}],"usage":{"input_tokens":200,"output_tokens":80,"cache_creation_input_tokens":0,"cache_read_input_tokens":50}}}
-`
-
-// fixtureFrictionSession: session with correction patterns. sessionId session-friction-001
-const fixtureFrictionSession = `{"type":"user","uuid":"u1","sessionId":"session-friction-001","timestamp":"2027-09-01T10:00:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"user","content":"Implement the user profile page"}}
-{"type":"assistant","uuid":"a1","sessionId":"session-friction-001","timestamp":"2027-09-01T10:01:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll create the profile page with a basic layout."},{"type":"tool_use","id":"ftu1","name":"Write","input":{"file_path":"/home/dev/friction-project/profile.tsx","content":"// profile page"}}],"usage":{"input_tokens":500,"output_tokens":200,"cache_creation_input_tokens":100,"cache_read_input_tokens":50}}}
-{"type":"user","uuid":"u1r","sessionId":"session-friction-001","timestamp":"2027-09-01T10:01:30Z","cwd":"/home/dev/friction-project","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ftu1","content":"File created successfully"}]}}
-{"type":"user","uuid":"u2","sessionId":"session-friction-001","timestamp":"2027-09-01T10:02:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"user","content":"No, that's not what I wanted. Use a card layout instead."}}
-{"type":"assistant","uuid":"a2","sessionId":"session-friction-001","timestamp":"2027-09-01T10:03:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Sorry about that. Let me redo it with a card layout."},{"type":"tool_use","id":"ftu2","name":"Edit","input":{"file_path":"/home/dev/friction-project/profile.tsx","old_string":"// profile page","new_string":"// card layout profile"}}],"usage":{"input_tokens":400,"output_tokens":150,"cache_creation_input_tokens":0,"cache_read_input_tokens":200}}}
-{"type":"user","uuid":"u2r","sessionId":"session-friction-001","timestamp":"2027-09-01T10:03:30Z","cwd":"/home/dev/friction-project","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ftu2","content":"File edited successfully"}]}}
-{"type":"user","uuid":"u3","sessionId":"session-friction-001","timestamp":"2027-09-01T10:04:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"user","content":"Actually, I meant to use the existing UserCard component"}}
-{"type":"assistant","uuid":"a3","sessionId":"session-friction-001","timestamp":"2027-09-01T10:05:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Using the existing UserCard component now."},{"type":"tool_use","id":"ftu3","name":"Edit","input":{"file_path":"/home/dev/friction-project/profile.tsx","old_string":"// card layout profile","new_string":"<UserCard />"}}],"usage":{"input_tokens":300,"output_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":100}}}
-{"type":"user","uuid":"u3r","sessionId":"session-friction-001","timestamp":"2027-09-01T10:05:30Z","cwd":"/home/dev/friction-project","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ftu3","content":"File edited successfully"}]}}
-{"type":"assistant","uuid":"a4","sessionId":"session-friction-001","timestamp":"2027-09-01T10:06:00Z","cwd":"/home/dev/friction-project","gitBranch":"main","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Done! The profile page now uses the existing UserCard component."}],"usage":{"input_tokens":200,"output_tokens":80,"cache_creation_input_tokens":0,"cache_read_input_tokens":50}}}
-`
-
 // --- Integration Test ---
 
 func TestIntegration(t *testing.T) {
@@ -256,12 +194,12 @@ func TestIntegration(t *testing.T) {
 	stateDir := filepath.Join(vaultPath, ".vibe-vault")
 
 	// Write fixture files
-	a1Path := writeFixture(t, fixtureDir, "session-aaa-001.jsonl", fixtureSessionA1)
-	a2Path := writeFixture(t, fixtureDir, "session-aaa-002.jsonl", fixtureSessionA2)
-	trivialPath := writeFixture(t, fixtureDir, "session-trivial-001.jsonl", fixtureTrivial)
-	bPath := writeFixture(t, fixtureDir, "session-bbb-001.jsonl", fixtureSessionB)
-	narrPath := writeFixture(t, fixtureDir, "session-narr-001.jsonl", fixtureNarrativeSession)
-	frictionPath := writeFixture(t, fixtureDir, "session-friction-001.jsonl", fixtureFrictionSession)
+	a1Path := writeFixture(t, fixtureDir, "session-aaa-001.jsonl", readTestdata(t, "session-a1.jsonl"))
+	a2Path := writeFixture(t, fixtureDir, "session-aaa-002.jsonl", readTestdata(t, "session-a2.jsonl"))
+	trivialPath := writeFixture(t, fixtureDir, "session-trivial-001.jsonl", readTestdata(t, "trivial.jsonl"))
+	bPath := writeFixture(t, fixtureDir, "session-bbb-001.jsonl", readTestdata(t, "session-b.jsonl"))
+	narrPath := writeFixture(t, fixtureDir, "session-narr-001.jsonl", readTestdata(t, "narrative-session.jsonl"))
+	frictionPath := writeFixture(t, fixtureDir, "session-friction-001.jsonl", readTestdata(t, "friction-session.jsonl"))
 
 	// 1. init
 	t.Run("init", func(t *testing.T) {
@@ -651,7 +589,7 @@ This is archived and should be ignored.
 		// Set up backfill directory structure: basePath/project-x/{uuid}.jsonl
 		backfillDir := t.TempDir()
 		projectDir := filepath.Join(backfillDir, "project-x")
-		writeFixture(t, projectDir, "abcdef01-2345-6789-abcd-ef0123456789.jsonl", fixtureBackfill)
+		writeFixture(t, projectDir, "abcdef01-2345-6789-abcd-ef0123456789.jsonl", readTestdata(t, "backfill.jsonl"))
 
 		stdout := mustRunVV(t, env, "backfill", backfillDir)
 		assertContains(t, stdout, "Found", "backfill found")
@@ -698,7 +636,7 @@ This is archived and should be ignored.
 
 	// 9. stop_checkpoint_then_session_end
 	t.Run("stop_checkpoint_then_session_end", func(t *testing.T) {
-		stopTranscriptPath := writeFixture(t, fixtureDir, "session-stop-001.jsonl", fixtureStopSession)
+		stopTranscriptPath := writeFixture(t, fixtureDir, "session-stop-001.jsonl", readTestdata(t, "stop-session.jsonl"))
 
 		// Build hook JSON for Stop event
 		stopJSON, _ := json.Marshal(map[string]string{
@@ -1069,6 +1007,43 @@ This is archived and should be ignored.
 
 		_, migrateHelpStderr, _ := runVV(t, env, "context", "migrate", "--help")
 		assertContains(t, migrateHelpStderr, "migrate", "context migrate help text")
+	})
+
+	// 10f. export
+	t.Run("export", func(t *testing.T) {
+		// JSON export (all sessions)
+		jsonStdout := mustRunVV(t, env, "export")
+		var jsonData []map[string]interface{}
+		if err := json.Unmarshal([]byte(jsonStdout), &jsonData); err != nil {
+			t.Fatalf("invalid JSON from export: %v\noutput: %s", err, jsonStdout)
+		}
+		if len(jsonData) == 0 {
+			t.Error("expected non-empty JSON array from export")
+		}
+
+		// JSON export filtered by project
+		projStdout := mustRunVV(t, env, "export", "--project", "myproject")
+		var projData []map[string]interface{}
+		if err := json.Unmarshal([]byte(projStdout), &projData); err != nil {
+			t.Fatalf("invalid JSON from filtered export: %v", err)
+		}
+		for _, entry := range projData {
+			if entry["project"] != "myproject" {
+				t.Errorf("filtered export has wrong project: %v", entry["project"])
+			}
+		}
+
+		// CSV export
+		csvStdout := mustRunVV(t, env, "export", "--format", "csv")
+		assertContains(t, csvStdout, "date,project,session_id", "CSV header")
+		lines := strings.Split(strings.TrimSpace(csvStdout), "\n")
+		if len(lines) < 2 {
+			t.Errorf("expected header + data rows, got %d lines", len(lines))
+		}
+
+		// Help flag
+		_, helpStderr, _ := runVV(t, env, "export", "--help")
+		assertContains(t, helpStderr, "export", "export help text")
 	})
 
 	// 11. reprocess

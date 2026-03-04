@@ -196,3 +196,57 @@ func TestDetectCorrections_IMeant(t *testing.T) {
 		t.Errorf("pattern = %q, want negation", corrections[0].Pattern)
 	}
 }
+
+func TestDetectCorrections_ExemptDecision(t *testing.T) {
+	d := makeDialogue(
+		userTurn("No, I think we should use a different approach"),
+	)
+	corrections := DetectCorrections(d)
+	if len(corrections) != 0 {
+		t.Errorf("expected 0 corrections for decision, got %d: %+v", len(corrections), corrections)
+	}
+}
+
+func TestDetectCorrections_ExemptPreference(t *testing.T) {
+	d := makeDialogue(
+		userTurn("No, I'd prefer to keep the current implementation"),
+	)
+	corrections := DetectCorrections(d)
+	if len(corrections) != 0 {
+		t.Errorf("expected 0 corrections for preference, got %d: %+v", len(corrections), corrections)
+	}
+}
+
+func TestDetectCorrections_ExemptISaidWeShould(t *testing.T) {
+	d := makeDialogue(
+		userTurn("No, let's use the existing database instead"),
+	)
+	corrections := DetectCorrections(d)
+	if len(corrections) != 0 {
+		t.Errorf("expected 0 corrections for 'no, let's', got %d: %+v", len(corrections), corrections)
+	}
+}
+
+func TestDetectCorrections_RealCorrectionStillCaught(t *testing.T) {
+	d := makeDialogue(
+		userTurn("No, that's completely wrong"),
+	)
+	corrections := DetectCorrections(d)
+	if len(corrections) != 1 {
+		t.Fatalf("expected 1 correction for real correction, got %d", len(corrections))
+	}
+	if corrections[0].Pattern != "negation" {
+		t.Errorf("pattern = %q, want negation", corrections[0].Pattern)
+	}
+}
+
+func TestDetectCorrections_ISaidMidSentenceNotCaught(t *testing.T) {
+	// "i said" mid-sentence should NOT be caught (restricted to prefix-only)
+	d := makeDialogue(
+		userTurn("The user i said hello to was confused"),
+	)
+	corrections := DetectCorrections(d)
+	if len(corrections) != 0 {
+		t.Errorf("expected 0 corrections for mid-sentence 'i said', got %d: %+v", len(corrections), corrections)
+	}
+}

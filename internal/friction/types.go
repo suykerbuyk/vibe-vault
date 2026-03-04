@@ -18,6 +18,7 @@ type Signals struct {
 	FileRetryDensity  float64 // files with 3+ modifications / total files
 	ErrorCycleDensity float64 // unrecovered errors / total activities
 	RecurringThreads  bool    // open threads recurring from prior session
+	DurationMinutes   int     // session duration for dynamic threshold scaling
 }
 
 // Result holds the full friction analysis output.

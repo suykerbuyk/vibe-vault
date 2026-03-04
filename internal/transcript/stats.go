@@ -20,6 +20,14 @@ func computeStats(entries []Entry) Stats {
 	branchSet := make(map[string]bool)
 	snapshotFiles := make(map[string]bool)
 
+	// Build UUID set for session continuity detection
+	uuidSet := make(map[string]bool)
+	for _, e := range entries {
+		if e.UUID != "" {
+			uuidSet[e.UUID] = true
+		}
+	}
+
 	for _, e := range entries {
 		// Track time bounds
 		if !e.Timestamp.IsZero() {
@@ -146,6 +154,14 @@ func computeStats(entries []Entry) Stats {
 	// Finalize branches
 	for b := range branchSet {
 		s.Branches = append(s.Branches, b)
+	}
+
+	// Detect external parent UUID (indicates /continue session)
+	for _, e := range entries {
+		if e.ParentUUID != "" && !uuidSet[e.ParentUUID] {
+			s.ParentUUID = e.ParentUUID
+			break
+		}
 	}
 
 	return s

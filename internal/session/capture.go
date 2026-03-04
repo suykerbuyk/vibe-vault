@@ -146,6 +146,11 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	// Build note data
 	noteData := render.NoteDataFromTranscript(t, info.Project, info.Domain, info.Branch, sessionID, iteration, previousNote)
 
+	// Session continuity: propagate ParentUUID if this is a /continue session
+	if t.Stats.ParentUUID != "" {
+		noteData.ParentSession = t.Stats.ParentUUID
+	}
+
 	// Narrative extraction (heuristic enrichment from tool calls)
 	narr := narrative.Extract(t, cwd)
 	if narr != nil {
@@ -415,6 +420,7 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		FrictionScore:  frictionScore(frictionResult),
 		KnowledgeNotes:   noteData.KnowledgeNotes,
 		EstimatedCostUSD: noteData.EstimatedCostUSD,
+		ParentUUID:       t.Stats.ParentUUID,
 	})
 
 	if err := idx.Save(); err != nil {

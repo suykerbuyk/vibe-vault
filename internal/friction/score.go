@@ -22,12 +22,31 @@ const (
 	thresholdErrorCycleDensity = 0.20
 )
 
+// tokenThreshold returns a dynamic token-per-file threshold based on session
+// duration. Scales linearly from base 50K at 30min, clamped to [20K, 200K].
+// Longer sessions are expected to use more tokens per file.
+func tokenThreshold(durationMinutes int) float64 {
+	if durationMinutes <= 0 {
+		return thresholdTokensPerFile // base threshold for unknown duration
+	}
+	// Linear scaling: base * (duration / 30)
+	threshold := thresholdTokensPerFile * (float64(durationMinutes) / 30.0)
+	if threshold < 20000 {
+		return 20000
+	}
+	if threshold > 200000 {
+		return 200000
+	}
+	return threshold
+}
+
 // Score computes the composite friction score from signals.
 // Returns 0-100 where higher means more friction.
 func Score(s Signals) int {
 	// Normalize each signal to [0, 1]
 	corrNorm := clamp(s.CorrectionDensity / thresholdCorrectionDensity)
-	tokenNorm := clamp(s.TokensPerFile / thresholdTokensPerFile)
+	tokThreshold := tokenThreshold(s.DurationMinutes)
+	tokenNorm := clamp(s.TokensPerFile / tokThreshold)
 	retryNorm := clamp(s.FileRetryDensity / thresholdFileRetryDensity)
 	errorNorm := clamp(s.ErrorCycleDensity / thresholdErrorCycleDensity)
 	threadNorm := 0.0
@@ -62,7 +81,8 @@ type SignalContribution struct {
 // TopContributors computes each signal's weighted contribution and returns the top N.
 func TopContributors(s Signals, n int) []SignalContribution {
 	corrNorm := clamp(s.CorrectionDensity / thresholdCorrectionDensity)
-	tokenNorm := clamp(s.TokensPerFile / thresholdTokensPerFile)
+	tokThreshold := tokenThreshold(s.DurationMinutes)
+	tokenNorm := clamp(s.TokensPerFile / tokThreshold)
 	retryNorm := clamp(s.FileRetryDensity / thresholdFileRetryDensity)
 	errorNorm := clamp(s.ErrorCycleDensity / thresholdErrorCycleDensity)
 	threadNorm := 0.0
