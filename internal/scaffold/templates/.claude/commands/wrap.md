@@ -7,6 +7,9 @@ Specifically:
 - Compare against the actual codebase state (files, architecture)
 - Update all sections that are stale: file inventory, architecture diagrams,
   design decisions, status, and what was last worked on
+- Rewrite commit.msg to document all code changes made in this session.
+  Write it to both the repo root and the vault agentctx/ directory so
+  they stay in sync.
 - Stage all modified project files (use git add with explicit file paths —
   never use git add -A or git add .)
 

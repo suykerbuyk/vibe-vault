@@ -1,7 +1,14 @@
 ## Restoring full AI thread context:
 
-Read CLAUDE.md, then read RESUME.md to restore full project context. After reading,
-briefly confirm what you loaded and note the current state based on recent git history.
+Read CLAUDE.md, then read RESUME.md to restore full project context.
+
+Run `vv inject` via Bash to load live vault context (recent sessions, open
+threads, decisions, friction trends, knowledge). Include the full output
+verbatim in your context — do not summarize it.
+
+After reading, briefly confirm what you loaded and note the current state:
+recent session activity from inject, and what was last worked on based on
+recent git history.
 
 ## Workflow Orchestration
 

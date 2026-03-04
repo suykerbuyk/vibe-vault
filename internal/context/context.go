@@ -515,6 +515,8 @@ func generateAgentCtxCLAUDE(project string) string {
 
 - **Never commit without explicit human permission.** Stage files and
   update commit.msg freely, but the actual git commit requires human approval.
+- **Keep commit.msg in sync.** Always write commit.msg to both the repo
+  root and the vault agentctx/ directory.
 - **Never commit AI context files.** CLAUDE.md, commit.msg, and anything
   under .claude/ are local-only.
 - **Git commit messages are the project's history.** Write them to be
@@ -604,9 +606,13 @@ Read the following files to restore full project context:
 1. %s/CLAUDE.md — behavioral rules and workflow standards
 2. %s/resume.md — current project state, architecture, decisions
 3. %s/tasks/ — active task files (skip tasks/done/)
+4. Run `+"`vv inject`"+` via Bash to load live vault context (recent sessions,
+   open threads, decisions, friction trends, knowledge). Include the
+   full output verbatim in your context — do not summarize it.
 
 After reading, briefly confirm what you loaded (test count, open tasks,
-what was last worked on) and ask what to work on.
+recent session activity from inject, what was last worked on) and ask
+what to work on.
 `, agentctx, agentctx, agentctx)
 }
 
@@ -629,8 +635,9 @@ Specifically:
 - Retire completed tasks: check each file in %s/tasks/ (not tasks/done/)
   against the session's work — if a task has been implemented, update its
   status to "Done" and move it to tasks/done/
-- Rewrite the repo-root commit.msg to document all code changes made in
-  this session
+- Rewrite commit.msg to document all code changes made in this session.
+  Write it to both the repo root and the vault agentctx/ directory so
+  they stay in sync
 - Stage all modified and newly added project files (use git add with explicit
   file paths — never use git add -A or git add .)
 
