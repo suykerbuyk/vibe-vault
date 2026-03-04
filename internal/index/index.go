@@ -40,7 +40,8 @@ type SessionEntry struct {
 	Messages       int            `json:"messages,omitempty"`
 	Corrections    int            `json:"corrections,omitempty"`
 	FrictionScore  int            `json:"friction_score,omitempty"`
-	KnowledgeNotes []string       `json:"knowledge_notes,omitempty"`
+	KnowledgeNotes   []string       `json:"knowledge_notes,omitempty"`
+	EstimatedCostUSD float64        `json:"estimated_cost_usd,omitempty"`
 }
 
 // Index manages the session-index.json file.

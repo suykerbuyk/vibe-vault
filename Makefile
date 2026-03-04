@@ -5,7 +5,7 @@ GOFLAGS := -trimpath -ldflags="$(LDFLAGS)"
 MANDIR  := man
 MANPREFIX := $(HOME)/.local/share/man
 
-.PHONY: all build man install test integration check vet clean pre-commit hooks
+.PHONY: all build man install test integration check vet lint coverage bench fuzz clean pre-commit hooks
 
 all: build man
 
@@ -39,6 +39,23 @@ pre-commit: vet test integration
 hooks:
 	git config core.hooksPath .githooks
 
+lint:
+	golangci-lint run ./...
+
+coverage:
+	go test -coverprofile=coverage.out ./internal/...
+	@echo "Coverage report: coverage.out"
+
+bench:
+	go test -bench=. -benchmem ./internal/...
+
+fuzz:
+	@for pkg in $$(go list ./internal/... | xargs grep -rl 'func Fuzz' | sed 's|/[^/]*$$||' | sort -u); do \
+		echo "fuzzing $$pkg"; \
+		go test -fuzz=Fuzz -fuzztime=30s "$$pkg"; \
+	done
+
 clean:
 	rm -f $(BINARY)
 	rm -f $(MANDIR)/*.1
+	rm -f coverage.out

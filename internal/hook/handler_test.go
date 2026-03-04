@@ -1,11 +1,14 @@
 package hook
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johns/vibe-vault/internal/config"
 )
@@ -348,5 +351,73 @@ func TestInputJSON(t *testing.T) {
 
 	if decoded != original {
 		t.Errorf("round-trip mismatch:\n  got:  %+v\n  want: %+v", decoded, original)
+	}
+}
+
+func TestReadStdinFrom_ValidJSON(t *testing.T) {
+	input := Input{
+		SessionID:     "sess-abc",
+		HookEventName: "SessionEnd",
+		CWD:           "/tmp/proj",
+	}
+	data, _ := json.Marshal(input)
+
+	got, err := readStdinFrom(bytes.NewReader(data), 2*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.SessionID != "sess-abc" {
+		t.Errorf("session_id: got %q, want %q", got.SessionID, "sess-abc")
+	}
+	if got.HookEventName != "SessionEnd" {
+		t.Errorf("hook_event_name: got %q, want %q", got.HookEventName, "SessionEnd")
+	}
+}
+
+func TestReadStdinFrom_EmptyStdin(t *testing.T) {
+	_, err := readStdinFrom(bytes.NewReader(nil), 2*time.Second)
+	if err == nil {
+		t.Fatal("expected error for empty stdin")
+	}
+	if !strings.Contains(err.Error(), "empty stdin") {
+		t.Errorf("expected 'empty stdin' error, got: %v", err)
+	}
+}
+
+func TestReadStdinFrom_InvalidJSON(t *testing.T) {
+	_, err := readStdinFrom(strings.NewReader("not json"), 2*time.Second)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "parse stdin JSON") {
+		t.Errorf("expected JSON parse error, got: %v", err)
+	}
+}
+
+func TestReadStdinFrom_Timeout(t *testing.T) {
+	// Use a reader that blocks forever
+	pr, _ := io.Pipe() // never close pw, so reads block
+	defer pr.Close()
+
+	_, err := readStdinFrom(pr, 50*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Errorf("expected timeout error, got: %v", err)
+	}
+}
+
+func TestReadStdinFrom_LargeInput(t *testing.T) {
+	// Create input larger than maxStdinSize (64KB)
+	huge := make([]byte, maxStdinSize+1024)
+	for i := range huge {
+		huge[i] = 'x'
+	}
+
+	_, err := readStdinFrom(bytes.NewReader(huge), 2*time.Second)
+	// Should get a JSON parse error (truncated data), not a hang or OOM
+	if err == nil {
+		t.Fatal("expected error for oversized input")
 	}
 }

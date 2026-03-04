@@ -18,12 +18,14 @@ type Summary struct {
 	TotalMessages  int
 	TotalToolUses  int
 	TotalDuration  int // minutes
+	TotalCostUSD   float64
 	ActiveProjects int
 
 	AvgTokensInPerMsg  float64
 	AvgTokensOutPerMsg float64
 	AvgToolsPerSession float64
 	AvgDuration        float64 // minutes
+	AvgCostUSD         float64
 
 	Projects []ProjectStats
 	Models   []ModelStats
@@ -38,6 +40,7 @@ type ProjectStats struct {
 	Sessions int
 	TokensIn int
 	Duration int // minutes
+	CostUSD  float64
 }
 
 // ModelStats holds per-model aggregate metrics.
@@ -68,6 +71,7 @@ type MonthStats struct {
 	Sessions int
 	TokensIn int
 	TokensOut int
+	CostUSD  float64
 }
 
 // Compute builds a Summary from index entries, optionally filtered by project.
@@ -91,6 +95,7 @@ func Compute(entries map[string]index.SessionEntry, project string) Summary {
 		s.TotalMessages += e.Messages
 		s.TotalToolUses += e.ToolUses
 		s.TotalDuration += e.Duration
+		s.TotalCostUSD += e.EstimatedCostUSD
 
 		// Project breakdown
 		ps, ok := projectMap[e.Project]
@@ -101,6 +106,7 @@ func Compute(entries map[string]index.SessionEntry, project string) Summary {
 		ps.Sessions++
 		ps.TokensIn += e.TokensIn
 		ps.Duration += e.Duration
+		ps.CostUSD += e.EstimatedCostUSD
 
 		// Model breakdown
 		model := e.Model
@@ -137,6 +143,7 @@ func Compute(entries map[string]index.SessionEntry, project string) Summary {
 			mm.Sessions++
 			mm.TokensIn += e.TokensIn
 			mm.TokensOut += e.TokensOut
+			mm.CostUSD += e.EstimatedCostUSD
 		}
 	}
 
@@ -150,6 +157,9 @@ func Compute(entries map[string]index.SessionEntry, project string) Summary {
 	if s.TotalSessions > 0 {
 		s.AvgToolsPerSession = float64(s.TotalToolUses) / float64(s.TotalSessions)
 		s.AvgDuration = float64(s.TotalDuration) / float64(s.TotalSessions)
+		if s.TotalCostUSD > 0 {
+			s.AvgCostUSD = s.TotalCostUSD / float64(s.TotalSessions)
+		}
 	}
 
 	// Model tok/msg

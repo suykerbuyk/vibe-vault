@@ -20,6 +20,7 @@ type Config struct {
 	Enrichment EnrichmentConfig `toml:"enrichment"`
 	Archive    ArchiveConfig    `toml:"archive"`
 	Friction   FrictionConfig   `toml:"friction"`
+	Pricing    PricingConfig    `toml:"pricing"`
 }
 
 type DomainsConfig struct {
@@ -43,6 +44,21 @@ type ArchiveConfig struct {
 
 type FrictionConfig struct {
 	AlertThreshold int `toml:"alert_threshold"`
+}
+
+// PricingConfig holds per-model cost estimation settings.
+type PricingConfig struct {
+	Enabled bool           `toml:"enabled"`
+	Models  []PricingModel `toml:"models"`
+}
+
+// PricingModel defines token rates for a model name pattern.
+type PricingModel struct {
+	Pattern             string  `toml:"pattern"`              // glob pattern, e.g. "claude-*"
+	InputPerMillion     float64 `toml:"input_per_million"`    // USD per 1M input tokens
+	OutputPerMillion    float64 `toml:"output_per_million"`   // USD per 1M output tokens
+	CacheReadPerMillion float64 `toml:"cache_read_per_million"`
+	CacheWritePerMillion float64 `toml:"cache_write_per_million"`
 }
 
 // DefaultConfig returns config with sensible defaults.

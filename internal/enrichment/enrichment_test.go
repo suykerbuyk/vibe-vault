@@ -2,14 +2,11 @@ package enrichment
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"fmt"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/llm"
 )
 
 func TestTruncate(t *testing.T) {
@@ -38,7 +35,7 @@ func TestTruncate(t *testing.T) {
 
 func TestBuildMessages(t *testing.T) {
 	input := PromptInput{
-		UserText:     "implement the thing",
+		UserText:      "implement the thing",
 		AssistantText: "I'll implement that for you",
 		FilesChanged:  []string{"main.go", "util.go"},
 		ToolCounts:    map[string]int{"Read": 3, "Edit": 2, "Bash": 1},
@@ -97,24 +94,14 @@ func TestBuildMessages(t *testing.T) {
 }
 
 func TestParseResponse(t *testing.T) {
-	resp := chatResponse{
-		Choices: []chatChoice{
-			{
-				Message: chatMessage{
-					Role: "assistant",
-					Content: `{
-						"summary": "Implemented user authentication with JWT tokens.",
-						"decisions": ["Used JWT over sessions — stateless and scalable"],
-						"open_threads": ["Add refresh token rotation"],
-						"tag": "implementation"
-					}`,
-				},
-			},
-		},
-	}
+	content := `{
+		"summary": "Implemented user authentication with JWT tokens.",
+		"decisions": ["Used JWT over sessions — stateless and scalable"],
+		"open_threads": ["Add refresh token rotation"],
+		"tag": "implementation"
+	}`
 
-	body, _ := json.Marshal(resp)
-	result, err := parseResponse(body)
+	result, err := parseResponse(content)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -133,26 +120,8 @@ func TestParseResponse(t *testing.T) {
 	}
 }
 
-func TestParseResponse_EmptyChoices(t *testing.T) {
-	resp := chatResponse{Choices: []chatChoice{}}
-	body, _ := json.Marshal(resp)
-	_, err := parseResponse(body)
-	if err == nil {
-		t.Fatal("expected error for empty choices")
-	}
-	if !strings.Contains(err.Error(), "empty choices") {
-		t.Errorf("wrong error: %v", err)
-	}
-}
-
 func TestParseResponse_BadJSON(t *testing.T) {
-	resp := chatResponse{
-		Choices: []chatChoice{
-			{Message: chatMessage{Content: "not json at all"}},
-		},
-	}
-	body, _ := json.Marshal(resp)
-	_, err := parseResponse(body)
+	_, err := parseResponse("not json at all")
 	if err == nil {
 		t.Fatal("expected error for bad JSON content")
 	}
@@ -179,76 +148,31 @@ func TestValidateTag(t *testing.T) {
 	}
 }
 
-func TestGenerate_Disabled(t *testing.T) {
-	cfg := config.EnrichmentConfig{Enabled: false}
-	result, err := Generate(context.Background(), cfg, PromptInput{})
+// mockProvider implements llm.Provider for testing.
+type mockProvider struct {
+	response *llm.Response
+	err      error
+	calls    int
+}
+
+func (m *mockProvider) Name() string { return "mock" }
+func (m *mockProvider) ChatCompletion(_ context.Context, _ llm.Request) (*llm.Response, error) {
+	m.calls++
+	return m.response, m.err
+}
+
+func TestGenerate_NilProvider(t *testing.T) {
+	result, err := Generate(context.Background(), nil, PromptInput{})
 	if result != nil || err != nil {
-		t.Errorf("disabled: got result=%v, err=%v", result, err)
+		t.Errorf("nil provider: got result=%v, err=%v", result, err)
 	}
 }
 
-func TestGenerate_NoAPIKey(t *testing.T) {
-	cfg := config.EnrichmentConfig{
-		Enabled:   true,
-		APIKeyEnv: "VV_TEST_NONEXISTENT_KEY_12345",
-	}
-	result, err := Generate(context.Background(), cfg, PromptInput{})
-	if result != nil || err != nil {
-		t.Errorf("no key: got result=%v, err=%v", result, err)
-	}
-}
-
-func TestGenerate_MockServer(t *testing.T) {
-	cannedResponse := chatResponse{
-		Choices: []chatChoice{
-			{
-				Message: chatMessage{
-					Role: "assistant",
-					Content: `{"summary":"Built enrichment pipeline.","decisions":["Raw HTTP over SDK — fewer deps"],"open_threads":["Add retry logic"],"tag":"implementation"}`,
-				},
-			},
+func TestGenerate_MockProvider(t *testing.T) {
+	mock := &mockProvider{
+		response: &llm.Response{
+			Content: `{"summary":"Built enrichment pipeline.","decisions":["Raw HTTP over SDK — fewer deps"],"open_threads":["Add retry logic"],"tag":"implementation"}`,
 		},
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify request structure
-		if r.Method != http.MethodPost {
-			t.Errorf("method: got %s, want POST", r.Method)
-		}
-		if r.Header.Get("Authorization") != "Bearer test-key-123" {
-			t.Errorf("auth: got %q", r.Header.Get("Authorization"))
-		}
-		if r.Header.Get("Content-Type") != "application/json" {
-			t.Errorf("content-type: got %q", r.Header.Get("Content-Type"))
-		}
-
-		// Verify request body
-		var req chatRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		if req.Temperature != 0.3 {
-			t.Errorf("temperature: got %f, want 0.3", req.Temperature)
-		}
-		if req.ResponseFormat == nil || req.ResponseFormat.Type != "json_object" {
-			t.Error("missing response_format")
-		}
-		if len(req.Messages) != 2 {
-			t.Errorf("messages: got %d, want 2", len(req.Messages))
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(cannedResponse)
-	}))
-	defer server.Close()
-
-	t.Setenv("VV_TEST_KEY", "test-key-123")
-
-	cfg := config.EnrichmentConfig{
-		Enabled:   true,
-		APIKeyEnv: "VV_TEST_KEY",
-		Model:     "test-model",
-		BaseURL:   server.URL,
 	}
 
 	input := PromptInput{
@@ -259,7 +183,7 @@ func TestGenerate_MockServer(t *testing.T) {
 		AsstMessages:  2,
 	}
 
-	result, err := Generate(context.Background(), cfg, input)
+	result, err := Generate(context.Background(), mock, input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -272,54 +196,18 @@ func TestGenerate_MockServer(t *testing.T) {
 	if result.Tag != "implementation" {
 		t.Errorf("tag: got %q", result.Tag)
 	}
-}
-
-func TestGenerate_Timeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Delay longer than the client timeout
-		time.Sleep(2 * time.Second)
-	}))
-	defer server.Close()
-
-	t.Setenv("VV_TEST_KEY_TIMEOUT", "test-key")
-
-	cfg := config.EnrichmentConfig{
-		Enabled:   true,
-		APIKeyEnv: "VV_TEST_KEY_TIMEOUT",
-		Model:     "test-model",
-		BaseURL:   server.URL,
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-
-	_, err := Generate(ctx, cfg, PromptInput{UserText: "test"})
-	if err == nil {
-		t.Fatal("expected timeout error")
+	if mock.calls != 1 {
+		t.Errorf("expected 1 call, got %d", mock.calls)
 	}
 }
 
-func TestGenerate_ServerError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(`{"error":{"message":"rate limit exceeded"}}`))
-	}))
-	defer server.Close()
-
-	t.Setenv("VV_TEST_KEY_429", "test-key")
-
-	cfg := config.EnrichmentConfig{
-		Enabled:   true,
-		APIKeyEnv: "VV_TEST_KEY_429",
-		Model:     "test-model",
-		BaseURL:   server.URL,
+func TestGenerate_ProviderError(t *testing.T) {
+	mock := &mockProvider{
+		err: fmt.Errorf("connection refused"),
 	}
 
-	_, err := Generate(context.Background(), cfg, PromptInput{UserText: "test"})
+	_, err := Generate(context.Background(), mock, PromptInput{UserText: "test"})
 	if err == nil {
-		t.Fatal("expected error for 429")
-	}
-	if !strings.Contains(err.Error(), "429") {
-		t.Errorf("error should mention status code: %v", err)
+		t.Fatal("expected error from provider")
 	}
 }

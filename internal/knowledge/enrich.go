@@ -4,19 +4,15 @@
 package knowledge
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/llm"
 )
 
-const systemPrompt = `You extract durable knowledge from Claude Code sessions.
+const knowledgeSystemPrompt = `You extract durable knowledge from Claude Code sessions.
 
 Given session data with friction corrections (user corrections and what followed),
 extract actionable lessons and architectural decisions.
@@ -56,79 +52,28 @@ type noteJSON struct {
 }
 
 // Enrich calls the LLM to extract knowledge notes from session data.
-// Returns nil if enrichment is disabled, no API key is set, or on error.
-func Enrich(ctx context.Context, cfg config.EnrichmentConfig, input ExtractInput) ([]Note, error) {
-	if !cfg.Enabled {
-		return nil, nil
-	}
-
-	apiKey := os.Getenv(cfg.APIKeyEnv)
-	if apiKey == "" {
+// Returns nil if provider is nil (enrichment disabled/unavailable).
+func Enrich(ctx context.Context, provider llm.Provider, input ExtractInput) ([]Note, error) {
+	if provider == nil {
 		return nil, nil
 	}
 
 	userPrompt := buildKnowledgePrompt(input)
 
-	reqBody := chatRequest{
-		Model: cfg.Model,
-		Messages: []chatMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userPrompt},
-		},
+	resp, err := provider.ChatCompletion(ctx, llm.Request{
+		System:      knowledgeSystemPrompt,
+		UserPrompt:  userPrompt,
 		Temperature: 0.3,
-		ResponseFormat: &respFormat{
-			Type: "json_object",
-		},
-	}
-
-	body, err := json.Marshal(reqBody)
+		JSONMode:    true,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("knowledge extraction: %w", err)
 	}
 
-	url := strings.TrimRight(cfg.BaseURL, "/") + "/chat/completions"
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
-	}
-
-	return parseKnowledgeResponse(respBody)
+	return parseKnowledgeResponse(resp.Content)
 }
 
-func parseKnowledgeResponse(body []byte) ([]Note, error) {
-	var resp chatResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
-	}
-
-	if resp.Error != nil {
-		return nil, fmt.Errorf("API error: %s", resp.Error.Message)
-	}
-
-	if len(resp.Choices) == 0 {
-		return nil, fmt.Errorf("empty choices in response")
-	}
-
-	content := resp.Choices[0].Message.Content
-
+func parseKnowledgeResponse(content string) ([]Note, error) {
 	var kj knowledgeJSON
 	if err := json.Unmarshal([]byte(content), &kj); err != nil {
 		return nil, fmt.Errorf("unmarshal knowledge JSON: %w", err)
@@ -200,7 +145,6 @@ func buildKnowledgePrompt(input ExtractInput) string {
 		b.WriteString("\n")
 	}
 
-	// Include truncated transcript text for additional context
 	if input.UserText != "" {
 		userText := input.UserText
 		if len(userText) > 8000 {
@@ -222,35 +166,4 @@ func buildKnowledgePrompt(input ExtractInput) string {
 	}
 
 	return b.String()
-}
-
-// API types — mirrors enrichment package but kept local to avoid coupling.
-
-type chatRequest struct {
-	Model          string        `json:"model"`
-	Messages       []chatMessage `json:"messages"`
-	Temperature    float64       `json:"temperature"`
-	ResponseFormat *respFormat   `json:"response_format,omitempty"`
-}
-
-type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type chatResponse struct {
-	Choices []chatChoice `json:"choices"`
-	Error   *apiError    `json:"error,omitempty"`
-}
-
-type chatChoice struct {
-	Message chatMessage `json:"message"`
-}
-
-type respFormat struct {
-	Type string `json:"type"`
-}
-
-type apiError struct {
-	Message string `json:"message"`
 }

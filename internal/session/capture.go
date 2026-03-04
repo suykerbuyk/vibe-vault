@@ -18,9 +18,11 @@ import (
 	"github.com/johns/vibe-vault/internal/friction"
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/knowledge"
+	"github.com/johns/vibe-vault/internal/llm"
 	"github.com/johns/vibe-vault/internal/narrative"
 	"github.com/johns/vibe-vault/internal/prose"
 	"github.com/johns/vibe-vault/internal/render"
+	"github.com/johns/vibe-vault/internal/stats"
 	"github.com/johns/vibe-vault/internal/transcript"
 )
 
@@ -29,9 +31,10 @@ type CaptureOpts struct {
 	TranscriptPath string
 	CWD            string
 	SessionID      string
-	Force          bool // skip dedup, overwrite existing note
-	Checkpoint     bool // provisional capture (Stop hook)
-	SkipEnrichment bool // skip LLM enrichment
+	Force          bool         // skip dedup, overwrite existing note
+	Checkpoint     bool         // provisional capture (Stop hook)
+	SkipEnrichment bool         // skip LLM enrichment
+	Provider       llm.Provider // LLM provider (nil = heuristic only)
 }
 
 // CaptureResult holds the output of a capture operation.
@@ -79,6 +82,22 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 
 	// Detect session metadata
 	info := Detect(cwd, t.Stats.GitBranch, t.Stats.Model, sessionID, cfg)
+
+	// Acquire index lock to prevent concurrent corruption
+	stateDir := cfg.StateDir()
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		log.Printf("warning: could not create state dir: %v", err)
+	}
+	indexLockPath := filepath.Join(stateDir, "session-index.json")
+	fl, lockErr := index.Lock(indexLockPath)
+	if lockErr != nil {
+		log.Printf("warning: could not acquire index lock: %v", lockErr)
+	}
+	defer func() {
+		if fl != nil {
+			fl.Unlock()
+		}
+	}()
 
 	// Load session index
 	idx, err := index.Load(cfg.StateDir())
@@ -142,7 +161,13 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		noteData.Decisions = narr.Decisions
 		noteData.OpenThreads = narr.OpenThreads
 		noteData.WorkPerformed = narr.WorkPerformed
+
+		// Timeline (Phase 5 Task 21)
+		noteData.Timeline = narrative.RenderTimeline(narr.Segments)
 	}
+
+	// Reasoning highlights from thinking blocks (Phase 4 Task 15)
+	noteData.ReasoningHighlights = narrative.ExtractReasoningHighlights(t)
 
 	// Prose dialogue extraction
 	dialogue := prose.Extract(t, cwd)
@@ -193,9 +218,26 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		noteData.Status = "checkpoint"
 	}
 
+	// Tool effectiveness analysis (Task 20)
+	if narr != nil {
+		te := stats.AnalyzeTools(narr.Segments)
+		noteData.ToolEffectiveness = stats.RenderToolEffectiveness(te)
+	}
+
+	// Cost estimation
+	if cfg.Pricing.Enabled {
+		noteData.EstimatedCostUSD = stats.EstimateCost(cfg.Pricing, stats.CostInput{
+			Model:        t.Stats.Model,
+			InputTokens:  t.Stats.InputTokens,
+			OutputTokens: t.Stats.OutputTokens,
+			CacheReads:   t.Stats.CacheReads,
+			CacheWrites:  t.Stats.CacheWrites,
+		})
+	}
+
 	// LLM enrichment (graceful: skip on error or if disabled)
 	// Skip when prose extraction produced output — the prose subsumes enrichment's purpose.
-	if !opts.SkipEnrichment && noteData.ProseDialogue == "" {
+	if !opts.SkipEnrichment && opts.Provider != nil && noteData.ProseDialogue == "" {
 		var filesChanged []string
 		for f := range t.Stats.FilesWritten {
 			filesChanged = append(filesChanged, f)
@@ -230,7 +272,7 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		enrichCtx, enrichCancel := context.WithTimeout(context.Background(), timeout)
 		defer enrichCancel()
 
-		enrichResult, enrichErr := enrichment.Generate(enrichCtx, cfg.Enrichment, enrichInput)
+		enrichResult, enrichErr := enrichment.Generate(enrichCtx, opts.Provider, enrichInput)
 		if enrichErr != nil {
 			log.Printf("warning: enrichment failed: %v", enrichErr)
 		}
@@ -246,7 +288,7 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	}
 
 	// Knowledge extraction (separate LLM call, high-signal sessions only)
-	if !opts.SkipEnrichment && cfg.Enrichment.Enabled {
+	if !opts.SkipEnrichment && opts.Provider != nil {
 		shouldExtract := (frictionResult != nil && frictionResult.Score >= 30) ||
 			len(noteData.Decisions) >= 2
 		if shouldExtract {
@@ -277,7 +319,7 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 
 			sessionNoteName := filenameNoExt(render.NoteFilename(date, iteration))
 
-			notes, kErr := knowledge.Enrich(kCtx, cfg.Enrichment, kInput)
+			notes, kErr := knowledge.Enrich(kCtx, opts.Provider, kInput)
 			if kErr != nil {
 				log.Printf("warning: knowledge extraction failed: %v", kErr)
 			}
@@ -371,7 +413,8 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		Messages:       noteData.Messages,
 		Corrections:    frictionCorrections(frictionResult),
 		FrictionScore:  frictionScore(frictionResult),
-		KnowledgeNotes: noteData.KnowledgeNotes,
+		KnowledgeNotes:   noteData.KnowledgeNotes,
+		EstimatedCostUSD: noteData.EstimatedCostUSD,
 	})
 
 	if err := idx.Save(); err != nil {

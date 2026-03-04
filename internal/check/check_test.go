@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/johns/vibe-vault/internal/config"
@@ -158,11 +159,11 @@ func TestCheckDomains_EmptySkipped(t *testing.T) {
 func TestCheckEnrichment_Disabled(t *testing.T) {
 	ecfg := config.EnrichmentConfig{Enabled: false}
 	r := CheckEnrichment(ecfg)
-	if r.Status != Pass {
-		t.Errorf("expected Pass, got %s: %s", r.Status, r.Detail)
+	if r.Status != Warn {
+		t.Errorf("expected Warn, got %s: %s", r.Status, r.Detail)
 	}
-	if r.Detail != "disabled" {
-		t.Errorf("unexpected detail: %s", r.Detail)
+	if !strings.Contains(r.Detail, "disabled") {
+		t.Errorf("expected 'disabled' in detail, got: %s", r.Detail)
 	}
 }
 
@@ -179,8 +180,8 @@ func TestCheckEnrichment_EnabledNoKey(t *testing.T) {
 	t.Setenv("TEST_API_KEY_MISSING", "")
 	ecfg := config.EnrichmentConfig{Enabled: true, APIKeyEnv: "TEST_API_KEY_MISSING"}
 	r := CheckEnrichment(ecfg)
-	if r.Status != Warn {
-		t.Errorf("expected Warn, got %s: %s", r.Status, r.Detail)
+	if r.Status != Fail {
+		t.Errorf("expected Fail, got %s: %s", r.Status, r.Detail)
 	}
 }
 

@@ -50,8 +50,8 @@ func TestComputeSingleSession(t *testing.T) {
 	if r.TotalWeeks != 1 {
 		t.Errorf("expected 1 week, got %d", r.TotalWeeks)
 	}
-	if len(r.Metrics) != 4 {
-		t.Errorf("expected 4 metrics, got %d", len(r.Metrics))
+	if len(r.Metrics) != 5 {
+		t.Errorf("expected 5 metrics, got %d", len(r.Metrics))
 	}
 }
 

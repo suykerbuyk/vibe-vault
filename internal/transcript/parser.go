@@ -42,8 +42,9 @@ func Parse(r io.Reader) (*Transcript, error) {
 			continue
 		}
 
-		// Skip non-conversation types
-		if entry.Type == "file-history-snapshot" || entry.Type == "progress" {
+		// Skip progress entries (noisy, no useful data).
+		// Keep file-history-snapshot entries for accurate file tracking.
+		if entry.Type == "progress" {
 			continue
 		}
 
@@ -97,6 +98,18 @@ func TextContent(msg *Message) string {
 	for _, b := range blocks {
 		if b.Type == "text" && b.Text != "" {
 			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// ThinkingContent extracts all thinking text from an assistant message.
+func ThinkingContent(msg *Message) string {
+	blocks := ContentBlocks(msg)
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == "thinking" && b.Thinking != "" {
+			parts = append(parts, b.Thinking)
 		}
 	}
 	return strings.Join(parts, "\n")

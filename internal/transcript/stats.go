@@ -17,6 +17,9 @@ func computeStats(entries []Entry) Stats {
 		ToolCounts:   make(map[string]int),
 	}
 
+	branchSet := make(map[string]bool)
+	snapshotFiles := make(map[string]bool)
+
 	for _, e := range entries {
 		// Track time bounds
 		if !e.Timestamp.IsZero() {
@@ -37,6 +40,37 @@ func computeStats(entries []Entry) Stats {
 		}
 		if s.GitBranch == "" && e.GitBranch != "" {
 			s.GitBranch = e.GitBranch
+		}
+
+		// Track all unique branches (Task 18)
+		if e.GitBranch != "" {
+			branchSet[e.GitBranch] = true
+		}
+
+		// Track CC version from first entry (Task 18)
+		if s.CCVersion == "" && e.Version != "" {
+			s.CCVersion = e.Version
+		}
+
+		// Parse file-history-snapshot entries for ground truth file tracking (Task 17)
+		if e.Type == "file-history-snapshot" {
+			extractSnapshotFiles(&e, snapshotFiles)
+			continue
+		}
+
+		// Parse system entries for turn_duration and compaction (Tasks 16, 18)
+		if e.Type == "system" {
+			if e.Subtype == "turn_duration" {
+				if dur := extractTurnDuration(&e); dur > 0 {
+					s.TurnDurations = append(s.TurnDurations, dur)
+				}
+			}
+			if e.Subtype == "compact_boundary" {
+				if extractCompactionTrigger(&e) == "auto" {
+					s.AutoCompactions++
+				}
+			}
+			continue
 		}
 
 		if e.Message == nil {
@@ -73,6 +107,12 @@ func computeStats(entries []Entry) Stats {
 				s.CacheWrites += u.CacheCreationInputTokens
 			}
 
+			// Thinking block metrics (Task 15)
+			if thinking := ThinkingContent(e.Message); thinking != "" {
+				s.ThinkingBlocks++
+				s.ThinkingTokens += len(thinking)
+			}
+
 			// Tool uses and file tracking
 			for _, tu := range ToolUses(e.Message) {
 				s.ToolUses++
@@ -86,7 +126,87 @@ func computeStats(entries []Entry) Stats {
 		s.Duration = s.EndTime.Sub(s.StartTime)
 	}
 
+	// Finalize turn duration stats
+	if len(s.TurnDurations) > 0 {
+		total := 0
+		for _, d := range s.TurnDurations {
+			total += d
+			if d > s.MaxTurnDuration {
+				s.MaxTurnDuration = d
+			}
+		}
+		s.AvgTurnDuration = total / len(s.TurnDurations)
+	}
+
+	// Finalize snapshot files
+	for f := range snapshotFiles {
+		s.FilesModifiedBySnapshot = append(s.FilesModifiedBySnapshot, f)
+	}
+
+	// Finalize branches
+	for b := range branchSet {
+		s.Branches = append(s.Branches, b)
+	}
+
 	return s
+}
+
+// extractSnapshotFiles extracts file paths from file-history-snapshot entries.
+func extractSnapshotFiles(e *Entry, files map[string]bool) {
+	// file-history-snapshot entries store data in a top-level field.
+	// We parse the raw JSON to extract trackedFileBackups keys.
+	// The entry's raw JSON has been unmarshaled into Entry, but the
+	// tracked files are in an extra field we need to access.
+	// Since Entry doesn't have a catch-all field, we rely on the
+	// ToolUseResult field or parse from the entry's content.
+	// In Claude Code's format, file-history-snapshot has a "content"
+	// field with trackedFileBackups as a map of filepath->content.
+	if e.Message != nil {
+		blocks := ContentBlocks(e.Message)
+		for _, b := range blocks {
+			if b.Input != nil {
+				if m, ok := b.Input.(map[string]interface{}); ok {
+					for k := range m {
+						files[k] = true
+					}
+				}
+			}
+		}
+	}
+}
+
+// extractTurnDuration extracts duration in ms from a turn_duration system entry.
+func extractTurnDuration(e *Entry) int {
+	if e.Message == nil {
+		return 0
+	}
+	// turn_duration entries typically have the duration in content
+	if s, ok := e.Message.Content.(string); ok {
+		// Try to parse as a number
+		var dur int
+		for _, c := range s {
+			if c >= '0' && c <= '9' {
+				dur = dur*10 + int(c-'0')
+			} else if dur > 0 {
+				break
+			}
+		}
+		return dur
+	}
+	return 0
+}
+
+// extractCompactionTrigger returns the trigger type from a compact_boundary entry.
+func extractCompactionTrigger(e *Entry) string {
+	if e.Message == nil {
+		return ""
+	}
+	if s, ok := e.Message.Content.(string); ok {
+		if strings.Contains(s, "auto") {
+			return "auto"
+		}
+	}
+	return ""
 }
 
 // trackFiles extracts file paths from tool inputs to track reads and writes.

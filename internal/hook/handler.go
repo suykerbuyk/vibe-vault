@@ -4,15 +4,18 @@
 package hook
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"time"
 
 	"github.com/johns/vibe-vault/internal/config"
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/knowledge"
+	"github.com/johns/vibe-vault/internal/llm"
 	"github.com/johns/vibe-vault/internal/session"
 )
 
@@ -53,27 +56,55 @@ func handleInput(input *Input, event string, cfg config.Config) error {
 	}
 }
 
-func readStdin() (*Input, error) {
-	// Read all stdin with a timeout
-	done := make(chan []byte, 1)
-	errCh := make(chan error, 1)
+// maxStdinSize is the maximum number of bytes read from stdin (64KB).
+const maxStdinSize = 64 * 1024
 
+func readStdin() (*Input, error) {
+	return readStdinFrom(os.Stdin, 2*time.Second)
+}
+
+// readStdinFrom reads and parses hook JSON from the given reader with a timeout.
+// On timeout, the pipe writer is closed to unblock the reading goroutine,
+// preventing goroutine leaks.
+func readStdinFrom(r io.Reader, timeout time.Duration) (*Input, error) {
+	// Use a pipe so we can close the writer to unblock the reader on timeout.
+	pr, pw := io.Pipe()
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// Copy from stdin (with size limit) into the pipe.
+	// Closing pw unblocks any pending read on pr.
 	go func() {
-		data, err := io.ReadAll(os.Stdin)
+		_, err := io.Copy(pw, io.LimitReader(r, maxStdinSize))
 		if err != nil {
-			errCh <- err
-			return
+			pw.CloseWithError(err)
+		} else {
+			pw.Close()
 		}
-		done <- data
 	}()
 
+	done := make(chan struct{})
 	var data []byte
+	var readErr error
+
+	go func() {
+		data, readErr = io.ReadAll(pr)
+		close(done)
+	}()
+
 	select {
-	case data = <-done:
-	case err := <-errCh:
-		return nil, err
-	case <-time.After(2 * time.Second):
+	case <-done:
+		// Read completed
+	case <-ctx.Done():
+		// Timeout: close the pipe writer to unblock ReadAll on the pipe reader
+		pw.CloseWithError(fmt.Errorf("stdin read timeout"))
+		<-done // wait for goroutine to finish
 		return nil, fmt.Errorf("stdin read timeout")
+	}
+
+	if readErr != nil {
+		return nil, readErr
 	}
 
 	if len(data) == 0 {
@@ -121,10 +152,17 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 		return fmt.Errorf("no transcript_path in hook input")
 	}
 
+	// Create LLM provider (nil if disabled or API key not set).
+	provider, providerErr := llm.NewProvider(cfg.Enrichment)
+	if providerErr != nil {
+		log.Printf("warning: LLM provider init failed: %v", providerErr)
+	}
+
 	result, err := session.Capture(session.CaptureOpts{
 		TranscriptPath: input.TranscriptPath,
 		CWD:            input.CWD,
 		SessionID:      input.SessionID,
+		Provider:       provider,
 	}, cfg)
 	if err != nil {
 		return fmt.Errorf("capture session: %w", err)
@@ -135,7 +173,16 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "vv: %s → %s\n", result.Project, result.NotePath)
+	// Report enrichment status in output.
+	enrichTag := "heuristic"
+	if providerName, model, reason := llm.Available(cfg.Enrichment); reason == "" {
+		enrichTag = fmt.Sprintf("enriched by %s/%s", providerName, model)
+	} else if cfg.Enrichment.Enabled {
+		enrichTag = fmt.Sprintf("heuristic — LLM unavailable: %s", reason)
+	} else {
+		enrichTag = "heuristic — no LLM configured"
+	}
+	fmt.Fprintf(os.Stderr, "vv: session captured → %s (%s)\n", result.NotePath, enrichTag)
 
 	if result.FrictionAlert != "" {
 		fmt.Fprintf(os.Stderr, "vv: %s\n", result.FrictionAlert)

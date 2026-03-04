@@ -30,6 +30,12 @@ type PromptInput struct {
 	Activities       []string // Activity descriptions for context
 }
 
+// chatMessage is used internally by buildMessages for prompt construction.
+type chatMessage struct {
+	Role    string
+	Content string
+}
+
 const systemPrompt = `You analyze Claude Code session transcripts and produce structured JSON summaries.
 
 Respond with valid JSON only. No markdown, no explanation. Schema:

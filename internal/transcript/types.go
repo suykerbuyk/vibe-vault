@@ -92,6 +92,26 @@ type Stats struct {
 	FilesRead    map[string]bool
 	FilesWritten map[string]bool
 	ToolCounts   map[string]int
+
+	// Phase 4: Extended extraction fields
+
+	// Thinking block metrics
+	ThinkingBlocks int // count of thinking blocks
+	ThinkingTokens int // approximate thinking content length (chars)
+
+	// Turn duration metrics (from system turn_duration entries)
+	TurnDurations  []int // turn durations in ms
+	AvgTurnDuration int  // average turn duration in ms
+	MaxTurnDuration int  // maximum turn duration in ms
+
+	// File history snapshot data (ground truth file tracking)
+	FilesModifiedBySnapshot []string // file paths from file-history-snapshot entries
+
+	// Session metadata
+	Slug             string   // session name/slug
+	CCVersion        string   // Claude Code version
+	Branches         []string // all unique git branches observed
+	AutoCompactions  int      // count of auto-triggered compactions
 }
 
 // Transcript holds the fully parsed result of a JSONL transcript.

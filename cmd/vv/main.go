@@ -22,6 +22,7 @@ import (
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/inject"
 	"github.com/johns/vibe-vault/internal/knowledge"
+	"github.com/johns/vibe-vault/internal/llm"
 	"github.com/johns/vibe-vault/internal/scaffold"
 	"github.com/johns/vibe-vault/internal/session"
 	"github.com/johns/vibe-vault/internal/stats"
@@ -140,6 +141,8 @@ func runInit() {
 	case "unchanged":
 		fmt.Printf("\nConfig already set to this vault (%s)\n", cfgPath)
 	}
+
+	fmt.Println("\nTip: enable LLM enrichment for richer session notes — see vv check for status")
 }
 
 func runHook() {
@@ -257,8 +260,17 @@ func runProcess() {
 	if len(os.Args) < 3 {
 		fatal("usage: vv process <transcript.jsonl>")
 	}
+
+	provider, err := llm.NewProvider(cfg.Enrichment)
+	if err != nil {
+		log.Printf("warning: LLM provider init failed: %v", err)
+	}
+
 	path := os.Args[2]
-	result, err := session.Capture(session.CaptureOpts{TranscriptPath: path}, cfg)
+	result, err := session.Capture(session.CaptureOpts{
+		TranscriptPath: path,
+		Provider:       provider,
+	}, cfg)
 	if err != nil {
 		fatal("process: %v", err)
 	}
@@ -613,6 +625,19 @@ func runReprocess() {
 	archiveDir := filepath.Join(cfg.StateDir(), "archive")
 	projectFilter := flagValue(os.Args[2:], "--project")
 
+	// Create LLM provider for enrichment.
+	provider, providerErr := llm.NewProvider(cfg.Enrichment)
+	if providerErr != nil {
+		log.Printf("warning: LLM provider init failed: %v", providerErr)
+	}
+
+	// Report enrichment mode.
+	if providerName, model, reason := llm.Available(cfg.Enrichment); reason == "" {
+		fmt.Printf("Reprocessing with LLM enrichment (%s/%s)\n", providerName, model)
+	} else {
+		fmt.Println("Reprocessing with heuristic extraction only (no LLM configured)")
+	}
+
 	idx, err := index.Load(cfg.StateDir())
 	if err != nil {
 		fatal("load index: %v", err)
@@ -669,6 +694,7 @@ func runReprocess() {
 		result, err := session.Capture(session.CaptureOpts{
 			TranscriptPath: transcriptPath,
 			Force:          true,
+			Provider:       provider,
 		}, cfg)
 
 		if cleanup != nil {

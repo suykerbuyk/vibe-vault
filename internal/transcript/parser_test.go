@@ -19,9 +19,9 @@ func TestParse(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 
-	// Should skip file-history-snapshot and progress entries
-	if len(tr.Entries) != 5 {
-		t.Fatalf("expected 5 entries, got %d", len(tr.Entries))
+	// Should skip progress entries; keeps file-history-snapshot for file tracking
+	if len(tr.Entries) != 6 {
+		t.Fatalf("expected 6 entries, got %d", len(tr.Entries))
 	}
 
 	// Check stats
@@ -62,9 +62,9 @@ func TestParse(t *testing.T) {
 		t.Error("expected src/login.tsx in files_written")
 	}
 
-	// Duration (1 minute)
-	if int(s.Duration.Seconds()) != 59 {
-		t.Errorf("duration = %v, want ~59s", s.Duration)
+	// Duration (60s — includes file-history-snapshot timestamp at 10:00:00)
+	if int(s.Duration.Seconds()) != 60 {
+		t.Errorf("duration = %v, want ~60s", s.Duration)
 	}
 }
 

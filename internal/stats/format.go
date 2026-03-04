@@ -34,12 +34,18 @@ func Format(s Summary, project string) string {
 	fmt.Fprintf(&b, "  %-20s %d\n", "models", len(s.Models))
 	fmt.Fprintf(&b, "  %-20s %s\n", "total duration", formatDuration(s.TotalDuration))
 	fmt.Fprintf(&b, "  %-20s %s in / %s out\n", "total tokens", formatTokens(s.TotalTokensIn), formatTokens(s.TotalTokensOut))
+	if s.TotalCostUSD > 0 {
+		fmt.Fprintf(&b, "  %-20s $%.2f\n", "total cost", s.TotalCostUSD)
+	}
 
 	// Averages
 	b.WriteString("\nAverages\n")
 	fmt.Fprintf(&b, "  %-20s %s in / %s out\n", "tokens/message", formatFloat(s.AvgTokensInPerMsg), formatFloat(s.AvgTokensOutPerMsg))
 	fmt.Fprintf(&b, "  %-20s %.1f\n", "tools/session", s.AvgToolsPerSession)
 	fmt.Fprintf(&b, "  %-20s %s\n", "duration", formatDuration(int(s.AvgDuration)))
+	if s.AvgCostUSD > 0 {
+		fmt.Fprintf(&b, "  %-20s $%.2f\n", "cost/session", s.AvgCostUSD)
+	}
 
 	// Projects (omit when filtered by project)
 	if project == "" && len(s.Projects) > 0 {
@@ -49,8 +55,12 @@ func Format(s Summary, project string) string {
 			limit = len(s.Projects)
 		}
 		for _, p := range s.Projects[:limit] {
-			fmt.Fprintf(&b, "  %-24s %3d sessions   %6s in   %s\n",
+			line := fmt.Sprintf("  %-24s %3d sessions   %6s in   %s",
 				p.Name, p.Sessions, formatTokens(p.TokensIn), formatDuration(p.Duration))
+			if p.CostUSD > 0 {
+				line += fmt.Sprintf("   $%.2f", p.CostUSD)
+			}
+			b.WriteString(line + "\n")
 		}
 		if len(s.Projects) > 5 {
 			fmt.Fprintf(&b, "  ... and %d more\n", len(s.Projects)-5)
@@ -81,8 +91,12 @@ func Format(s Summary, project string) string {
 	if len(s.Monthly) > 0 {
 		b.WriteString("\nMonthly Trend\n")
 		for _, m := range s.Monthly {
-			fmt.Fprintf(&b, "  %-12s %3d sessions   %6s in / %6s out\n",
+			line := fmt.Sprintf("  %-12s %3d sessions   %6s in / %6s out",
 				m.Month, m.Sessions, formatTokens(m.TokensIn), formatTokens(m.TokensOut))
+			if m.CostUSD > 0 {
+				line += fmt.Sprintf("   $%.2f", m.CostUSD)
+			}
+			b.WriteString(line + "\n")
 		}
 	}
 

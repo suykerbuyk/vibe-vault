@@ -195,19 +195,38 @@ func CheckDomains(domains config.DomainsConfig) []Result {
 	return results
 }
 
-// CheckEnrichment checks enrichment configuration.
+// CheckEnrichment checks enrichment configuration with provider-aware messaging.
 func CheckEnrichment(ecfg config.EnrichmentConfig) Result {
 	if !ecfg.Enabled {
-		return Result{Name: "enrichment", Status: Pass, Detail: "disabled"}
+		return Result{
+			Name:   "enrichment",
+			Status: Warn,
+			Detail: "disabled (enable for AI summaries, decisions, knowledge capture)",
+		}
 	}
+
+	provider := ecfg.Provider
+	if provider == "" {
+		provider = "openai"
+	}
+
 	keyEnv := ecfg.APIKeyEnv
 	if keyEnv == "" {
 		keyEnv = "XAI_API_KEY"
 	}
+
 	if os.Getenv(keyEnv) != "" {
-		return Result{Name: "enrichment", Status: Pass, Detail: keyEnv + " set"}
+		return Result{
+			Name:   "enrichment",
+			Status: Pass,
+			Detail: fmt.Sprintf("%s/%s (API key set)", provider, ecfg.Model),
+		}
 	}
-	return Result{Name: "enrichment", Status: Warn, Detail: keyEnv + " not set"}
+	return Result{
+		Name:   "enrichment",
+		Status: Fail,
+		Detail: fmt.Sprintf("enabled but %s not set", keyEnv),
+	}
 }
 
 // CheckHook checks whether "vv hook" is configured in ~/.claude/settings.json.

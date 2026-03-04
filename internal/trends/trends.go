@@ -20,6 +20,7 @@ type WeekBucket struct {
 	TokensPerFile  []float64
 	Corrections    []float64
 	Durations      []float64
+	Costs          []float64
 
 	Sessions int
 }
@@ -105,6 +106,10 @@ func Compute(entries map[string]index.SessionEntry, project string, displayWeeks
 		if e.Duration > 0 {
 			b.Durations = append(b.Durations, float64(e.Duration))
 		}
+
+		if e.EstimatedCostUSD > 0 {
+			b.Costs = append(b.Costs, e.EstimatedCostUSD)
+		}
 	}
 
 	// Sort buckets chronologically (oldest first for rolling avg computation)
@@ -124,12 +129,14 @@ func Compute(entries map[string]index.SessionEntry, project string, displayWeeks
 	tokensPts := buildPoints(buckets, func(b *WeekBucket) (float64, bool) { return avg(b.TokensPerFile) })
 	correctionsPts := buildPoints(buckets, func(b *WeekBucket) (float64, bool) { return avg(b.Corrections) })
 	durationPts := buildPoints(buckets, func(b *WeekBucket) (float64, bool) { return avg(b.Durations) })
+	costPts := buildPoints(buckets, func(b *WeekBucket) (float64, bool) { return sum(b.Costs) })
 
 	metrics := []MetricTrend{
 		buildMetric("friction", frictionPts, displayWeeks, true),
 		buildMetric("tokens/file", tokensPts, displayWeeks, true),
 		buildMetric("corrections", correctionsPts, displayWeeks, true),
 		buildMetric("duration", durationPts, displayWeeks, true),
+		buildMetric("cost", costPts, displayWeeks, true),
 	}
 
 	return Result{
@@ -266,6 +273,18 @@ func isoWeekStart(year, week int) time.Time {
 // weekLabel formats a date as "Jan 06".
 func weekLabel(t time.Time) string {
 	return t.Format("Jan 02")
+}
+
+// sum computes the total. Returns (0, false) if slice is empty.
+func sum(vals []float64) (float64, bool) {
+	if len(vals) == 0 {
+		return 0, false
+	}
+	var total float64
+	for _, v := range vals {
+		total += v
+	}
+	return total, true
 }
 
 // avg computes the arithmetic mean. Returns (0, false) if slice is empty.

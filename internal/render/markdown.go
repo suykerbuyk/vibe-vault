@@ -52,6 +52,20 @@ type NoteData struct {
 	Corrections     int                // Count of detected user corrections
 	FrictionSignals []string           // Human-readable friction signal descriptions
 	KnowledgeNotes  []string           // Relative vault paths to extracted knowledge notes
+
+	// Phase 4: Extended data fields
+	ThinkingBlocks      int      // count of thinking blocks
+	CognitiveComplexity string   // low/medium/high based on thinking tokens
+	ReasoningHighlights []string // extracted reasoning bullet points
+	AvgTurnMs           int      // average turn duration in ms
+	MaxTurnMs           int      // maximum turn duration in ms
+	SessionName         string   // session slug/name
+	CCVersion           string   // Claude Code version
+	AllBranches         []string // all observed git branches
+	AutoCompactions     int      // auto-compaction count
+	Timeline            string   // rendered timeline section
+	EstimatedCostUSD    float64  // estimated session cost in USD
+	ToolEffectiveness   string   // rendered tool effectiveness section (empty = skip)
 }
 
 // SessionNote renders a full Obsidian markdown note from NoteData.
@@ -102,6 +116,33 @@ func SessionNote(d NoteData) string {
 	}
 	if d.Corrections > 0 {
 		b.WriteString(fmt.Sprintf("corrections: %d\n", d.Corrections))
+	}
+	if d.ThinkingBlocks > 0 {
+		b.WriteString(fmt.Sprintf("thinking_blocks: %d\n", d.ThinkingBlocks))
+	}
+	if d.CognitiveComplexity != "" {
+		b.WriteString(fmt.Sprintf("cognitive_complexity: %s\n", d.CognitiveComplexity))
+	}
+	if d.AvgTurnMs > 0 {
+		b.WriteString(fmt.Sprintf("avg_turn_ms: %d\n", d.AvgTurnMs))
+	}
+	if d.MaxTurnMs > 0 {
+		b.WriteString(fmt.Sprintf("max_turn_ms: %d\n", d.MaxTurnMs))
+	}
+	if d.SessionName != "" {
+		b.WriteString(fmt.Sprintf("session_name: \"%s\"\n", escapeYAML(d.SessionName)))
+	}
+	if d.CCVersion != "" {
+		b.WriteString(fmt.Sprintf("claude_code_version: \"%s\"\n", d.CCVersion))
+	}
+	if len(d.AllBranches) > 1 {
+		b.WriteString(fmt.Sprintf("branches: [%s]\n", strings.Join(d.AllBranches, ", ")))
+	}
+	if d.AutoCompactions > 0 {
+		b.WriteString(fmt.Sprintf("auto_compactions: %d\n", d.AutoCompactions))
+	}
+	if d.EstimatedCostUSD > 0 {
+		b.WriteString(fmt.Sprintf("estimated_cost_usd: %.2f\n", d.EstimatedCostUSD))
 	}
 	if d.Tag != "" {
 		b.WriteString(fmt.Sprintf("tags: [cortana-session, %s]\n", d.Tag))
@@ -189,6 +230,12 @@ func SessionNote(d NoteData) string {
 		b.WriteString("\n")
 	}
 
+	// Tool Effectiveness (Task 20 — only rendered when interesting patterns found)
+	if d.ToolEffectiveness != "" {
+		b.WriteString("## Tool Effectiveness\n\n")
+		b.WriteString(d.ToolEffectiveness)
+	}
+
 	// Key Decisions
 	if len(d.Decisions) > 0 {
 		b.WriteString("## Key Decisions\n\n")
@@ -204,6 +251,22 @@ func SessionNote(d NoteData) string {
 		for _, t := range d.OpenThreads {
 			b.WriteString(fmt.Sprintf("- [ ] %s\n", t))
 		}
+		b.WriteString("\n")
+	}
+
+	// Reasoning Highlights (Task 15)
+	if len(d.ReasoningHighlights) > 0 {
+		b.WriteString("## Reasoning Highlights\n\n")
+		for _, rh := range d.ReasoningHighlights {
+			b.WriteString(fmt.Sprintf("- %s\n", rh))
+		}
+		b.WriteString("\n")
+	}
+
+	// Timeline (Task 21)
+	if d.Timeline != "" {
+		b.WriteString("## Timeline\n\n")
+		b.WriteString(d.Timeline)
 		b.WriteString("\n")
 	}
 
@@ -274,24 +337,45 @@ func NoteDataFromTranscript(t *transcript.Transcript, project, domain, branch, s
 	}
 	sort.Strings(filesChanged)
 
+	// Cognitive complexity based on thinking tokens relative to output tokens (Task 15)
+	var cogComplexity string
+	if s.ThinkingTokens > 0 {
+		ratio := float64(s.ThinkingTokens) / float64(max(s.OutputTokens, 1))
+		switch {
+		case ratio > 2.0:
+			cogComplexity = "high"
+		case ratio > 0.5:
+			cogComplexity = "medium"
+		default:
+			cogComplexity = "low"
+		}
+	}
+
 	return NoteData{
-		Date:         date,
-		Project:      project,
-		Branch:       branch,
-		Domain:       domain,
-		Model:        s.Model,
-		SessionID:    sessionID,
-		Iteration:    iteration,
-		Duration:     int(s.Duration.Minutes()),
-		Messages:     s.UserMessages + s.AssistantMessages,
-		InputTokens:  totalInput,
-		OutputTokens: s.OutputTokens,
-		Title:        title,
-		Summary:      summary,
-		PreviousNote: previous,
-		FilesChanged: filesChanged,
-		ToolCounts:   s.ToolCounts,
-		TotalTools:   s.ToolUses,
+		Date:                date,
+		Project:             project,
+		Branch:              branch,
+		Domain:              domain,
+		Model:               s.Model,
+		SessionID:           sessionID,
+		Iteration:           iteration,
+		Duration:            int(s.Duration.Minutes()),
+		Messages:            s.UserMessages + s.AssistantMessages,
+		InputTokens:         totalInput,
+		OutputTokens:        s.OutputTokens,
+		Title:               title,
+		Summary:             summary,
+		PreviousNote:        previous,
+		FilesChanged:        filesChanged,
+		ToolCounts:          s.ToolCounts,
+		TotalTools:          s.ToolUses,
+		ThinkingBlocks:      s.ThinkingBlocks,
+		CognitiveComplexity: cogComplexity,
+		AvgTurnMs:           s.AvgTurnDuration,
+		MaxTurnMs:           s.MaxTurnDuration,
+		CCVersion:           s.CCVersion,
+		AllBranches:         s.Branches,
+		AutoCompactions:     s.AutoCompactions,
 	}
 }
 

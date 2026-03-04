@@ -5,6 +5,7 @@ package knowledge
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,7 +15,7 @@ import (
 
 // WriteNote renders and writes a knowledge note to the vault.
 // Returns the relative path within the vault (e.g. "Knowledge/learnings/2026-02-28-dont-use-json-skip.md").
-// Does not overwrite existing files.
+// Does not overwrite existing files. When a slug collision occurs, appends -2 through -10 suffix.
 func WriteNote(vaultPath string, note Note) (string, error) {
 	typeDir := "learnings"
 	if note.Type == "decision" {
@@ -22,13 +23,18 @@ func WriteNote(vaultPath string, note Note) (string, error) {
 	}
 
 	slug := slugify(note.Title)
-	filename := fmt.Sprintf("%s-%s.md", note.Date, slug)
-	relPath := filepath.Join("Knowledge", typeDir, filename)
-	absPath := filepath.Join(vaultPath, relPath)
+	baseFilename := fmt.Sprintf("%s-%s", note.Date, slug)
+	dir := filepath.Join("Knowledge", typeDir)
 
-	// Don't overwrite existing notes
-	if _, err := os.Stat(absPath); err == nil {
-		return relPath, nil
+	// Try the base filename, then -2 through -10 on collision
+	relPath, absPath, err := findAvailablePath(vaultPath, dir, baseFilename)
+	if err != nil {
+		return "", err
+	}
+	if relPath == "" {
+		// All slots taken (base + -2 through -10)
+		log.Printf("warning: all slug slots taken for %s, skipping", baseFilename)
+		return "", nil
 	}
 
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
@@ -41,6 +47,31 @@ func WriteNote(vaultPath string, note Note) (string, error) {
 	}
 
 	return relPath, nil
+}
+
+// findAvailablePath finds the first available filename for a knowledge note.
+// Tries baseFilename.md, then baseFilename-2.md through baseFilename-10.md.
+// Returns ("", "", nil) if all slots are taken.
+func findAvailablePath(vaultPath, dir, baseFilename string) (relPath, absPath string, err error) {
+	// Try base filename first
+	filename := baseFilename + ".md"
+	rel := filepath.Join(dir, filename)
+	abs := filepath.Join(vaultPath, rel)
+	if _, err := os.Stat(abs); os.IsNotExist(err) {
+		return rel, abs, nil
+	}
+
+	// Try -2 through -10
+	for i := 2; i <= 10; i++ {
+		filename = fmt.Sprintf("%s-%d.md", baseFilename, i)
+		rel = filepath.Join(dir, filename)
+		abs = filepath.Join(vaultPath, rel)
+		if _, err := os.Stat(abs); os.IsNotExist(err) {
+			return rel, abs, nil
+		}
+	}
+
+	return "", "", nil
 }
 
 var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
