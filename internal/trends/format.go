@@ -34,7 +34,11 @@ func Format(r Result) string {
 			detail = fmt.Sprintf(" (%+.0f%%)", m.DeltaPct)
 		}
 		avgStr := formatMetricValue(m.Name, m.OverallAvg)
-		fmt.Fprintf(&b, "  %-16s %8s avg  %s %s%s\n", m.Name, avgStr, arrow, m.Direction, detail)
+		thresholdNote := ""
+		if m.Name == "friction" && r.AlertThreshold > 0 && m.OverallAvg >= float64(r.AlertThreshold) {
+			thresholdNote = fmt.Sprintf(" (above threshold %d)", r.AlertThreshold)
+		}
+		fmt.Fprintf(&b, "  %-16s %8s avg  %s %s%s%s\n", m.Name, avgStr, arrow, m.Direction, detail, thresholdNote)
 	}
 
 	// Per-metric week tables
@@ -57,6 +61,9 @@ func Format(r Result) string {
 				} else {
 					marker = "  v dip"
 				}
+			}
+			if m.Name == "friction" && r.AlertThreshold > 0 && p.Value >= float64(r.AlertThreshold) {
+				marker += "  \u26a0"
 			}
 			fmt.Fprintf(&b, "  %-10s %8s %8s%s\n", p.WeekLabel, valStr, avgStr, marker)
 		}

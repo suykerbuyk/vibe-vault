@@ -19,6 +19,7 @@ type Config struct {
 	Domains    DomainsConfig    `toml:"domains"`
 	Enrichment EnrichmentConfig `toml:"enrichment"`
 	Archive    ArchiveConfig    `toml:"archive"`
+	Friction   FrictionConfig   `toml:"friction"`
 }
 
 type DomainsConfig struct {
@@ -40,6 +41,10 @@ type ArchiveConfig struct {
 	Compress bool `toml:"compress"`
 }
 
+type FrictionConfig struct {
+	AlertThreshold int `toml:"alert_threshold"`
+}
+
 // DefaultConfig returns config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
@@ -59,6 +64,9 @@ func DefaultConfig() Config {
 		},
 		Archive: ArchiveConfig{
 			Compress: true,
+		},
+		Friction: FrictionConfig{
+			AlertThreshold: 40,
 		},
 	}
 }

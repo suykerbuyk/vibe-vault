@@ -39,7 +39,8 @@ func (idx *Index) Projects() []string {
 }
 
 // ProjectContext generates an Obsidian markdown context document for a project.
-func (idx *Index) ProjectContext(project string, knowledge []KnowledgeSummary) string {
+// alertThreshold is the friction score threshold for alerts (0 = disabled).
+func (idx *Index) ProjectContext(project string, knowledge []KnowledgeSummary, alertThreshold int) string {
 	entries := idx.projectEntries(project)
 	if len(entries) == 0 {
 		return ""
@@ -105,6 +106,14 @@ func (idx *Index) ProjectContext(project string, knowledge []KnowledgeSummary) s
 			b.WriteString(fmt.Sprintf("- [ ] %s\n", t))
 		}
 		b.WriteString("\n")
+	}
+
+	// Friction Alert — recent sessions above threshold
+	if alertThreshold > 0 {
+		frictionAlert := collectFrictionAlert(entries, alertThreshold)
+		if frictionAlert != "" {
+			b.WriteString(frictionAlert)
+		}
 	}
 
 	// Friction Patterns — recurring high-friction signals
@@ -252,6 +261,37 @@ func collectKeyFiles(entries []SessionEntry) []keyFile {
 	})
 
 	return files
+}
+
+func collectFrictionAlert(entries []SessionEntry, threshold int) string {
+	// Use last 5 sessions
+	start := len(entries) - 5
+	if start < 0 {
+		start = 0
+	}
+	recent := entries[start:]
+
+	var sum, count, highCount int
+	for _, e := range recent {
+		if e.FrictionScore > 0 {
+			sum += e.FrictionScore
+			count++
+			if e.FrictionScore >= threshold {
+				highCount++
+			}
+		}
+	}
+
+	if count == 0 {
+		return ""
+	}
+
+	avg := float64(sum) / float64(count)
+	if avg < float64(threshold) {
+		return ""
+	}
+
+	return fmt.Sprintf("## \u26a0 Friction Alert\n\nRecent sessions average friction **%.0f** (threshold: %d).\n%d of %d recent sessions exceeded threshold.\nConsider: review recent corrections for recurring patterns.\n\n", avg, threshold, highCount, len(recent))
 }
 
 func collectFrictionPatterns(entries []SessionEntry) []string {

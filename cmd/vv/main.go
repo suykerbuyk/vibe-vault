@@ -339,6 +339,7 @@ func runTrends() {
 	}
 
 	result := trends.Compute(idx.Entries, project, weeks)
+	result.AlertThreshold = cfg.Friction.AlertThreshold
 	fmt.Print(trends.Format(result))
 }
 
@@ -363,7 +364,7 @@ func runIndex() {
 
 	summaries := readKnowledgeSummaries(cfg.VaultPath)
 
-	genResult, err := index.GenerateContext(idx, cfg.VaultPath, summaries)
+	genResult, err := index.GenerateContext(idx, cfg.VaultPath, summaries, cfg.Friction.AlertThreshold)
 	if err != nil {
 		log.Printf("warning: generate context: %v", err)
 	} else {
@@ -620,7 +621,7 @@ func runReprocess() {
 	if len(affectedProjects) > 0 {
 		idx, _ = index.Load(cfg.StateDir())
 		summaries := readKnowledgeSummaries(cfg.VaultPath)
-		genResult, err := index.GenerateContext(idx, cfg.VaultPath, summaries)
+		genResult, err := index.GenerateContext(idx, cfg.VaultPath, summaries, cfg.Friction.AlertThreshold)
 		if err != nil {
 			log.Printf("warning: generate context: %v", err)
 		} else {

@@ -286,6 +286,41 @@ func TestHandleInput_SessionEnd_RefreshesContext(t *testing.T) {
 	}
 }
 
+func TestHandleInput_SessionEnd_NoFrictionAlert(t *testing.T) {
+	// Minimal transcript produces low/zero friction — should not emit alert
+	cfg := testConfig(t)
+	transcriptPath := writeTranscript(t, minimalTranscript)
+
+	// Capture stderr
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	input := &Input{
+		SessionID:      "test-sess-no-friction",
+		TranscriptPath: transcriptPath,
+		HookEventName:  "SessionEnd",
+		CWD:            "/tmp/proj",
+	}
+
+	err := handleInput(input, "", cfg)
+
+	w.Close()
+	os.Stderr = oldStderr
+
+	if err != nil {
+		t.Fatalf("handleInput: %v", err)
+	}
+
+	stderrBuf := make([]byte, 4096)
+	n, _ := r.Read(stderrBuf)
+	stderrOutput := string(stderrBuf[:n])
+
+	if strings.Contains(stderrOutput, "⚠ friction") {
+		t.Error("should not emit friction alert for low-friction session")
+	}
+}
+
 func TestInputJSON(t *testing.T) {
 	original := Input{
 		SessionID:            "sess-123",

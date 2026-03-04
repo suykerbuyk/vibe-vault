@@ -142,6 +142,10 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 
 	fmt.Fprintf(os.Stderr, "vv: %s → %s\n", result.Project, result.NotePath)
 
+	if result.FrictionAlert != "" {
+		fmt.Fprintf(os.Stderr, "vv: %s\n", result.FrictionAlert)
+	}
+
 	// Auto-refresh context documents
 	idx, err := index.Load(cfg.StateDir())
 	if err != nil {
@@ -166,7 +170,7 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 		}
 	}
 
-	genResult, err := index.GenerateContext(idx, cfg.VaultPath, summaries)
+	genResult, err := index.GenerateContext(idx, cfg.VaultPath, summaries, cfg.Friction.AlertThreshold)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "vv: warning: context refresh failed: %v\n", err)
 		return nil

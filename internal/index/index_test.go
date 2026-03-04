@@ -2,6 +2,7 @@ package index
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -690,7 +691,7 @@ func TestProjectContextTimeline(t *testing.T) {
 		Summary: "Second session", Tag: "implementation",
 	}
 
-	doc := idx.ProjectContext("proj", nil)
+	doc := idx.ProjectContext("proj", nil, 0)
 
 	if !contains(doc, "[[2026-02-20-01]]") {
 		t.Error("missing first session wikilink")
@@ -720,7 +721,7 @@ func TestProjectContextDecisionDedup(t *testing.T) {
 		Decisions: []string{"Use JWT auth", "Add rate limiting"}, // "Use JWT auth" is duplicate
 	}
 
-	doc := idx.ProjectContext("proj", nil)
+	doc := idx.ProjectContext("proj", nil, 0)
 
 	// Count occurrences of "Use JWT auth" in decisions section
 	count := countOccurrences(doc, "Use JWT auth")
@@ -743,7 +744,7 @@ func TestProjectContextThreadResolution(t *testing.T) {
 		Decisions: []string{"completed authentication system with JWT"},
 	}
 
-	doc := idx.ProjectContext("proj", nil)
+	doc := idx.ProjectContext("proj", nil, 0)
 
 	// "implement authentication system" should be filtered out
 	// because "completed authentication system with JWT" resolves it
@@ -768,7 +769,7 @@ func TestProjectContextKeyFiles(t *testing.T) {
 		}
 	}
 
-	doc := idx.ProjectContext("proj", nil)
+	doc := idx.ProjectContext("proj", nil, 0)
 
 	if !contains(doc, "`main.go` (4 sessions)") {
 		t.Error("main.go should appear as key file with 4 sessions")
@@ -850,7 +851,7 @@ func TestProjectContextLearnedPatterns(t *testing.T) {
 		},
 	}
 
-	doc := idx.ProjectContext("proj", knowledge)
+	doc := idx.ProjectContext("proj", knowledge, 0)
 
 	if !contains(doc, "## Learned Patterns") {
 		t.Error("missing Learned Patterns section")
@@ -882,13 +883,78 @@ func TestProjectContextAgnosticKnowledge(t *testing.T) {
 		},
 	}
 
-	doc := idx.ProjectContext("proj", knowledge)
+	doc := idx.ProjectContext("proj", knowledge, 0)
 
 	if !contains(doc, "## Learned Patterns") {
 		t.Error("agnostic knowledge should appear in Learned Patterns")
 	}
 	if !contains(doc, "[[2026-02-28-cross-project-pattern]]") {
 		t.Error("missing agnostic knowledge wikilink")
+	}
+}
+
+func TestProjectContextFrictionAlert(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+
+	// 5 sessions with high friction scores (avg 50)
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("s-alert-%d", i)
+		idx.Entries[id] = SessionEntry{
+			SessionID: id, Project: "proj",
+			Date:      fmt.Sprintf("2026-02-%02d", 20+i),
+			Iteration: 1, NotePath: fmt.Sprintf("Projects/proj/sessions/2026-02-%02d-01.md", 20+i),
+			FrictionScore: 50,
+		}
+	}
+
+	doc := idx.ProjectContext("proj", nil, 40)
+
+	if !contains(doc, "## ⚠ Friction Alert") {
+		t.Error("expected friction alert section for avg friction 50 with threshold 40")
+	}
+	if !contains(doc, "threshold: 40") {
+		t.Error("expected threshold value in alert section")
+	}
+}
+
+func TestProjectContextFrictionAlertBelowThreshold(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+
+	// 5 sessions with low friction scores (avg 20)
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("s-low-%d", i)
+		idx.Entries[id] = SessionEntry{
+			SessionID: id, Project: "proj",
+			Date:      fmt.Sprintf("2026-02-%02d", 20+i),
+			Iteration: 1, NotePath: fmt.Sprintf("Projects/proj/sessions/2026-02-%02d-01.md", 20+i),
+			FrictionScore: 20,
+		}
+	}
+
+	doc := idx.ProjectContext("proj", nil, 40)
+
+	if contains(doc, "Friction Alert") {
+		t.Error("should not have friction alert for avg friction 20 with threshold 40")
+	}
+}
+
+func TestProjectContextFrictionAlertDisabled(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("s-dis-%d", i)
+		idx.Entries[id] = SessionEntry{
+			SessionID: id, Project: "proj",
+			Date:      fmt.Sprintf("2026-02-%02d", 20+i),
+			Iteration: 1, NotePath: fmt.Sprintf("Projects/proj/sessions/2026-02-%02d-01.md", 20+i),
+			FrictionScore: 50,
+		}
+	}
+
+	doc := idx.ProjectContext("proj", nil, 0)
+
+	if contains(doc, "Friction Alert") {
+		t.Error("should not have friction alert when threshold is 0")
 	}
 }
 

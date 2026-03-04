@@ -43,11 +43,12 @@ type MetricTrend struct {
 
 // Result holds the complete trends analysis.
 type Result struct {
-	TotalSessions int
-	TotalWeeks    int
-	DisplayWeeks  int
-	Project       string
-	Metrics       []MetricTrend
+	TotalSessions  int
+	TotalWeeks     int
+	DisplayWeeks   int
+	Project        string
+	Metrics        []MetricTrend
+	AlertThreshold int // friction alert threshold (0 = disabled)
 }
 
 // Compute builds trend analysis from index entries.

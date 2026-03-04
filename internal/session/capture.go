@@ -36,13 +36,15 @@ type CaptureOpts struct {
 
 // CaptureResult holds the output of a capture operation.
 type CaptureResult struct {
-	NotePath  string
-	Project   string
-	Domain    string
-	Iteration int
-	Title     string
-	Skipped   bool
-	Reason    string
+	NotePath      string
+	Project       string
+	Domain        string
+	Iteration     int
+	Title         string
+	Skipped       bool
+	Reason        string
+	FrictionScore int
+	FrictionAlert string
 }
 
 // Capture processes a transcript and writes a session note.
@@ -170,10 +172,20 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		}
 		frictionResult = friction.Analyze(dialogue, narr, t.Stats, priorThreads)
 	}
+	var frictionAlert string
 	if frictionResult != nil {
 		noteData.FrictionScore = frictionResult.Score
 		noteData.Corrections = frictionResult.Signals.Corrections
 		noteData.FrictionSignals = frictionResult.Summary
+
+		if cfg.Friction.AlertThreshold > 0 && frictionResult.Score >= cfg.Friction.AlertThreshold {
+			top := friction.TopContributors(frictionResult.Signals, 2)
+			parts := make([]string, len(top))
+			for i, c := range top {
+				parts[i] = fmt.Sprintf("%s: %.0f", c.Name, c.Weight)
+			}
+			frictionAlert = fmt.Sprintf("\u26a0 friction %d \u2014 %s", frictionResult.Score, strings.Join(parts, ", "))
+		}
 	}
 
 	// Mark checkpoint status
@@ -367,11 +379,13 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	}
 
 	return &CaptureResult{
-		NotePath:  relPath,
-		Project:   info.Project,
-		Domain:    info.Domain,
-		Iteration: iteration,
-		Title:     noteData.Title,
+		NotePath:      relPath,
+		Project:       info.Project,
+		Domain:        info.Domain,
+		Iteration:     iteration,
+		Title:         noteData.Title,
+		FrictionScore: frictionScore(frictionResult),
+		FrictionAlert: frictionAlert,
 	}, nil
 }
 

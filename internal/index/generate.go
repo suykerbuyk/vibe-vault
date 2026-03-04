@@ -18,13 +18,14 @@ type GenerateResult struct {
 // GenerateContext writes per-project history.md and cross-project _knowledge.md
 // files. It uses the already-loaded index (no rebuild) so it's fast enough for
 // post-hook use. Callers provide knowledge summaries (may be nil).
-func GenerateContext(idx *Index, vaultPath string, summaries []KnowledgeSummary) (*GenerateResult, error) {
+// alertThreshold is the friction alert threshold (0 = disabled).
+func GenerateContext(idx *Index, vaultPath string, summaries []KnowledgeSummary, alertThreshold int) (*GenerateResult, error) {
 	result := &GenerateResult{}
 
 	// Generate per-project context documents
 	projectsDir := filepath.Join(vaultPath, "Projects")
 	for _, project := range idx.Projects() {
-		doc := idx.ProjectContext(project, summaries)
+		doc := idx.ProjectContext(project, summaries, alertThreshold)
 		dir := filepath.Join(projectsDir, project)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			log.Printf("warning: create dir for %s: %v", project, err)

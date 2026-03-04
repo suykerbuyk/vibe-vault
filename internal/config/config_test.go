@@ -37,6 +37,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Archive.Compress != true {
 		t.Error("Archive.Compress should default to true")
 	}
+	if cfg.Friction.AlertThreshold != 40 {
+		t.Errorf("Friction.AlertThreshold = %d, want 40", cfg.Friction.AlertThreshold)
+	}
 }
 
 func TestLoad_NoConfig(t *testing.T) {
@@ -101,6 +104,50 @@ compress = false
 	}
 	if cfg.Archive.Compress {
 		t.Error("Archive.Compress should be false")
+	}
+}
+
+func TestLoad_FrictionConfig(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("HOME", t.TempDir())
+
+	configDir := filepath.Join(xdg, "vibe-vault")
+	os.MkdirAll(configDir, 0o755)
+
+	tomlContent := `vault_path = "/custom/vault"
+
+[friction]
+alert_threshold = 60
+`
+	os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(tomlContent), 0o644)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.Friction.AlertThreshold != 60 {
+		t.Errorf("Friction.AlertThreshold = %d, want 60", cfg.Friction.AlertThreshold)
+	}
+}
+
+func TestLoad_FrictionConfigAbsent(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("HOME", t.TempDir())
+
+	configDir := filepath.Join(xdg, "vibe-vault")
+	os.MkdirAll(configDir, 0o755)
+	os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(`vault_path = "/custom/vault"`), 0o644)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.Friction.AlertThreshold != 40 {
+		t.Errorf("Friction.AlertThreshold = %d, want 40 (default)", cfg.Friction.AlertThreshold)
 	}
 }
 

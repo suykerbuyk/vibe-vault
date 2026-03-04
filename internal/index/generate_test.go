@@ -28,7 +28,7 @@ func TestGenerateContext_WritesHistoryMd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := GenerateContext(idx, vaultPath, nil)
+	result, err := GenerateContext(idx, vaultPath, nil, 0)
 	if err != nil {
 		t.Fatalf("GenerateContext: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestGenerateContext_WritesKnowledgeMd(t *testing.T) {
 		},
 	}
 
-	result, err := GenerateContext(idx, vaultPath, summaries)
+	result, err := GenerateContext(idx, vaultPath, summaries, 0)
 	if err != nil {
 		t.Fatalf("GenerateContext: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestGenerateContext_NoSessions(t *testing.T) {
 
 	idx, _ := Load(stateDir)
 
-	result, err := GenerateContext(idx, vaultPath, nil)
+	result, err := GenerateContext(idx, vaultPath, nil, 0)
 	if err != nil {
 		t.Fatalf("GenerateContext: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestGenerateContext_MultipleProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := GenerateContext(idx, vaultPath, nil)
+	result, err := GenerateContext(idx, vaultPath, nil, 0)
 	if err != nil {
 		t.Fatalf("GenerateContext: %v", err)
 	}

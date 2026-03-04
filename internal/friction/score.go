@@ -3,7 +3,10 @@
 
 package friction
 
-import "math"
+import (
+	"math"
+	"sort"
+)
 
 // Signal weights and thresholds for friction scoring.
 const (
@@ -48,6 +51,49 @@ func Score(s Signals) int {
 	}
 
 	return score
+}
+
+// SignalContribution represents a single signal's weighted contribution to the friction score.
+type SignalContribution struct {
+	Name   string
+	Weight float64 // weighted contribution (normalized × weight)
+}
+
+// TopContributors computes each signal's weighted contribution and returns the top N.
+func TopContributors(s Signals, n int) []SignalContribution {
+	corrNorm := clamp(s.CorrectionDensity / thresholdCorrectionDensity)
+	tokenNorm := clamp(s.TokensPerFile / thresholdTokensPerFile)
+	retryNorm := clamp(s.FileRetryDensity / thresholdFileRetryDensity)
+	errorNorm := clamp(s.ErrorCycleDensity / thresholdErrorCycleDensity)
+	threadNorm := 0.0
+	if s.RecurringThreads {
+		threadNorm = 1.0
+	}
+
+	contribs := []SignalContribution{
+		{"corrections", math.Round(corrNorm * float64(weightCorrectionDensity))},
+		{"tokens/file", math.Round(tokenNorm * float64(weightTokenEfficiency))},
+		{"file retries", math.Round(retryNorm * float64(weightFileRetryDensity))},
+		{"error cycles", math.Round(errorNorm * float64(weightErrorCycleDensity))},
+		{"recurring threads", math.Round(threadNorm * float64(weightRecurringThreads))},
+	}
+
+	// Filter zero contributions
+	var nonzero []SignalContribution
+	for _, c := range contribs {
+		if c.Weight > 0 {
+			nonzero = append(nonzero, c)
+		}
+	}
+
+	sort.Slice(nonzero, func(i, j int) bool {
+		return nonzero[i].Weight > nonzero[j].Weight
+	})
+
+	if n > len(nonzero) {
+		n = len(nonzero)
+	}
+	return nonzero[:n]
 }
 
 // clamp limits a value to [0, 1].

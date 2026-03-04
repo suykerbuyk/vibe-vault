@@ -106,6 +106,46 @@ func TestScore_PartialCombination(t *testing.T) {
 	}
 }
 
+func TestTopContributors_AllAtThreshold(t *testing.T) {
+	s := Signals{
+		CorrectionDensity: 0.30,
+		TokensPerFile:     50000,
+		FileRetryDensity:  0.50,
+		ErrorCycleDensity: 0.20,
+		RecurringThreads:  true,
+	}
+	top := TopContributors(s, 2)
+	if len(top) != 2 {
+		t.Fatalf("expected 2 contributors, got %d", len(top))
+	}
+	// corrections (30), tokens/file (25) are the top two
+	if top[0].Name != "corrections" || top[0].Weight != 30 {
+		t.Errorf("top[0] = %+v, want corrections:30", top[0])
+	}
+	if top[1].Name != "tokens/file" || top[1].Weight != 25 {
+		t.Errorf("top[1] = %+v, want tokens/file:25", top[1])
+	}
+}
+
+func TestTopContributors_SingleSignal(t *testing.T) {
+	s := Signals{CorrectionDensity: 0.30}
+	top := TopContributors(s, 3)
+	if len(top) != 1 {
+		t.Fatalf("expected 1 contributor, got %d", len(top))
+	}
+	if top[0].Name != "corrections" {
+		t.Errorf("top[0].Name = %q, want corrections", top[0].Name)
+	}
+}
+
+func TestTopContributors_ZeroSignals(t *testing.T) {
+	s := Signals{}
+	top := TopContributors(s, 2)
+	if len(top) != 0 {
+		t.Errorf("expected 0 contributors, got %d", len(top))
+	}
+}
+
 func TestClamp(t *testing.T) {
 	tests := []struct {
 		v    float64

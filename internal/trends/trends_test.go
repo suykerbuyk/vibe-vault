@@ -386,6 +386,54 @@ func TestFormatProjectInHeader(t *testing.T) {
 	}
 }
 
+func TestFormatFrictionThresholdMarker(t *testing.T) {
+	entries := map[string]index.SessionEntry{
+		"s1": makeEntry("s1", "proj", "2025-02-03", 50, 0, 0, 0, 0, nil),
+	}
+	r := Compute(entries, "", 12)
+	r.AlertThreshold = 40
+	out := Format(r)
+	if !strings.Contains(out, "⚠") {
+		t.Error("expected ⚠ marker for friction 50 with threshold 40")
+	}
+}
+
+func TestFormatFrictionBelowThreshold(t *testing.T) {
+	entries := map[string]index.SessionEntry{
+		"s1": makeEntry("s1", "proj", "2025-02-03", 30, 0, 0, 0, 0, nil),
+	}
+	r := Compute(entries, "", 12)
+	r.AlertThreshold = 40
+	out := Format(r)
+	if strings.Contains(out, "⚠") {
+		t.Error("should not have ⚠ marker for friction 30 with threshold 40")
+	}
+}
+
+func TestFormatFrictionThresholdDisabled(t *testing.T) {
+	entries := map[string]index.SessionEntry{
+		"s1": makeEntry("s1", "proj", "2025-02-03", 50, 0, 0, 0, 0, nil),
+	}
+	r := Compute(entries, "", 12)
+	r.AlertThreshold = 0
+	out := Format(r)
+	if strings.Contains(out, "⚠") {
+		t.Error("should not have ⚠ marker when threshold is 0 (disabled)")
+	}
+}
+
+func TestFormatFrictionOverviewThreshold(t *testing.T) {
+	entries := map[string]index.SessionEntry{
+		"s1": makeEntry("s1", "proj", "2025-02-03", 50, 0, 0, 0, 0, nil),
+	}
+	r := Compute(entries, "", 12)
+	r.AlertThreshold = 40
+	out := Format(r)
+	if !strings.Contains(out, "above threshold 40") {
+		t.Error("expected 'above threshold 40' in overview for avg friction 50")
+	}
+}
+
 // --- Helper tests ---
 
 func TestRollingAvg(t *testing.T) {
