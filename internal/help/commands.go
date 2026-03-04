@@ -412,7 +412,7 @@ Vault-side (in Projects/{project}/):
   tasks/           Task directory with done/ subdirectory
 
 Repo-side (in current directory):
-  CLAUDE.md              Vault pointer + workflow rules
+  CLAUDE.md              Vault pointer (workflow rules in vault-side workflow.md)
   .claude/commands/restart.md  Session resume command
   .claude/commands/wrap.md     Session wrap command
 

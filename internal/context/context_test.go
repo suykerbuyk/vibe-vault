@@ -31,7 +31,7 @@ func TestInit_CreatesVaultFiles(t *testing.T) {
 
 	// Vault-side files (inside agentctx/)
 	for _, rel := range []string{
-		"Projects/myproject/agentctx/CLAUDE.md",
+		"Projects/myproject/agentctx/workflow.md",
 		"Projects/myproject/agentctx/resume.md",
 		"Projects/myproject/agentctx/iterations.md",
 		"Projects/myproject/agentctx/commands/restart.md",
@@ -119,7 +119,7 @@ func TestInit_CommandsDirectorySymlink(t *testing.T) {
 	}
 }
 
-func TestInit_AgentCtxCLAUDE(t *testing.T) {
+func TestInit_WorkflowMD(t *testing.T) {
 	vault := t.TempDir()
 	cwd := t.TempDir()
 	cfg := testConfig(vault)
@@ -129,24 +129,24 @@ func TestInit_AgentCtxCLAUDE(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(vault, "Projects", "myproject", "agentctx", "CLAUDE.md"))
+	data, err := os.ReadFile(filepath.Join(vault, "Projects", "myproject", "agentctx", "workflow.md"))
 	if err != nil {
-		t.Fatalf("read agentctx/CLAUDE.md: %v", err)
+		t.Fatalf("read agentctx/workflow.md: %v", err)
 	}
 	content := string(data)
 
 	// Should contain behavioral rules
 	if !strings.Contains(content, "Pair Programming") {
-		t.Error("agentctx/CLAUDE.md missing pair programming section")
+		t.Error("agentctx/workflow.md missing pair programming section")
 	}
 	if !strings.Contains(content, "Plan Mode") {
-		t.Error("agentctx/CLAUDE.md missing plan mode section")
+		t.Error("agentctx/workflow.md missing plan mode section")
 	}
 	if !strings.Contains(content, "resume.md") {
-		t.Error("agentctx/CLAUDE.md missing file references")
+		t.Error("agentctx/workflow.md missing file references")
 	}
 	if !strings.Contains(content, "myproject") {
-		t.Error("agentctx/CLAUDE.md missing project name")
+		t.Error("agentctx/workflow.md missing project name")
 	}
 }
 
@@ -281,7 +281,7 @@ func TestInit_ClaudeMDContent(t *testing.T) {
 	if !strings.Contains(content, "myproject") {
 		t.Error("CLAUDE.md missing project name")
 	}
-	// Should NOT contain full behavioral rules (those are in agentctx/CLAUDE.md)
+	// Should NOT contain full behavioral rules (those are in agentctx/workflow.md)
 	if strings.Contains(content, "Pair Programming") {
 		t.Error("CLAUDE.md should be thin pointer, not contain behavioral rules")
 	}

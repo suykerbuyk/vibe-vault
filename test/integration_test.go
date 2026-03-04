@@ -897,11 +897,11 @@ This is archived and should be ignored.
 		assertContains(t, stdout, "ctx-project", "context init project name")
 
 		// Vault-side agentctx structure
-		if !fileExists(filepath.Join(agentctxDir, "CLAUDE.md")) {
-			t.Error("vault agentctx/CLAUDE.md not created")
+		if !fileExists(filepath.Join(agentctxDir, "workflow.md")) {
+			t.Error("vault agentctx/workflow.md not created")
 		} else {
-			content := readFile(t, filepath.Join(agentctxDir, "CLAUDE.md"))
-			assertContains(t, content, "Pair Programming", "agentctx/CLAUDE.md behavioral rules")
+			content := readFile(t, filepath.Join(agentctxDir, "workflow.md"))
+			assertContains(t, content, "Pair Programming", "agentctx/workflow.md behavioral rules")
 		}
 		if !fileExists(filepath.Join(agentctxDir, "resume.md")) {
 			t.Error("vault agentctx/resume.md not created")
@@ -961,8 +961,8 @@ This is archived and should be ignored.
 		assertContains(t, stdout2, "Context initialized", "idempotent context init stdout")
 
 		// Vault files still exist
-		if !fileExists(filepath.Join(agentctxDir, "CLAUDE.md")) {
-			t.Error("vault agentctx/CLAUDE.md missing after re-run")
+		if !fileExists(filepath.Join(agentctxDir, "workflow.md")) {
+			t.Error("vault agentctx/workflow.md missing after re-run")
 		}
 		if !fileExists(filepath.Join(agentctxDir, "resume.md")) {
 			t.Error("vault agentctx/resume.md missing after re-run")
@@ -1035,11 +1035,11 @@ This is archived and should be ignored.
 		}
 
 		// Behavioral rules present
-		if !fileExists(filepath.Join(migrateAgentctx, "CLAUDE.md")) {
-			t.Error("vault agentctx/CLAUDE.md not created by migrate")
+		if !fileExists(filepath.Join(migrateAgentctx, "workflow.md")) {
+			t.Error("vault agentctx/workflow.md not created by migrate")
 		} else {
-			content := readFile(t, filepath.Join(migrateAgentctx, "CLAUDE.md"))
-			assertContains(t, content, "Pair Programming", "migrate agentctx/CLAUDE.md behavioral rules")
+			content := readFile(t, filepath.Join(migrateAgentctx, "workflow.md"))
+			assertContains(t, content, "Pair Programming", "migrate agentctx/workflow.md behavioral rules")
 		}
 
 		// Repo-side: CLAUDE.md updated to thin pointer

@@ -44,7 +44,7 @@ type MigrateResult struct {
 // Vault layout:
 //
 //	Projects/{project}/agentctx/       — all AI context for this project
-//	  CLAUDE.md                        — behavioral rules and file pointers
+//	  workflow.md                      — behavioral rules and workflow standards
 //	  resume.md                        — project state
 //	  iterations.md                    — iteration history
 //	  commands/{restart,wrap}.md       — slash commands
@@ -87,7 +87,7 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 		rel     string
 		content string
 	}{
-		{"CLAUDE.md", generateAgentCtxCLAUDE(project)},
+		{"workflow.md", generateWorkflowMD(project)},
 		{"resume.md", generateResume(project)},
 		{"iterations.md", generateIterations(project)},
 		{"commands/restart.md", generateRestartMD(compressedVault, project)},
@@ -245,11 +245,11 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 		os.RemoveAll(localCmds)
 	}
 
-	// Write agentctx/CLAUDE.md (behavioral rules)
-	agentCLAUDE := filepath.Join(agentctx, "CLAUDE.md")
-	safeWrite(agentCLAUDE, generateAgentCtxCLAUDE(project), true)
+	// Write agentctx/workflow.md (behavioral rules)
+	workflowPath := filepath.Join(agentctx, "workflow.md")
+	safeWrite(workflowPath, generateWorkflowMD(project), true)
 	result.Actions = append(result.Actions, FileAction{
-		Path:   filepath.Join("Projects", project, "agentctx", "CLAUDE.md"),
+		Path:   filepath.Join("Projects", project, "agentctx", "workflow.md"),
 		Action: "UPDATE",
 	})
 
@@ -492,17 +492,17 @@ All project context, behavioral rules, and workflow commands live in the vault:
 
   %s/Projects/%s/agentctx/
 
-Read agentctx/CLAUDE.md at session start for full context and behavioral rules.
+Read agentctx/workflow.md at session start for full context and behavioral rules.
 
 Do not commit this file, commit.msg, or anything under .claude/.
 `, compressedVault, project)
 }
 
-// generateAgentCtxCLAUDE produces the vault-side CLAUDE.md that lives inside
+// generateWorkflowMD produces the vault-side workflow.md that lives inside
 // agentctx/ and contains the behavioral rules, workflow standards, and file
 // pointers. This is what the AI actually reads for context.
-func generateAgentCtxCLAUDE(project string) string {
-	return fmt.Sprintf(`# %s — AI Context
+func generateWorkflowMD(project string) string {
+	return fmt.Sprintf(`# %s — Workflow
 
 ## Files
 
@@ -594,6 +594,8 @@ Never jump to coding short-term fixes without investigation.
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary
 - **Test Coverage**: Ensure close to 80%% unit test coverage for code changes
+
+Read resume.md for current project state, architecture, and open threads.
 `, project)
 }
 
@@ -603,7 +605,7 @@ func generateRestartMD(compressedVault, project string) string {
 
 Read the following files to restore full project context:
 
-1. %s/CLAUDE.md — behavioral rules and workflow standards
+1. %s/workflow.md — behavioral rules and workflow standards
 2. %s/resume.md — current project state, architecture, decisions
 3. %s/tasks/ — active task files (skip tasks/done/)
 4. Run `+"`vv inject`"+` via Bash to load live vault context (recent sessions,
