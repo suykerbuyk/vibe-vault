@@ -79,7 +79,7 @@ func main() {
 			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVersion))
 			return
 		}
-		fmt.Printf("vv v%s (vibe-vault)\n", help.Version)
+		fmt.Printf("vv %s (vibe-vault)\n", help.Version)
 
 	case "help", "--help", "-help", "-h":
 		usage()
