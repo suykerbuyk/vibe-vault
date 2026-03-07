@@ -5,7 +5,7 @@ GOFLAGS := -trimpath -ldflags="$(LDFLAGS)"
 MANDIR  := man
 MANPREFIX := $(HOME)/.local/share/man
 
-.PHONY: all build man install test integration check vet lint coverage bench fuzz clean pre-commit hooks
+.PHONY: all build man install uninstall test integration check vet lint coverage bench fuzz clean pre-commit hooks
 
 all: build man
 
@@ -19,6 +19,10 @@ install: build man
 	cp $(BINARY) $(HOME)/.local/bin/$(BINARY)
 	install -d $(MANPREFIX)/man1
 	cp $(MANDIR)/*.1 $(MANPREFIX)/man1/
+
+uninstall:
+	rm -f $(HOME)/.local/bin/$(BINARY)
+	rm -f $(MANPREFIX)/man1/vv.1 $(MANPREFIX)/man1/vv-*.1
 
 test:
 	go test -short ./...

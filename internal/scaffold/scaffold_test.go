@@ -32,8 +32,9 @@ func TestInit_CreatesVault(t *testing.T) {
 		".github/workflows/vault-health.yml",
 		".claude/commands/distill.md",
 		".claude/skills/README.md",
-		"docs/architecture.md",
-		"docs/examples/session-note-enriched.md",
+		"doc/architecture.md",
+		"doc/vault-guide.md",
+		"doc/examples/session-note-enriched.md",
 	} {
 		path := filepath.Join(target, rel)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
