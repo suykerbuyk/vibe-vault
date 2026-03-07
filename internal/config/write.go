@@ -56,6 +56,10 @@ work = "~/work"
 personal = "~/personal"
 opensource = "~/opensource"
 
+[tags]
+session = "vv-session"
+# extra = ["my-team"]
+
 [enrichment]
 enabled = false
 timeout_seconds = 10
@@ -120,6 +124,40 @@ func updateVaultPath(configPath, newVaultPath string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// ProjectConfigTemplate returns a fully-commented config.toml for per-project
+// overlay. All settings are commented out; uncommenting any setting overrides
+// the global config for that project only.
+func ProjectConfigTemplate() string {
+	return `# Project-local vibe-vault configuration overlay.
+# Uncomment any setting to override the global ~/.config/vibe-vault/config.toml
+# for this project only. Settings not present here inherit from global config.
+#
+# This file lives in the vault at Projects/{project}/agentctx/config.toml
+# and is symlinked into repos via agentctx/config.toml.
+
+# [tags]
+# session = "vv-session"
+# extra = ["my-team"]
+
+# [enrichment]
+# enabled = false
+# timeout_seconds = 10
+# provider = "openai"
+# model = "grok-3-mini-fast"
+# api_key_env = "XAI_API_KEY"
+# base_url = "https://api.x.ai/v1"
+
+# [archive]
+# compress = true
+
+# [friction]
+# alert_threshold = 40
+
+# [pricing]
+# enabled = false
+`
 }
 
 // CompressHome replaces $HOME prefix with ~/ for portable config values.

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johns/vibe-vault/internal/sanitize"
 	"github.com/johns/vibe-vault/internal/transcript"
 )
 
@@ -517,7 +518,7 @@ func firstUserRequest(entries []transcript.Entry) string {
 			continue
 		}
 
-		text := extractUserText(e)
+		text := sanitize.StripTags(extractUserText(e))
 		if text == "" {
 			continue
 		}
@@ -573,6 +574,8 @@ func extractUserText(e transcript.Entry) string {
 
 // IsNoiseMessage detects messages that shouldn't be used as user requests.
 func IsNoiseMessage(text string) bool {
+	// Strip XML tags first — commands arrive as <command-message>wrap</command-message>
+	text = sanitize.StripTags(text)
 	lower := strings.ToLower(strings.TrimSpace(text))
 
 	// Slash commands
@@ -606,6 +609,7 @@ func IsNoiseMessage(text string) bool {
 		"thanks", "thank you", "bye", "goodbye",
 		"got it", "understood", "noted", "perfect", "great",
 		"nice", "awesome", "cool", "good", "fine", "alright",
+		"wrap", "clear", "context",
 	}
 	for _, t := range trivials {
 		if lower == t || lower == t+"!" || lower == t+"." {

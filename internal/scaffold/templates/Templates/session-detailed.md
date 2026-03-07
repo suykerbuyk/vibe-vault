@@ -10,7 +10,7 @@ duration_minutes:
 isc_satisfied:
 isc_total:
 tags:
-  - cortana-session
+  - vv-session
 summary: ""
 ---
 

@@ -2,7 +2,7 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**555 unit tests** across 48 test files + **1 integration test** (22 subtests). All passing.
+**566 unit tests** across 48 test files + **1 integration test** (22 subtests). All passing.
 
 Run unit tests: `make test` (or `go test -short ./...`)
 Run integration: `make integration` (or `go test -run TestIntegration -timeout 60s ./test/`)
@@ -14,12 +14,12 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 | `session/detect_test.go` | 8 | `DetectProject` (5 variants: baseline, git remote SSH/HTTPS, no remote, not git repo), `detectDomain`, `TitleFromFirstMessage`, `repoNameFromURL` |
 | `transcript/parser_test.go` | 7 | `Parse` (full round-trip), `FirstUserMessage`, `FirstUserMessage_SkipsResume`, `ContentBlocks_StringContent`, `TextContent`, `ParseParentUUID_ContinuedSession`, `ParseParentUUID_NoContinuation` |
 | `scaffold/scaffold_test.go` | 5 | `CreatesVault`, `RefusesExistingObsidian`, `RefusesExistingVibeVault`, `VaultNameReplacement`, `ExecutablePermissions` |
-| `config/config_test.go` | 9 | `DefaultConfig`, `Load_NoConfig`, `Load_ValidConfig`, `Load_FrictionConfig`, `Load_FrictionConfigAbsent`, `Load_ExpandsHome`, `Load_XDGPriority`, `Load_InvalidTOML`, `ProjectsDir_StateDir` |
+| `config/config_test.go` | 16 | `DefaultConfig`, `Load_NoConfig`, `Load_ValidConfig`, `Load_FrictionConfig`, `Load_FrictionConfigAbsent`, `Load_ExpandsHome`, `Load_XDGPriority`, `Load_InvalidTOML`, `Overlay_TagsOverride`, `Overlay_PartialOverride`, `Overlay_MissingFile`, `Overlay_FullyCommented`, `WithProjectOverlay`, `SessionTag`, `SessionTags`, `ProjectsDir_StateDir` |
 | `config/write_test.go` | 6 | `WriteDefault_CreatesConfig`, `WriteDefault_UpdatesExistingVaultPath`, `WriteDefault_UnchangedExisting`, `WriteDefault_PreservesAllSections`, `WriteDefault_MissingVaultPathKey`, `CompressHome` |
 | `enrichment/enrichment_test.go` | 11 | `Truncate`, `BuildMessages`, `ParseResponse`, `ParseResponse_EmptyChoices`, `ParseResponse_BadJSON`, `ValidateTag`, `Generate_Disabled`, `Generate_NoAPIKey`, `Generate_MockServer`, `Generate_Timeout`, `Generate_ServerError` |
 | `help/help_test.go` | 50 | Terminal output regression (all 15 subcommands incl. inject, export), FormatUsage, registry completeness (15 subcommands), roff structure (subcommands + hook + context subcommands), escapeRoff, ManName (incl. spaces), hook + context subcommand terminal output |
 | `context/context_test.go` | 27 | Init (CreatesVaultFiles, CreatesRepoFiles, CommandsDirectorySymlink, WorkflowMD, IdempotentSkip, ForceOverwrite, ProjectOverride, VaultNotFound, ClaudeMDContent, GitignoreUpdated, GitignoreIdempotent, ProjectDetection, AgentctxSymlink, ClaudeMDNoAbsolutePath, CommandsRelativeSymlink, GitignoreAgentctx, VersionFile), Migrate (CopiesResume, CopiesHistory, CopiesTasks, CopiesLocalCommands, SkipsAlreadySymlinkedCommands, SkipsMissing, SkipsExistingVaultFiles, ForceOverwrite, UpdatesRepoFiles, PreservesOriginals) |
-| `context/schema_test.go` | 8 | ReadVersion (Missing, Roundtrip, Invalid), WriteVersion (Creates, Overwrites), MigrationsFrom (Zero, One, Latest) |
+| `context/schema_test.go` | 9 | ReadVersion (Missing, Roundtrip, Invalid), WriteVersion (Creates, Overwrites), MigrationsFrom (Zero, One, Two, Latest) |
 | `context/sync_test.go` | 14 | Sync (LegacyProject, AlreadyCurrent, PartialMigration, DryRun, AllMode, PropagatesSharedCommands, ExistingCommandNotOverwritten, Idempotent), Migrate0to1, Migrate1to2 (CreatesSymlink, RewritesCLAUDEMD, RelativeCommands, VaultOnlySkipsRepo), DiscoverProjects, PropagateSharedCommands |
 | `context/template_test.go` | 7 | ResolveTemplate (Fallback, VaultOverride, VarSubstitution), ApplyVars, EnsureVaultTemplates (Creates, SkipsExisting), DefaultVars |
 | `knowledge/extract_test.go` | 3 | `PairCorrections` (single section, nil inputs, multi-section) |
@@ -53,7 +53,7 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 | `friction/analyze_test.go` | 14 | `Analyze_NilInputs`, `CorrectionsOnly`, `NarrativeSignals`, `RecurringThreads_Jaccard`, `NoRecurringThreads_Jaccard`, `Combined`, `BuildSummary`, `HasRecurringThreads`, `HasRecurringThreads_NoMatch`, `SignificantWords`, `JaccardIdentical`, `JaccardNone`, `JaccardPartial`, `JaccardThreshold` |
 | `friction/format_test.go` | 8 | `ComputeProjectFriction_Empty`, `SingleProject`, `ProjectFilter`, `SkipsZero`, `Format_Empty`, `Format_SingleProject`, `Format_ProjectFilter`, `Format_MultiProject` |
 | `noteparse/noteparse_test.go` | 8 | `ParseFrontmatter`, `ParseBracketList`, `ExtractDecisions`, `ExtractOpenThreads`, `ExtractFilesChanged`, `ExtractCommits`, `MissingFrontmatter`, `EmptyFile` |
-| `render/markdown_test.go` | 22 | `SessionNote_AllFields`, `SessionNote_MinimalFields`, `SessionNote_TagRendering`, `SessionNote_ToolUsage`, `SessionNote_CheckpointStatus`, `SessionNote_NoTools`, `SessionNote_PreviousNote`, `SessionNote_RelatedNotes`, `SessionNote_YAMLEscape`, `NoteDataFromTranscript`, `NoteDataFromTranscript_ZeroTime`, `NoteFilename`, `NoteRelPath`, `SessionNote_ProseDialogue`, `SessionNote_ProseDialogueFallback`, `SessionNote_Commits`, `SessionNote_NoCommits`, `SessionNote_FrictionSignals`, `SessionNote_NoFriction`, `SessionNote_LowFrictionNoSection`, `SessionNote_ParentSession`, `SessionNote_NoParentSession` |
+| `render/markdown_test.go` | 23 | `SessionNote_AllFields`, `SessionNote_MinimalFields`, `SessionNote_TagRendering`, `SessionNote_SessionTagsOverride`, `SessionNote_ToolUsage`, `SessionNote_CheckpointStatus`, `SessionNote_NoTools`, `SessionNote_PreviousNote`, `SessionNote_RelatedNotes`, `SessionNote_YAMLEscape`, `NoteDataFromTranscript`, `NoteDataFromTranscript_ZeroTime`, `NoteFilename`, `NoteRelPath`, `SessionNote_ProseDialogue`, `SessionNote_ProseDialogueFallback`, `SessionNote_Commits`, `SessionNote_NoCommits`, `SessionNote_FrictionSignals`, `SessionNote_NoFriction`, `SessionNote_LowFrictionNoSection`, `SessionNote_ParentSession`, `SessionNote_NoParentSession` |
 | `sanitize/redact_test.go` | 5 | `StripTags_NoTags`, `StripTags_AllTagTypes` (18 subtests), `StripTags_NonMatchingTags`, `StripTags_NestedContent`, `StripTags_EmptyAndWhitespace` |
 | `discover/discover_test.go` | 5 | `DiscoverFindsTranscripts`, `DiscoverSubagentDetection`, `DiscoverUUIDFiltering`, `FindBySessionID`, `FindBySessionIDSubagent` |
 | `archive/archive_test.go` | 3 | `ArchiveRoundTrip`, `IsArchived`, `ArchivePath` |

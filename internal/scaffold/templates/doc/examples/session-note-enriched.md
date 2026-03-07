@@ -12,7 +12,7 @@ messages: 24
 tokens_in: 52000
 tokens_out: 18000
 status: completed
-tags: [cortana-session, implementation]
+tags: [vv-session, implementation]
 summary: "Implemented token-bucket rate limiter with Redis backing store"
 previous: "[[2026-02-09-02]]"
 ---

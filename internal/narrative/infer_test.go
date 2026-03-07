@@ -278,7 +278,7 @@ func TestInferSubject_MultipleCommits_UsesLast(t *testing.T) {
 	}
 }
 
-func TestInferSummary_MultipleCommits_UsesLast(t *testing.T) {
+func TestInferSummary_MultipleCommits_JoinsAll(t *testing.T) {
 	segments := []Segment{
 		{Activities: []Activity{
 			{Kind: KindFileCreate},
@@ -290,11 +290,14 @@ func TestInferSummary_MultipleCommits_UsesLast(t *testing.T) {
 		{SHA: "bbb", Message: "feat: implement login flow"},
 	}
 	got := inferSummary(segments, "Do the work", commits)
-	if !strings.Contains(got, "feat:") {
-		t.Errorf("expected feat prefix from last commit, got %q", got)
+	if !strings.Contains(got, "initial scaffold") {
+		t.Errorf("expected first commit subject, got %q", got)
 	}
 	if !strings.Contains(got, "implement login flow") {
-		t.Errorf("expected last commit subject, got %q", got)
+		t.Errorf("expected second commit subject, got %q", got)
+	}
+	if !strings.Contains(got, ";") {
+		t.Errorf("expected semicolon separator, got %q", got)
 	}
 }
 
@@ -567,6 +570,19 @@ func TestExtractBacktickContent(t *testing.T) {
 	}
 }
 
+func TestInferSummary_ActivityDescription(t *testing.T) {
+	segments := []Segment{
+		{Activities: []Activity{
+			{Kind: KindPlanMode},
+			{Kind: KindExplore},
+		}},
+	}
+	got := inferSummary(segments, "", nil)
+	if !strings.Contains(got, "Planning") {
+		t.Errorf("expected planning description, got %q", got)
+	}
+}
+
 func TestIsNoiseMessage(t *testing.T) {
 	tests := []struct {
 		msg  string
@@ -579,6 +595,11 @@ func TestIsNoiseMessage(t *testing.T) {
 		{"restart", true},
 		{"```\ncode block\n```", true},
 		{"caveat: something", true},
+		{"<command-message>wrap</command-message>", true},
+		{"<command-name>/clear</command-name>", true},
+		{"wrap", true},
+		{"clear", true},
+		{"context", true},
 		{"Fix the login bug", false},
 		{"Add unit tests for the handler", false},
 	}

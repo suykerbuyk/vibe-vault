@@ -83,6 +83,9 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	// Detect session metadata
 	info := Detect(cwd, t.Stats.GitBranch, t.Stats.Model, sessionID, cfg)
 
+	// Apply per-project config overlay (project-local settings override global)
+	cfg = cfg.WithProjectOverlay(info.Project)
+
 	// Acquire index lock to prevent concurrent corruption
 	stateDir := cfg.StateDir()
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
@@ -375,6 +378,9 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 			Reason: describeRelation(candidateEntry, r.Entry),
 		})
 	}
+
+	// Build session tags from config
+	noteData.SessionTags = cfg.SessionTags(noteData.Tag)
 
 	// Render markdown
 	markdown := render.SessionNote(noteData)

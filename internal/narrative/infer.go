@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/johns/vibe-vault/internal/sanitize"
 	"github.com/johns/vibe-vault/internal/transcript"
 )
 
@@ -28,7 +29,7 @@ func inferTitle(segments []Segment, t *transcript.Transcript) string {
 	}
 
 	// Fall back to transcript first user message
-	first := transcript.FirstUserMessage(t)
+	first := sanitize.StripTags(transcript.FirstUserMessage(t))
 	if first != "" {
 		first = strings.TrimSpace(first)
 		if idx := strings.IndexByte(first, '\n'); idx > 0 {
@@ -117,13 +118,29 @@ func extractBacktickContent(s string) string {
 	return s[start+1 : start+1+end]
 }
 
-// inferSummary builds a semantic summary: "prefix: subject (outcomes)"
+// inferSummary builds a semantic summary from commits, activities, and title.
+//
+// Priority order:
+//  1. Multiple commits → joined commit subjects as narrative
+//  2. Single commit → "prefix: subject (outcomes)"
+//  3. No commits → "prefix: title (outcomes)" with activity-derived description
 func inferSummary(segments []Segment, title string, commits []Commit) string {
-	prefix := inferIntentPrefix(segments, commits)
-	subject := inferSubject(title, commits)
 	outcomes := formatOutcomes(segments)
 
+	// Multiple commits: join all subjects into a narrative summary
+	if len(commits) > 1 {
+		return multiCommitSummary(commits, outcomes)
+	}
+
+	prefix := inferIntentPrefix(segments, commits)
+	subject := inferSubject(title, commits)
+
+	// No subject and no outcomes: generic fallback
 	if subject == "" && outcomes == "" {
+		// Try activity-derived description
+		if desc := activityDescription(segments); desc != "" {
+			return desc
+		}
 		return "Claude Code session."
 	}
 
@@ -150,6 +167,76 @@ func inferSummary(segments []Segment, title string, commits []Commit) string {
 	}
 
 	return b.String()
+}
+
+// multiCommitSummary joins commit messages into a narrative summary.
+func multiCommitSummary(commits []Commit, outcomes string) string {
+	var subjects []string
+	for _, c := range commits {
+		subj := stripConventionalPrefix(c.Message)
+		if subj != "" {
+			subjects = append(subjects, truncateStr(subj, 60))
+		}
+	}
+	if len(subjects) == 0 {
+		return "Claude Code session."
+	}
+
+	summary := strings.Join(subjects, "; ")
+	if outcomes != "" {
+		summary += " (" + outcomes + ")"
+	}
+	return summary
+}
+
+// activityDescription produces a human-readable summary from activity patterns
+// when no title or commits are available.
+func activityDescription(segments []Segment) string {
+	var creates, modifies, tests, planModes, explores int
+	var firstFile string
+
+	for _, seg := range segments {
+		for _, a := range seg.Activities {
+			switch a.Kind {
+			case KindFileCreate:
+				creates++
+				if firstFile == "" {
+					firstFile = extractBacktickContent(a.Description)
+				}
+			case KindFileModify:
+				modifies++
+				if firstFile == "" {
+					firstFile = extractBacktickContent(a.Description)
+				}
+			case KindTestRun:
+				tests++
+			case KindPlanMode:
+				planModes++
+			case KindExplore:
+				explores++
+			}
+		}
+	}
+
+	total := creates + modifies + tests + planModes + explores
+	if total == 0 {
+		return ""
+	}
+
+	if planModes > 0 && (creates+modifies) <= 2 {
+		return "Planning and analysis session."
+	}
+	if firstFile != "" && tests > 0 {
+		return fmt.Sprintf("Modified `%s` and %d other files, tests passing.", firstFile, creates+modifies-1)
+	}
+	if firstFile != "" {
+		return fmt.Sprintf("Worked on `%s` and %d other files.", firstFile, creates+modifies-1)
+	}
+	if explores > 0 && creates+modifies == 0 {
+		return "Explored and analyzed codebase."
+	}
+
+	return ""
 }
 
 // inferIntentPrefix determines the conventional commit prefix from commits or activity patterns.

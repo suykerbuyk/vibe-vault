@@ -12,7 +12,7 @@ messages: 18
 tokens_in: 38000
 tokens_out: 12000
 status: completed
-tags: [cortana-session, debugging]
+tags: [vv-session, debugging]
 summary: "Debug flaky CI test caused by timezone-dependent date formatting"
 previous: "[[2026-02-10-01]]"
 ---

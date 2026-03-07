@@ -78,7 +78,7 @@ jobs:
       - name: Validate tags against controlled vocabulary
         run: |
           # Controlled vocabulary from CLAUDE.md
-          allowed="cortana-session knowledge decision pattern learning research implementation debugging review planning exploration"
+          allowed="vv-session knowledge decision pattern learning research implementation debugging review planning exploration"
           violations=0
           shopt -s globstar nullglob
           for file in Projects/**/sessions/*.md Knowledge/**/*.md; do

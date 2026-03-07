@@ -241,6 +241,20 @@ opensource = "~/opensource"
 Any session whose CWD starts with `~/work/` gets `domain: work` in its
 frontmatter. This powers the domain-filtered dashboards in Obsidian.
 
+### Session tags
+
+Session notes are tagged with `vv-session` by default. Customize in
+`~/.config/vibe-vault/config.toml`:
+
+```toml
+[tags]
+session = "vv-session"    # base tag for all session notes
+# extra = ["my-team"]     # additional tags applied to every session
+```
+
+Tags can also be overridden per-project via `agentctx/config.toml`
+(see section 6).
+
 ## 6. Optional: Vault-Resident AI Context
 
 AI workflow files (resume, iteration history, tasks, slash commands) can live
@@ -261,6 +275,7 @@ This creates:
   - `workflow.md` — behavioral rules (pair programming, plan mode, verification)
   - `resume.md` — project state scaffold
   - `iterations.md` — iteration history
+  - `config.toml` — per-project config overlay (all settings commented out)
   - `commands/restart.md`, `commands/wrap.md` — slash commands
   - `tasks/`, `tasks/done/` — task tracking
 - **Repo-side**:

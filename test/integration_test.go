@@ -900,7 +900,7 @@ This is archived and should be ignored.
 			t.Error("vault agentctx/.version not created")
 		} else {
 			versionContent := readFile(t, filepath.Join(agentctxDir, ".version"))
-			assertContains(t, versionContent, "schema_version = 2", ".version has latest schema")
+			assertContains(t, versionContent, "schema_version = 3", ".version has latest schema")
 		}
 
 		// Phase 2: agentctx symlink at repo root
@@ -1049,14 +1049,14 @@ This is archived and should be ignored.
 		os.MkdirAll(filepath.Join(legacyAgentctx, "commands"), 0o755)
 		os.WriteFile(filepath.Join(legacyAgentctx, "resume.md"), []byte("# Resume"), 0o644)
 
-		// Run sync — should migrate 0→2
+		// Run sync — should migrate 0→3
 		stdout := mustRunVVInDir(t, env, syncCwd, "context", "sync", "--project", legacyProject)
 		assertContains(t, stdout, "v0", "sync shows from version")
-		assertContains(t, stdout, "v2", "sync shows to version")
+		assertContains(t, stdout, "v3", "sync shows to version")
 
 		// .version should be at latest
 		versionContent := readFile(t, filepath.Join(legacyAgentctx, ".version"))
-		assertContains(t, versionContent, "schema_version = 2", ".version at latest after sync")
+		assertContains(t, versionContent, "schema_version = 3", ".version at latest after sync")
 
 		// agentctx symlink at repo root
 		if !isSymlink(filepath.Join(syncCwd, "agentctx")) {

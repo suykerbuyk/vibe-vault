@@ -60,9 +60,16 @@ model = "grok-3-mini-fast"
 api_key_env = "XAI_API_KEY"
 base_url = "https://api.x.ai/v1"
 
+[tags]
+session = "vv-session"
+# extra = ["my-team"]
+
 [archive]
 compress = true
 ```
+
+Per-project overrides can be placed in `Projects/{project}/agentctx/config.toml`.
+Only uncommented settings override the global config.
 
 ### Data Flow
 
@@ -84,14 +91,16 @@ Claude Code SessionEnd
 ```
 vv hook                  # Claude Code hook mode (reads stdin)
 vv process <file.jsonl>  # Process a single transcript
-vv version               # Print version
-```
-
-Future commands (not yet implemented):
-```
 vv backfill              # Discover + process all unprocessed sessions
 vv reprocess             # Re-extract archived transcripts
 vv index                 # Rebuild project context
+vv stats                 # Session analytics
+vv friction              # Friction analysis
+vv trends                # Weekly metric trends
+vv inject                # Session-start context payload
+vv context init          # Initialize vault-resident AI context
+vv context sync          # Sync schema and shared commands
+vv version               # Print version
 ```
 
 ## Vault Conventions
@@ -137,7 +146,7 @@ tools: [Bash, Edit, Glob, Grep, Read, Write]
 status: completed
 friction_score: 28
 corrections: 2
-tags: [cortana-session]
+tags: [vv-session]
 summary: "One-line description"
 previous: "[[YYYY-MM-DD-NN]]"
 ---
@@ -157,7 +166,7 @@ Workspace directories are configured in `~/.config/vibe-vault/config.toml`.
 
 Only use these tags to keep the vault searchable and consistent:
 
-- `cortana-session` — Session log/summary
+- `vv-session` — Session log/summary
 - `knowledge` — Extracted knowledge note
 - `decision` — Architectural or design decision
 - `pattern` — Reusable pattern discovered

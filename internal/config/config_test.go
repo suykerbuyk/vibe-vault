@@ -214,6 +214,133 @@ func TestLoad_InvalidTOML(t *testing.T) {
 	}
 }
 
+func TestOverlay_TagsOverride(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	os.WriteFile(cfgPath, []byte(`[tags]
+session = "my-custom-tag"
+extra = ["team-x"]
+`), 0o644)
+
+	base := DefaultConfig()
+	result := base.Overlay(cfgPath)
+
+	if result.Tags.Session != "my-custom-tag" {
+		t.Errorf("Tags.Session = %q, want my-custom-tag", result.Tags.Session)
+	}
+	if len(result.Tags.Extra) != 1 || result.Tags.Extra[0] != "team-x" {
+		t.Errorf("Tags.Extra = %v, want [team-x]", result.Tags.Extra)
+	}
+	// Base should be unchanged
+	if base.Tags.Session != DefaultSessionTag {
+		t.Error("base config was mutated")
+	}
+}
+
+func TestOverlay_PartialOverride(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	os.WriteFile(cfgPath, []byte(`[friction]
+alert_threshold = 80
+`), 0o644)
+
+	base := DefaultConfig()
+	result := base.Overlay(cfgPath)
+
+	if result.Friction.AlertThreshold != 80 {
+		t.Errorf("Friction.AlertThreshold = %d, want 80", result.Friction.AlertThreshold)
+	}
+	// Other fields unchanged
+	if result.Tags.Session != DefaultSessionTag {
+		t.Errorf("Tags.Session = %q, want %q (unchanged)", result.Tags.Session, DefaultSessionTag)
+	}
+	if result.Enrichment.Model != "grok-3-mini-fast" {
+		t.Errorf("Enrichment.Model = %q, want grok-3-mini-fast (unchanged)", result.Enrichment.Model)
+	}
+}
+
+func TestOverlay_MissingFile(t *testing.T) {
+	base := DefaultConfig()
+	result := base.Overlay("/nonexistent/config.toml")
+
+	if result.Tags.Session != base.Tags.Session {
+		t.Error("overlay from missing file should return base unchanged")
+	}
+}
+
+func TestOverlay_FullyCommented(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	os.WriteFile(cfgPath, []byte(ProjectConfigTemplate()), 0o644)
+
+	base := DefaultConfig()
+	result := base.Overlay(cfgPath)
+
+	// All-commented file should leave base unchanged
+	if result.Tags.Session != base.Tags.Session {
+		t.Errorf("Tags.Session changed to %q from all-commented overlay", result.Tags.Session)
+	}
+	if result.Friction.AlertThreshold != base.Friction.AlertThreshold {
+		t.Errorf("Friction.AlertThreshold changed to %d from all-commented overlay", result.Friction.AlertThreshold)
+	}
+}
+
+func TestWithProjectOverlay(t *testing.T) {
+	dir := t.TempDir()
+	base := Config{VaultPath: dir}
+
+	// Create project config
+	projDir := filepath.Join(dir, "Projects", "myproj", "agentctx")
+	os.MkdirAll(projDir, 0o755)
+	os.WriteFile(filepath.Join(projDir, "config.toml"), []byte(`[tags]
+session = "proj-tag"
+`), 0o644)
+
+	result := base.WithProjectOverlay("myproj")
+	if result.Tags.Session != "proj-tag" {
+		t.Errorf("Tags.Session = %q, want proj-tag", result.Tags.Session)
+	}
+}
+
+func TestSessionTag(t *testing.T) {
+	// Default
+	cfg := DefaultConfig()
+	if cfg.SessionTag() != DefaultSessionTag {
+		t.Errorf("SessionTag = %q, want %q", cfg.SessionTag(), DefaultSessionTag)
+	}
+
+	// Custom
+	cfg.Tags.Session = "custom"
+	if cfg.SessionTag() != "custom" {
+		t.Errorf("SessionTag = %q, want custom", cfg.SessionTag())
+	}
+
+	// Empty falls back to default
+	cfg.Tags.Session = ""
+	if cfg.SessionTag() != DefaultSessionTag {
+		t.Errorf("SessionTag = %q, want %q", cfg.SessionTag(), DefaultSessionTag)
+	}
+}
+
+func TestSessionTags(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Tags.Extra = []string{"team-x"}
+
+	tags := cfg.SessionTags("debugging")
+	if len(tags) != 3 {
+		t.Fatalf("len = %d, want 3", len(tags))
+	}
+	if tags[0] != DefaultSessionTag {
+		t.Errorf("tags[0] = %q", tags[0])
+	}
+	if tags[1] != "team-x" {
+		t.Errorf("tags[1] = %q", tags[1])
+	}
+	if tags[2] != "debugging" {
+		t.Errorf("tags[2] = %q", tags[2])
+	}
+}
+
 func TestProjectsDir_StateDir(t *testing.T) {
 	cfg := Config{VaultPath: "/home/user/vault"}
 

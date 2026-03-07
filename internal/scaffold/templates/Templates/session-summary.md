@@ -7,7 +7,7 @@ status: active
 project:
 model:
 tags:
-  - cortana-session
+  - vv-session
 summary: ""
 ---
 

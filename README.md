@@ -49,7 +49,7 @@ tokens_in: 52000
 tokens_out: 18000
 tool_uses: 38
 status: completed
-tags: [cortana-session, implementation]
+tags: [vv-session, implementation]
 commits: ["a1b2c3d", "d4e5f6a"]
 friction_score: 12
 summary: "feat: token-bucket rate limiter with Redis (4+4 files, tests pass)"

@@ -201,3 +201,22 @@ Key architectural and design decisions in vibe-vault, with rationale.
     calls from corrupting the session index. Lock acquired before `index.Load()`,
     released after `idx.Save()`. Non-fatal: if lock fails, capture proceeds
     with a warning.
+
+29. **Configurable session tags with `vv-session` default:** Session notes are
+    tagged via `[tags]` config section: `session` sets the base tag (default
+    `vv-session`), `extra` adds additional tags to every session. Tags are built
+    by `Config.SessionTags(activityTag)` which concatenates session + extra +
+    activity tag. The renderer uses `SessionTags` when populated, falling back
+    to hardcoded `vv-session` for backward compatibility. The noteparser skips
+    both `cortana-session` (legacy) and `vv-session` when extracting activity
+    tags from existing notes.
+
+30. **Per-project config overlay via `agentctx/config.toml`:** Each project can
+    override global config settings by uncommenting values in
+    `Projects/{project}/agentctx/config.toml`. The overlay is applied after
+    project detection in `session.Capture()` via `Config.Overlay()`, which uses
+    TOML metadata (`IsDefined()`) to only replace fields explicitly present in
+    the overlay file. A fully-commented file changes nothing. This allows
+    per-project enrichment models, custom tags, friction thresholds, etc.
+    without duplicating the entire config. Schema migration 2→3 generates the
+    template for existing projects.

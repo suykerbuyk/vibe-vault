@@ -114,8 +114,8 @@ Print summary               Print summary             session.Capture(Force:true
 | `cmd/vv` | `main.go` | CLI arg parsing, subcommand routing (including hook sub-subcommands), help via `internal/help`, `wantsHelp()` flag guard, unknown flag rejection, `runTrends()` with `--project` and `--weeks` flags, `runInject()` with `--project`/`--format`/`--sections`/`--max-tokens` flags, `runExport()` with `--format`/`--project` flags, `readKnowledgeSummaries()` helper for index/reprocess/inject, `runContext()` with `sync` sub-subcommand (`--project`/`--all`/`--dry-run`/`--force`), `runCheck()` agentctx schema check |
 | `cmd/gen-man` | `main.go` | Generates `man/*.1` files from help registry (Subcommands + HookSubcommands + ContextSubcommands) |
 | `context` | `context.go` | `Init()` — scaffold vault-resident context (workflow.md, resume.md, iterations.md, tasks/, repo-side CLAUDE.md + .claude/commands/, agentctx symlink, .version); `Migrate()` — copy local files to vault + force-update repo-side; helpers: safeWrite, gitignoreEnsure, copyFile/Dir, template generators (relative paths, no absolute vault paths) |
-| `context` | `schema.go` | `VersionFile` TOML struct, `ReadVersion`/`WriteVersion`, `LatestSchemaVersion` const (2), `Migration` type + registry (0→1 writes .version, 1→2 adds symlinks/relative paths), `migrationsFrom()` |
-| `context` | `sync.go` | `Sync()` — run schema migrations + shared command propagation for one or all projects; `SyncOpts`/`SyncResult`/`ProjectSyncResult` types; `discoverProjects()`, `propagateSharedCommands()`, `migrate1to2()` |
+| `context` | `schema.go` | `VersionFile` TOML struct, `ReadVersion`/`WriteVersion`, `LatestSchemaVersion` const (3), `Migration` type + registry (0→1 writes .version, 1→2 adds symlinks/relative paths, 2→3 adds per-project config.toml), `migrationsFrom()` |
+| `context` | `sync.go` | `Sync()` — run schema migrations + shared command propagation for one or all projects; `SyncOpts`/`SyncResult`/`ProjectSyncResult` types; `discoverProjects()`, `propagateSharedCommands()`, `migrate1to2()`, `migrate2to3()` |
 | `context` | `template.go` | `TemplateVars`, `DefaultVars()`, `resolveTemplate()` (vault Templates/agentctx/ first, fallback to embedded), `applyVars()` ({{PROJECT}}/{{DATE}}), `EnsureVaultTemplates()` (seed 6 template files) |
 | `friction` | `types.go` | `Correction`, `Signals`, `Result`, `ProjectFriction` types |
 | `friction` | `detect.go` | `DetectCorrections()` — linguistic (negation, redirect, undo, quality, repetition) + contextual (short negation after long assistant turn) correction detection |
@@ -127,8 +127,8 @@ Print summary               Print summary             session.Capture(Force:true
 | `help` | `roff.go` | `FormatRoff()` and `FormatRoffTopLevel()` — roff-formatted man pages |
 | `check` | `check.go` | 10 diagnostic checks (config, vault, obsidian, projects, state, index, domains, enrichment, hook, agentctx schema), `Run()` aggregator, `Report.Format()`, `CheckAgentctxSchema()` (pass/warn by version) |
 | `archive` | `archive.go` | Zstd compress/decompress via klauspost/compress, IsArchived, ArchivePath |
-| `config` | `config.go` | TOML config with XDG paths, `~` expansion, defaults |
-| `config` | `write.go` | Write/update config.toml with action status, ConfigDir(), CompressHome(), updateVaultPath() |
+| `config` | `config.go` | TOML config with XDG paths, `~` expansion, defaults, `SessionTag()`/`SessionTags()` for configurable session tags, `Overlay()` for per-project config, `WithProjectOverlay()` loads `Projects/{project}/agentctx/config.toml` |
+| `config` | `write.go` | Write/update config.toml with action status, ConfigDir(), CompressHome(), updateVaultPath(), `ProjectConfigTemplate()` for per-project overlay scaffolds |
 | `discover` | `discover.go` | Walk directories for UUID-named `.jsonl` transcripts, subagent detection, FindBySessionID |
 | `hook` | `handler.go` | Stdin JSON parsing (2s timeout), `handleInput()` dispatch logic (extracted for testability), dispatches SessionEnd/Stop/PreCompact, auto-refresh context on SessionEnd via `GenerateContext()` |
 | `hook` | `setup.go` | `Install()`/`Uninstall()` for `~/.claude/settings.json`: 3 events (SessionEnd, Stop, PreCompact), idempotent JSON manipulation, backup, directory creation |
@@ -158,7 +158,7 @@ Print summary               Print summary             session.Capture(Force:true
 | `knowledge` | `render.go` | `RenderNote()` — Obsidian markdown for knowledge notes (lesson: "What Was Learned", decision: "Context"); frontmatter with confidence, source_sessions, category |
 | `knowledge` | `read.go` | `ReadNotes()` — walk Knowledge/learnings/ and decisions/ directories, parse frontmatter from .md files, skip .gitkeep and archived notes, populate NotePath |
 | `knowledge` | `write.go` | `WriteNote()` — write to `Knowledge/{learnings,decisions}/{date}-{slug}.md`, no-overwrite dedup, title→slug conversion |
-| `session` | `capture.go` | Orchestration via `CaptureOpts`: parse → detect → index → **narrative** → **prose** → **commits** → enrich (skipped when prose succeeds) → **friction** → **knowledge** (separate LLM call, gated on friction >= 30 or decisions >= 2) → relate → render → write. Force mode reuses existing iteration to overwrite in place |
+| `session` | `capture.go` | Orchestration via `CaptureOpts`: parse → detect → **project config overlay** → index → **narrative** → **prose** → **commits** → enrich (skipped when prose succeeds) → **friction** → **knowledge** (separate LLM call, gated on friction >= 30 or decisions >= 2) → relate → render → write. Force mode reuses existing iteration to overwrite in place |
 | `session` | `detect.go` | Git remote origin + CWD-based project name, config-based domain detection |
 | `index` | `index.go` | Enriched SessionEntry + TranscriptPath + Commits + Friction + KnowledgeNotes + token/message counts, JSON index: dedup, iteration counting, cross-linking |
 | `index` | `rebuild.go` | `Rebuild()` — walk Projects/*/sessions/, parse via noteparse, preserve TranscriptPaths from old index, backfill token/message counts, parse corrections + knowledge_notes from frontmatter |

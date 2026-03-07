@@ -12,15 +12,25 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// DefaultSessionTag is the default tag applied to all session notes.
+const DefaultSessionTag = "vv-session"
+
 // Config holds all vibe-vault configuration.
 type Config struct {
 	VaultPath string `toml:"vault_path"`
 
 	Domains    DomainsConfig    `toml:"domains"`
+	Tags       TagsConfig       `toml:"tags"`
 	Enrichment EnrichmentConfig `toml:"enrichment"`
 	Archive    ArchiveConfig    `toml:"archive"`
 	Friction   FrictionConfig   `toml:"friction"`
 	Pricing    PricingConfig    `toml:"pricing"`
+}
+
+// TagsConfig controls tags applied to session notes.
+type TagsConfig struct {
+	Session string   `toml:"session"` // base tag for all session notes (default: "vv-session")
+	Extra   []string `toml:"extra"`   // additional tags applied to all sessions
 }
 
 type DomainsConfig struct {
@@ -81,6 +91,9 @@ func DefaultConfig() Config {
 		Archive: ArchiveConfig{
 			Compress: true,
 		},
+		Tags: TagsConfig{
+			Session: DefaultSessionTag,
+		},
 		Friction: FrictionConfig{
 			AlertThreshold: 40,
 		},
@@ -134,6 +147,90 @@ func expandHome(path string) string {
 		return path
 	}
 	return filepath.Join(home, path[2:])
+}
+
+// SessionTag returns the configured session tag, defaulting to DefaultSessionTag.
+func (c Config) SessionTag() string {
+	if c.Tags.Session != "" {
+		return c.Tags.Session
+	}
+	return DefaultSessionTag
+}
+
+// SessionTags returns all tags for a session note: session tag + extra + activity tag.
+func (c Config) SessionTags(activityTag string) []string {
+	tags := []string{c.SessionTag()}
+	tags = append(tags, c.Tags.Extra...)
+	if activityTag != "" {
+		tags = append(tags, activityTag)
+	}
+	return tags
+}
+
+// Overlay applies a project-local config.toml on top of this config.
+// Only non-zero values in the overlay replace the base config.
+// Returns the original config unchanged if the file doesn't exist.
+func (c Config) Overlay(projectConfigPath string) Config {
+	if _, err := os.Stat(projectConfigPath); err != nil {
+		return c
+	}
+	// Decode into a fresh struct so we can detect which fields were set.
+	// TOML decoder only populates fields present in the file.
+	var overlay Config
+	md, err := toml.DecodeFile(projectConfigPath, &overlay)
+	if err != nil {
+		return c
+	}
+
+	// Apply only keys that were explicitly set in the overlay file
+	if md.IsDefined("tags", "session") && overlay.Tags.Session != "" {
+		c.Tags.Session = overlay.Tags.Session
+	}
+	if md.IsDefined("tags", "extra") {
+		c.Tags.Extra = overlay.Tags.Extra
+	}
+	if md.IsDefined("enrichment", "enabled") {
+		c.Enrichment.Enabled = overlay.Enrichment.Enabled
+	}
+	if md.IsDefined("enrichment", "timeout_seconds") {
+		c.Enrichment.TimeoutSeconds = overlay.Enrichment.TimeoutSeconds
+	}
+	if md.IsDefined("enrichment", "provider") {
+		c.Enrichment.Provider = overlay.Enrichment.Provider
+	}
+	if md.IsDefined("enrichment", "model") {
+		c.Enrichment.Model = overlay.Enrichment.Model
+	}
+	if md.IsDefined("enrichment", "api_key_env") {
+		c.Enrichment.APIKeyEnv = overlay.Enrichment.APIKeyEnv
+	}
+	if md.IsDefined("enrichment", "base_url") {
+		c.Enrichment.BaseURL = overlay.Enrichment.BaseURL
+	}
+	if md.IsDefined("archive", "compress") {
+		c.Archive.Compress = overlay.Archive.Compress
+	}
+	if md.IsDefined("friction", "alert_threshold") {
+		c.Friction.AlertThreshold = overlay.Friction.AlertThreshold
+	}
+	if md.IsDefined("pricing", "enabled") {
+		c.Pricing.Enabled = overlay.Pricing.Enabled
+	}
+	if md.IsDefined("pricing", "models") {
+		c.Pricing.Models = overlay.Pricing.Models
+	}
+
+	return c
+}
+
+// ProjectConfigPath returns the path to a project's local config overlay.
+func (c Config) ProjectConfigPath(project string) string {
+	return filepath.Join(c.VaultPath, "Projects", project, "agentctx", "config.toml")
+}
+
+// WithProjectOverlay loads and applies a project-local config overlay.
+func (c Config) WithProjectOverlay(project string) Config {
+	return c.Overlay(c.ProjectConfigPath(project))
 }
 
 // ProjectsDir returns the vault's Projects directory.

@@ -215,6 +215,17 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun bool) []File
 	return actions
 }
 
+// migrate2to3 adds per-project config.toml overlay template.
+func migrate2to3(ctx MigrationContext) ([]FileAction, error) {
+	var actions []FileAction
+
+	cfgPath := filepath.Join(ctx.AgentctxPath, "config.toml")
+	action := safeWrite(cfgPath, config.ProjectConfigTemplate(), false)
+	actions = append(actions, FileAction{Path: "config.toml", Action: action})
+
+	return actions, nil
+}
+
 // migrate1to2 adds agentctx symlink at repo root, rewrites CLAUDE.md to
 // relative paths, replaces .claude/commands with relative symlink, adds
 // agentctx to .gitignore, and ensures vault templates are seeded.

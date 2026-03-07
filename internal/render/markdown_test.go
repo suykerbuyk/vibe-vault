@@ -50,7 +50,7 @@ func TestSessionNote_AllFields(t *testing.T) {
 		"tokens_in: 5000",
 		"tokens_out: 2000",
 		"status: completed",
-		"tags: [cortana-session, implementation]",
+		"tags: [vv-session, implementation]",
 		`summary: "Added JWT authentication"`,
 		`previous: "[[2026-02-21-03]]"`,
 		`related: ["[[2026-02-20-01]]"]`,
@@ -98,7 +98,7 @@ func TestSessionNote_MinimalFields(t *testing.T) {
 	if !strings.Contains(out, "# Session") {
 		t.Error("missing title")
 	}
-	if !strings.Contains(out, "tags: [cortana-session]") {
+	if !strings.Contains(out, "tags: [vv-session]") {
 		t.Error("missing default tags")
 	}
 	if !strings.Contains(out, "*vv v0.1.0*") {
@@ -118,8 +118,8 @@ func TestSessionNote_TagRendering(t *testing.T) {
 		tag  string
 		want string
 	}{
-		{"", "tags: [cortana-session]"},
-		{"debugging", "tags: [cortana-session, debugging]"},
+		{"", "tags: [vv-session]"},
+		{"debugging", "tags: [vv-session, debugging]"},
 	}
 	for _, tt := range tests {
 		d := NoteData{Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S", Tag: tt.tag}
@@ -127,6 +127,17 @@ func TestSessionNote_TagRendering(t *testing.T) {
 		if !strings.Contains(out, tt.want) {
 			t.Errorf("tag=%q: want %q in output", tt.tag, tt.want)
 		}
+	}
+}
+
+func TestSessionNote_SessionTagsOverride(t *testing.T) {
+	d := NoteData{
+		Date: "2026-01-01", Project: "p", Domain: "d", SessionID: "s", Title: "T", Summary: "S",
+		SessionTags: []string{"custom-tag", "team-x", "debugging"},
+	}
+	out := SessionNote(d)
+	if !strings.Contains(out, "tags: [custom-tag, team-x, debugging]") {
+		t.Errorf("SessionTags override not rendered, got: %s", extractLine(out, "tags:"))
 	}
 }
 

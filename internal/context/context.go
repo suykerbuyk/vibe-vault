@@ -106,6 +106,14 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 		})
 	}
 
+	// Write project config overlay template
+	projCfgPath := filepath.Join(agentctx, "config.toml")
+	cfgAction := safeWrite(projCfgPath, config.ProjectConfigTemplate(), opts.Force)
+	result.Actions = append(result.Actions, FileAction{
+		Path:   filepath.Join("Projects", project, "agentctx", "config.toml"),
+		Action: cfgAction,
+	})
+
 	// Write .version file
 	vf := newVersionFile(LatestSchemaVersion)
 	if err := WriteVersion(agentctx, vf); err != nil {

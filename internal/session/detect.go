@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/sanitize"
 )
 
 // Info holds detected session metadata.
@@ -138,6 +139,12 @@ func detectDomain(cwd string, cfg config.Config) string {
 // TitleFromFirstMessage generates a session title from the first user message.
 // Falls back to a generic title if the message is too short or looks trivial.
 func TitleFromFirstMessage(firstMsg string) string {
+	if firstMsg == "" {
+		return "Session"
+	}
+
+	// Strip XML tags — commands arrive as <command-message>wrap</command-message>
+	firstMsg = sanitize.StripTags(firstMsg)
 	if firstMsg == "" {
 		return "Session"
 	}

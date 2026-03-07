@@ -67,6 +67,7 @@ type NoteData struct {
 	EstimatedCostUSD    float64  // estimated session cost in USD
 	ToolEffectiveness   string   // rendered tool effectiveness section (empty = skip)
 	ParentSession       string   // parent entry UUID (non-empty = /continue session)
+	SessionTags         []string // pre-built tag list (e.g. ["vv-session", "implementation"])
 }
 
 // SessionNote renders a full Obsidian markdown note from NoteData.
@@ -145,10 +146,12 @@ func SessionNote(d NoteData) string {
 	if d.EstimatedCostUSD > 0 {
 		b.WriteString(fmt.Sprintf("estimated_cost_usd: %.2f\n", d.EstimatedCostUSD))
 	}
-	if d.Tag != "" {
-		b.WriteString(fmt.Sprintf("tags: [cortana-session, %s]\n", d.Tag))
+	if len(d.SessionTags) > 0 {
+		b.WriteString(fmt.Sprintf("tags: [%s]\n", strings.Join(d.SessionTags, ", ")))
+	} else if d.Tag != "" {
+		b.WriteString(fmt.Sprintf("tags: [vv-session, %s]\n", d.Tag))
 	} else {
-		b.WriteString("tags: [cortana-session]\n")
+		b.WriteString("tags: [vv-session]\n")
 	}
 	b.WriteString(fmt.Sprintf("summary: \"%s\"\n", escapeYAML(d.Summary)))
 	if d.PreviousNote != "" {
