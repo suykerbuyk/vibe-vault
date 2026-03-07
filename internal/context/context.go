@@ -95,6 +95,8 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 		{"iterations.md", func() string { return generateIterations(project) }},
 		{"commands/restart.md", generateRestartMD},
 		{"commands/wrap.md", generateWrapMD},
+		{"commands/license.md", generateLicenseMD},
+		{"commands/makefile.md", generateMakefileMD},
 	}
 	for _, f := range vaultFiles {
 		content := resolveTemplate(cfg.VaultPath, f.rel, vars, f.fallback)
@@ -293,6 +295,8 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 	}{
 		{"restart.md", generateRestartMD},
 		{"wrap.md", generateWrapMD},
+		{"license.md", generateLicenseMD},
+		{"makefile.md", generateMakefileMD},
 	} {
 		content := resolveTemplate(cfg.VaultPath, "commands/"+cmd.name, vars, cmd.fallback)
 		path := filepath.Join(agentctx, "commands", cmd.name)
@@ -686,11 +690,225 @@ Specifically:
   against the session's work — if a task has been implemented, update its
   status to "Done" and move it to tasks/done/
 - Rewrite commit.msg to document all code changes made in this session
+  (symlinked — write once at repo root, vault copy updates automatically)
 - Stage all modified and newly added project files (use git add with explicit
   file paths — never use git add -A or git add .)
 
+Do not add "Co-Authored-By" lines to commit messages or source files.
+
 Do not ask for confirmation — just do the updates, stage the files, show what
 changed, and note that the user should review before committing.
+`
+}
+
+func generateLicenseMD() string {
+	return `Add or update dual MIT/Apache-2.0 licensing for this project.
+
+All rights attributed to: John Suykerbuyk <john@syketech.com> and SykeTech LTD
+
+## Rules
+
+Every step below MUST be idempotent — running this skill repeatedly produces
+the identical result each time.  Never duplicate content, never append to
+existing correct content.
+
+## Step 1: Create/overwrite the single LICENSE file
+
+Write a single ` + "`LICENSE`" + ` file in the project root containing, in order:
+
+1. A preamble explaining dual licensing and the user's choice
+2. ` + "`===`" + ` separator + full MIT license text (copyright line below)
+3. ` + "`===`" + ` separator + full Apache 2.0 license text with copyright appendix
+
+Copyright line (use the current year from the system):
+
+    Copyright (c) YYYY John Suykerbuyk and SykeTech LTD
+
+This file is canonical — always overwrite it entirely so the content matches
+this template exactly.  There should be NO separate ` + "`LICENSE-MIT`" + ` or
+` + "`LICENSE-APACHE`" + ` files; delete them if they exist.
+
+## Step 2: Ask about source-file banners
+
+Prompt the user:
+
+> Should I add a small copyright + SPDX banner to the top of every source
+> file that doesn't already have one?  (y/n)
+
+If the user declines, stop here.
+
+## Step 3: Add banners (idempotent)
+
+### Banner templates by language
+
+**C / C++ / Rust / Go / Java / JS / TS / CSS / SCSS** (line comments):
+` + "```" + `
+// Copyright (c) YYYY John Suykerbuyk and SykeTech LTD
+// SPDX-License-Identifier: MIT OR Apache-2.0
+` + "```" + `
+
+**Python / Ruby / Shell / YAML / Toml / Makefile** (hash comments):
+` + "```" + `
+# Copyright (c) YYYY John Suykerbuyk and SykeTech LTD
+# SPDX-License-Identifier: MIT OR Apache-2.0
+` + "```" + `
+
+**HTML / XML / SVG** (block comments):
+` + "```" + `
+<!-- Copyright (c) YYYY John Suykerbuyk and SykeTech LTD -->
+<!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
+` + "```" + `
+
+**Lua / SQL** (double-dash):
+` + "```" + `
+-- Copyright (c) YYYY John Suykerbuyk and SykeTech LTD
+-- SPDX-License-Identifier: MIT OR Apache-2.0
+` + "```" + `
+
+### File selection
+
+Include:  all source files matching typical extensions for the detected language
+(.h, .cpp, .c, .rs, .go, .py, .js, .ts, .java, .rb, .sh, .lua, .sql, etc.)
+
+Exclude:
+- vendor/, third_party/, node_modules/, target/, build/, dist/
+- prototype/, .git/
+- Generated files (*.pb.go, *_generated.*, etc.)
+- Non-source files (LICENSE, README, Makefile unless it has project logic)
+
+### Idempotency rules
+
+1. If a file already starts with the exact banner (matching comment style and
+   content), skip it — do not modify the file.
+2. If a file has a banner with a **different year** or **different wording**,
+   replace the old banner with the current one (same two lines, in place).
+3. For files with a shebang (#!) on line 1, place the banner on lines 2-3
+   (with a blank line between shebang and banner if not already present).
+4. Always leave exactly one blank line between the banner and the first line
+   of real code.
+
+## Step 4: Validate
+
+1. Confirm LICENSE exists and contains both license texts.
+2. If banners were added, spot-check 2-3 files to confirm correct placement.
+3. Build the project (if a build system exists) to confirm nothing broke.
+4. Run tests (if they exist) to confirm nothing broke.
+
+## Step 5: Report
+
+Summarize:
+- LICENSE file status (created / updated / unchanged)
+- Number of files with banners added / updated / already correct
+- Build + test results
+`
+}
+
+func generateMakefileMD() string {
+	return `Audit or create a Makefile facade for this project's native build system.
+
+## Rules
+
+1. **Discover** the native build system by checking for config files:
+   - CMakeLists.txt -> CMake
+   - Cargo.toml -> Cargo
+   - go.mod -> Go
+   - package.json -> Node (npm/yarn/pnpm)
+   - meson.build -> Meson
+
+2. **Read** any existing Makefile to preserve project-specific targets.
+
+3. **Create or update** a Makefile with these standard targets:
+
+   | Target           | Purpose                          | Safety    |
+   |------------------|----------------------------------|-----------|
+   | make             | Print help (.DEFAULT_GOAL)       | read-only |
+   | make build       | Default build                    | mutates   |
+   | make test        | Unit tests (builds first)        | mutates   |
+   | make integration | Integration tests (builds first) | mutates   |
+   | make install     | Install to PREFIX=~/.local       | mutates   |
+   | make clean       | Remove build artifacts           | mutates   |
+
+   Key constraint: **bare make MUST show help and NEVER mutate.** Use .DEFAULT_GOAL := help.
+
+4. **Validate** by running make and confirming it only prints help (exit 0, no build side effects).
+
+## Adaptation patterns
+
+### CMake
+` + "```makefile" + `
+BUILD_DIR  ?= build
+BUILD_TYPE ?= Release
+PREFIX     ?= $(HOME)/.local
+build:
+	cmake -B $(BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DCMAKE_INSTALL_PREFIX=$(PREFIX)
+	ninja -C $(BUILD_DIR)
+test: build
+	./$(BUILD_DIR)/*_tests "~[integration]~[benchmark]"
+integration: build
+	./$(BUILD_DIR)/*_tests "[integration]"
+install: build
+	cmake --install $(BUILD_DIR)
+clean:
+	rm -rf $(BUILD_DIR)
+` + "```" + `
+
+### Cargo
+` + "```makefile" + `
+build:
+	cargo build --release
+test:
+	cargo test
+integration:
+	cargo test -- --ignored
+install:
+	cargo install --path .
+clean:
+	cargo clean
+` + "```" + `
+
+### Go
+` + "```makefile" + `
+build:
+	go build ./...
+test:
+	go test ./...
+integration:
+	go test -tags=integration ./...
+install:
+	go install ./...
+clean:
+	go clean
+` + "```" + `
+
+### Node (npm)
+` + "```makefile" + `
+build:
+	npm run build
+test:
+	npm test
+install:
+	npm ci
+clean:
+	rm -rf node_modules dist
+` + "```" + `
+
+### Meson
+` + "```makefile" + `
+BUILD_DIR ?= builddir
+build:
+	meson setup $(BUILD_DIR) --buildtype=release
+	ninja -C $(BUILD_DIR)
+test: build
+	meson test -C $(BUILD_DIR)
+install: build
+	meson install -C $(BUILD_DIR)
+clean:
+	rm -rf $(BUILD_DIR)
+` + "```" + `
+
+## Help target template
+
+The help target should list all targets, overridable variables, and include a "Quick start" recommendation pointing the user to the most common workflow (usually make build && make test).
 `
 }
 

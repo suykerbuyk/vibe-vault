@@ -58,6 +58,8 @@ func EnsureVaultTemplates(vaultPath string) []FileAction {
 		{"iterations.md", vaultTemplateIterations},
 		{"commands/restart.md", vaultTemplateRestart},
 		{"commands/wrap.md", vaultTemplateWrap},
+		{"commands/license.md", vaultTemplateLicense},
+		{"commands/makefile.md", vaultTemplateMakefile},
 	}
 
 	var actions []FileAction
@@ -109,3 +111,7 @@ var vaultTemplateIterations = generateIterations("{{PROJECT}}")
 var vaultTemplateRestart = generateRestartMD()
 
 var vaultTemplateWrap = generateWrapMD()
+
+var vaultTemplateLicense = generateLicenseMD()
+
+var vaultTemplateMakefile = generateMakefileMD()
