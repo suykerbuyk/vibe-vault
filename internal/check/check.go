@@ -250,6 +250,52 @@ func checkHookFile(path string) Result {
 	return Result{Name: "hook", Status: Fail, Detail: "vv hook not found in " + config.CompressHome(path)}
 }
 
+// CheckAgentctxSchema checks the agentctx schema version for a project.
+// Returns nil if no agentctx directory exists.
+func CheckAgentctxSchema(vaultPath, project string, latestVersion int) *Result {
+	agentctxDir := filepath.Join(vaultPath, "Projects", project, "agentctx")
+	if _, err := os.Stat(agentctxDir); os.IsNotExist(err) {
+		return nil
+	}
+
+	versionPath := filepath.Join(agentctxDir, ".version")
+	data, err := os.ReadFile(versionPath)
+	if err != nil {
+		// No .version file means schema v0
+		return &Result{
+			Name:   "agentctx",
+			Status: Warn,
+			Detail: fmt.Sprintf("%s: schema v0 (latest: v%d) — run `vv context sync`", project, latestVersion),
+		}
+	}
+
+	// Parse just the schema_version field
+	version := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "schema_version") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &version)
+			}
+		}
+	}
+
+	if version >= latestVersion {
+		return &Result{
+			Name:   "agentctx",
+			Status: Pass,
+			Detail: fmt.Sprintf("%s: schema v%d (current)", project, version),
+		}
+	}
+
+	return &Result{
+		Name:   "agentctx",
+		Status: Warn,
+		Detail: fmt.Sprintf("%s: schema v%d (latest: v%d) — run `vv context sync`", project, version, latestVersion),
+	}
+}
+
 // Run executes all checks against the given config and returns a report.
 func Run(cfg config.Config) Report {
 	var results []Result

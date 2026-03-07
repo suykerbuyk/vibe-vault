@@ -214,7 +214,7 @@ var expectedTerminal = map[string]string{
 
 	"context": "vv context \u2014 manage vault-resident AI context files\n" +
 		"\n" +
-		"Usage: vv context [init | migrate]\n" +
+		"Usage: vv context [init | migrate | sync]\n" +
 		"\n" +
 		"Manages AI workflow context files (resume, iterations, tasks) that live\n" +
 		"in the Obsidian vault rather than as untracked repo-local files. This\n" +
@@ -222,7 +222,8 @@ var expectedTerminal = map[string]string{
 		"\n" +
 		"Subcommands:\n" +
 		"  vv context init      Scaffold vault-resident context for current project\n" +
-		"  vv context migrate   Copy existing local files to vault\n",
+		"  vv context migrate   Copy existing local files to vault\n" +
+		"  vv context sync      Migrate schema and propagate shared commands\n",
 
 	"inject": "vv inject \u2014 output session-start context payload\n" +
 		"\n" +

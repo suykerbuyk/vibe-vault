@@ -1,0 +1,45 @@
+.TH VV-CONTEXT-SYNC 1 "2026-03-06" "vv v0.7.1-dirty" "Vibe-Vault Manual"
+.SH NAME
+vv-context-sync \- migrate schema and propagate shared commands
+.SH SYNOPSIS
+.B vv context sync [\-\-project <name>] [\-\-all] [\-\-dry\-run] [\-\-force]
+.SH DESCRIPTION
+Runs schema migrations and propagates shared commands for one or all
+projects.
+.PP
+Schema migrations upgrade the agentctx directory structure to the latest
+version. For example, migrating from v0 to v2 adds a .version file,
+creates an agentctx symlink at the repo root, rewrites CLAUDE.md to
+use relative paths, and replaces .claude/commands with a relative
+symlink.
+.PP
+Shared command propagation copies new .md files from
+Templates/agentctx/commands/ to each project's agentctx/commands/.
+Existing project commands are never overwritten.
+.PP
+In \-\-all mode, only vault\-side operations are performed (no repo\-side
+symlinks). Run from each repo root without \-\-all for repo\-side updates.
+.SH OPTIONS
+.TP
+.B \-\-project <name>
+Override auto\-detected project name
+.TP
+.B \-\-all
+Sync all projects with agentctx (vault\-only operations)
+.TP
+.B \-\-dry\-run
+Report changes without modifying any files
+.TP
+.B \-\-force
+Force overwrite existing files during migration
+.SH EXAMPLES
+.nf
+vv context sync                       Sync current project
+vv context sync \-\-dry\-run             Preview changes
+vv context sync \-\-all                 Sync all projects (vault\-only)
+vv context sync \-\-project myproject   Sync a specific project
+.fi
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-context (1),
+.BR vv\-context\-init (1)

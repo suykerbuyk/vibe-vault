@@ -274,12 +274,13 @@ func TestInit_ClaudeMDContent(t *testing.T) {
 	}
 	content := string(data)
 
-	// Thin pointer — should reference agentctx path
+	// Thin pointer — should reference agentctx (relative, no absolute paths)
 	if !strings.Contains(content, "agentctx") {
 		t.Error("CLAUDE.md missing agentctx reference")
 	}
-	if !strings.Contains(content, "myproject") {
-		t.Error("CLAUDE.md missing project name")
+	// Should NOT contain absolute vault path
+	if strings.Contains(content, vault) {
+		t.Error("CLAUDE.md contains absolute vault path")
 	}
 	// Should NOT contain full behavioral rules (those are in agentctx/workflow.md)
 	if strings.Contains(content, "Pair Programming") {
@@ -321,14 +322,14 @@ func TestInit_GitignoreIdempotent(t *testing.T) {
 	cfg := testConfig(vault)
 
 	giPath := filepath.Join(cwd, ".gitignore")
-	os.WriteFile(giPath, []byte("CLAUDE.md\ncommit.msg\n"), 0o644)
+	os.WriteFile(giPath, []byte("CLAUDE.md\ncommit.msg\nagentctx\n"), 0o644)
 
 	result, err := Init(cfg, cwd, Opts{Project: "myproject"})
 	if err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// Should not have gitignore UPDATE action
+	// Should not have gitignore UPDATE action when all entries already present
 	for _, a := range result.Actions {
 		if a.Path == ".gitignore" && a.Action == "UPDATE" {
 			t.Error(".gitignore should not be updated when entries already present")
@@ -644,5 +645,117 @@ func TestMigrate_PreservesOriginals(t *testing.T) {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			t.Errorf("original deleted: %s", path)
 		}
+	}
+}
+
+// --- Phase 2 tests: agentctx symlink and relative paths ---
+
+func TestInit_AgentctxSymlink(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	_, err := Init(cfg, cwd, Opts{Project: "myproject"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	linkPath := filepath.Join(cwd, "agentctx")
+	info, err := os.Lstat(linkPath)
+	if err != nil {
+		t.Fatalf("agentctx symlink not created: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("agentctx should be a symlink")
+	}
+
+	// Should resolve to vault agentctx path
+	target, err := filepath.EvalSymlinks(linkPath)
+	if err != nil {
+		t.Fatalf("eval symlink: %v", err)
+	}
+	expected := filepath.Join(vault, "Projects", "myproject", "agentctx")
+	if target != expected {
+		t.Errorf("agentctx symlink target = %q, want %q", target, expected)
+	}
+}
+
+func TestInit_ClaudeMDNoAbsolutePath(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	_, err := Init(cfg, cwd, Opts{Project: "myproject"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(cwd, "CLAUDE.md"))
+	content := string(data)
+
+	if strings.Contains(content, vault) {
+		t.Error("CLAUDE.md contains absolute vault path")
+	}
+	if !strings.Contains(content, "agentctx/") {
+		t.Error("CLAUDE.md missing relative agentctx reference")
+	}
+}
+
+func TestInit_CommandsRelativeSymlink(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	_, err := Init(cfg, cwd, Opts{Project: "myproject"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	cmdsPath := filepath.Join(cwd, ".claude", "commands")
+	target, err := os.Readlink(cmdsPath)
+	if err != nil {
+		t.Fatalf("readlink .claude/commands: %v", err)
+	}
+	if target != filepath.Join("..", "agentctx", "commands") {
+		t.Errorf("commands symlink target = %q, want relative ../agentctx/commands", target)
+	}
+}
+
+func TestInit_GitignoreAgentctx(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	_, err := Init(cfg, cwd, Opts{Project: "myproject"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(cwd, ".gitignore"))
+	if !strings.Contains(string(data), "agentctx") {
+		t.Error(".gitignore missing agentctx entry")
+	}
+}
+
+func TestInit_VersionFile(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	_, err := Init(cfg, cwd, Opts{Project: "myproject"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	agentctxPath := filepath.Join(vault, "Projects", "myproject", "agentctx")
+	vf, err := ReadVersion(agentctxPath)
+	if err != nil {
+		t.Fatalf("ReadVersion: %v", err)
+	}
+	if vf.SchemaVersion != LatestSchemaVersion {
+		t.Errorf("SchemaVersion = %d, want %d", vf.SchemaVersion, LatestSchemaVersion)
+	}
+	if vf.CreatedBy == "" {
+		t.Error("CreatedBy is empty")
 	}
 }

@@ -240,6 +240,44 @@ func runContext() {
 			}
 			fmt.Println("\nLocal originals preserved — remove manually after verifying.")
 			return
+		case "sync":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdContextSync))
+				return
+			}
+			cfg := mustLoadConfig()
+			cwd, err := os.Getwd()
+			if err != nil {
+				fatal("getwd: %v", err)
+			}
+			syncOpts := vvcontext.SyncOpts{
+				Project: flagValue(args[1:], "--project"),
+				All:     hasFlag(args[1:], "--all"),
+				DryRun:  hasFlag(args[1:], "--dry-run"),
+				Force:   hasFlag(args[1:], "--force"),
+			}
+			syncResult, err := vvcontext.Sync(cfg, cwd, syncOpts)
+			if err != nil {
+				fatal("%v", err)
+			}
+			for _, psr := range syncResult.Projects {
+				if psr.FromVersion == psr.ToVersion && len(psr.Actions) == 0 {
+					fmt.Printf("%s: schema v%d (current)\n", psr.Project, psr.ToVersion)
+					continue
+				}
+				if psr.FromVersion != psr.ToVersion {
+					fmt.Printf("%s: schema v%d → v%d\n", psr.Project, psr.FromVersion, psr.ToVersion)
+				} else {
+					fmt.Printf("%s:\n", psr.Project)
+				}
+				for _, a := range psr.Actions {
+					fmt.Printf("  %-8s %s\n", a.Action, a.Path)
+				}
+				if psr.RepoSkipped {
+					fmt.Printf("  note: %s\n", psr.RepoNote)
+				}
+			}
+			return
 		}
 	}
 
@@ -292,6 +330,18 @@ func runCheck() {
 
 	cfg := mustLoadConfig()
 	report := check.Run(cfg)
+
+	// Add agentctx schema check for current project (if detectable)
+	cwd, err := os.Getwd()
+	if err == nil {
+		project := session.DetectProject(cwd)
+		if project != "_unknown" {
+			if result := check.CheckAgentctxSchema(cfg.VaultPath, project, vvcontext.LatestSchemaVersion); result != nil {
+				report.Results = append(report.Results, *result)
+			}
+		}
+	}
+
 	fmt.Print(report.Format())
 	if report.HasFailures() {
 		os.Exit(1)

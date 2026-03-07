@@ -292,11 +292,23 @@ Then rewrites the repo-side CLAUDE.md to point at the vault and replaces
 local commands with symlinks. Local originals are preserved — remove them
 manually after verifying the migration.
 
+### Sync schema and shared commands
+
+After upgrading `vv`, existing projects may have an older agentctx schema.
+Sync brings them up to date and propagates any new shared commands from
+`Templates/agentctx/commands/`:
+
+```bash
+vv context sync                    # sync current project
+vv context sync --all              # sync all projects (vault-only)
+vv context sync --dry-run          # preview changes
+```
+
 ### How it works after setup
 
 - `/restart` reads `resume.md` from the vault's `agentctx/` directory
 - `/wrap` updates vault-side files (resume, tasks) in `agentctx/`
-- `CLAUDE.md` in the repo is a 5-line pointer to the agentctx path
+- `CLAUDE.md` in the repo is a 5-line pointer referencing `agentctx/`
 - `agentctx/workflow.md` has behavioral rules (loaded via CLAUDE.md → workflow.md chain)
 - Everything is searchable in Obsidian alongside session notes
 
@@ -359,6 +371,7 @@ vv reprocess --project myproject   # one project only
 | Reprocess notes | `vv reprocess` |
 | Init project context | `vv context init` |
 | Migrate local context | `vv context migrate` |
+| Sync schema/commands | `vv context sync` |
 | Process one file | `vv process path/to/transcript.jsonl` |
 | Per-command help | `vv <command> --help` |
 | Man pages | `man vv` or `man vv-<command>` |

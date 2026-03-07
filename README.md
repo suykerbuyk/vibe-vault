@@ -294,7 +294,7 @@ deterministic heuristics rather than embeddings.
 | `vv friction [--project X]` | Show friction analysis and correction patterns |
 | `vv trends [--project X]` | Show metric trends over time |
 | `vv inject [--project X]` | Output session-start context payload |
-| `vv context [init \| migrate]` | Manage vault-resident AI context files |
+| `vv context [init \| migrate \| sync]` | Manage vault-resident AI context files |
 | `vv version` | Print version |
 
 ### Common Workflows
@@ -349,6 +349,9 @@ vv inject --max-tokens 500                   # compact output
 vv context init                       # scaffold agentctx/ from current directory
 vv context init --project myproject   # specify project name
 vv context migrate                    # copy existing RESUME.md/HISTORY.md/tasks/commands to vault
+vv context sync                       # run schema migrations + propagate shared commands
+vv context sync --all                 # sync all projects (vault-only operations)
+vv context sync --dry-run             # preview changes without modifying files
 ```
 
 **Diagnose issues:**
@@ -620,11 +623,12 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 ### Test Suite
 
-**507 tests** across 35 test files + **1 integration test** with 20
+**555 tests** across 48 test files + **1 integration test** with 22
 subtests. The integration test exercises the full pipeline:
 `init` → `process` → `index` → `knowledge injection` → `stats` →
 `backfill` → `archive` → `checkpoint lifecycle` → `friction` →
-`trends` → `inject` → `context init/migrate` → `reprocess`.
+`trends` → `inject` → `context init/migrate` → `context sync` →
+`export` → `reprocess`.
 
 ```bash
 make test          # unit tests only (~0.5s)

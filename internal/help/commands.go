@@ -412,7 +412,7 @@ var CmdContext = Command{
 	Name:     "context",
 	Synopsis: "manage vault-resident AI context files",
 	Brief:    "Manage vault-resident AI context",
-	Usage:      "vv context [init | migrate]",
+	Usage:      "vv context [init | migrate | sync]",
 	TableUsage: "vv context [init | ...]",
 	Description: `Manages AI workflow context files (resume, iterations, tasks) that live
 in the Obsidian vault rather than as untracked repo-local files. This
@@ -420,8 +420,9 @@ makes context portable, searchable, and visible to Obsidian.
 
 Subcommands:
   vv context init      Scaffold vault-resident context for current project
-  vv context migrate   Copy existing local files to vault`,
-	SeeAlso: []string{"vv(1)", "vv-context-init(1)", "vv-context-migrate(1)"},
+  vv context migrate   Copy existing local files to vault
+  vv context sync      Migrate schema and propagate shared commands`,
+	SeeAlso: []string{"vv(1)", "vv-context-init(1)", "vv-context-migrate(1)", "vv-context-sync(1)"},
 }
 
 var CmdContextInit = Command{
@@ -486,6 +487,41 @@ exist are skipped unless --force is specified.`,
 	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-context-init(1)"},
 }
 
+var CmdContextSync = Command{
+	Name:     "context sync",
+	Synopsis: "migrate schema and propagate shared commands",
+	Brief:    "Migrate schema and propagate shared commands",
+	Usage:    "vv context sync [--project <name>] [--all] [--dry-run] [--force]",
+	Flags: []Flag{
+		{Name: "--project <name>", Desc: "Override auto-detected project name"},
+		{Name: "--all", Desc: "Sync all projects with agentctx (vault-only operations)"},
+		{Name: "--dry-run", Desc: "Report changes without modifying any files"},
+		{Name: "--force", Desc: "Force overwrite existing files during migration"},
+	},
+	Description: `Runs schema migrations and propagates shared commands for one or all
+projects.
+
+Schema migrations upgrade the agentctx directory structure to the latest
+version. For example, migrating from v0 to v2 adds a .version file,
+creates an agentctx symlink at the repo root, rewrites CLAUDE.md to
+use relative paths, and replaces .claude/commands with a relative
+symlink.
+
+Shared command propagation copies new .md files from
+Templates/agentctx/commands/ to each project's agentctx/commands/.
+Existing project commands are never overwritten.
+
+In --all mode, only vault-side operations are performed (no repo-side
+symlinks). Run from each repo root without --all for repo-side updates.`,
+	Examples: []string{
+		"vv context sync                       Sync current project",
+		"vv context sync --dry-run             Preview changes",
+		"vv context sync --all                 Sync all projects (vault-only)",
+		"vv context sync --project myproject   Sync a specific project",
+	},
+	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-context-init(1)"},
+}
+
 // HookSubcommands is the ordered list of hook sub-subcommands.
 var HookSubcommands = []Command{
 	CmdHookInstall,
@@ -496,6 +532,7 @@ var HookSubcommands = []Command{
 var ContextSubcommands = []Command{
 	CmdContextInit,
 	CmdContextMigrate,
+	CmdContextSync,
 }
 
 // Subcommands is the ordered list of all subcommands.

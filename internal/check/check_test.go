@@ -279,6 +279,49 @@ func TestRun_Integration(t *testing.T) {
 	}
 }
 
+func TestCheckAgentctxSchema_Current(t *testing.T) {
+	vault := t.TempDir()
+	project := "myproject"
+	agentctxDir := filepath.Join(vault, "Projects", project, "agentctx")
+	os.MkdirAll(agentctxDir, 0o755)
+	os.WriteFile(filepath.Join(agentctxDir, ".version"), []byte("schema_version = 2\n"), 0o644)
+
+	r := CheckAgentctxSchema(vault, project, 2)
+	if r == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if r.Status != Pass {
+		t.Errorf("expected Pass, got %s: %s", r.Status, r.Detail)
+	}
+}
+
+func TestCheckAgentctxSchema_Outdated(t *testing.T) {
+	vault := t.TempDir()
+	project := "myproject"
+	agentctxDir := filepath.Join(vault, "Projects", project, "agentctx")
+	os.MkdirAll(agentctxDir, 0o755)
+	// No .version file = schema v0
+
+	r := CheckAgentctxSchema(vault, project, 2)
+	if r == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if r.Status != Warn {
+		t.Errorf("expected Warn, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "vv context sync") {
+		t.Errorf("expected detail to suggest vv context sync, got: %s", r.Detail)
+	}
+}
+
+func TestCheckAgentctxSchema_NoAgentctx(t *testing.T) {
+	vault := t.TempDir()
+	r := CheckAgentctxSchema(vault, "nonexistent", 2)
+	if r != nil {
+		t.Errorf("expected nil result for missing agentctx, got %+v", r)
+	}
+}
+
 func TestStatus_String(t *testing.T) {
 	tests := []struct {
 		s    Status

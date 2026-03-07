@@ -889,10 +889,40 @@ This is archived and should be ignored.
 			t.Error("wrap.md not readable through .claude/commands symlink")
 		}
 
-		// .gitignore contains expected entries
+		// .gitignore contains expected entries (including agentctx)
 		gitignoreContent := readFile(t, filepath.Join(repoCwd, ".gitignore"))
 		assertContains(t, gitignoreContent, "CLAUDE.md", ".gitignore contains CLAUDE.md")
 		assertContains(t, gitignoreContent, "commit.msg", ".gitignore contains commit.msg")
+		assertContains(t, gitignoreContent, "agentctx", ".gitignore contains agentctx")
+
+		// Phase 1: .version file created at latest schema
+		if !fileExists(filepath.Join(agentctxDir, ".version")) {
+			t.Error("vault agentctx/.version not created")
+		} else {
+			versionContent := readFile(t, filepath.Join(agentctxDir, ".version"))
+			assertContains(t, versionContent, "schema_version = 2", ".version has latest schema")
+		}
+
+		// Phase 2: agentctx symlink at repo root
+		if !isSymlink(filepath.Join(repoCwd, "agentctx")) {
+			t.Error("agentctx symlink not created at repo root")
+		}
+
+		// Phase 2: CLAUDE.md has no absolute path
+		claudeContent := readFile(t, filepath.Join(repoCwd, "CLAUDE.md"))
+		assertNotContains(t, claudeContent, vaultPath, "CLAUDE.md should not contain absolute vault path")
+		assertContains(t, claudeContent, "agentctx/", "CLAUDE.md should contain relative agentctx reference")
+
+		// Phase 2: .claude/commands is a relative symlink
+		cmdsTarget, _ := os.Readlink(filepath.Join(repoCwd, ".claude", "commands"))
+		if cmdsTarget != filepath.Join("..", "agentctx", "commands") {
+			t.Errorf(".claude/commands target = %q, want ../agentctx/commands", cmdsTarget)
+		}
+
+		// Phase 3: Templates/agentctx/ seeded in vault
+		if !fileExists(filepath.Join(vaultPath, "Templates", "agentctx", "README.md")) {
+			t.Error("Templates/agentctx/README.md not seeded")
+		}
 
 		// --- Section 2: context init idempotent re-run ---
 		stdout2 := mustRunVVInDir(t, env, repoCwd, "context", "init", "--project", "ctx-project")
@@ -1007,6 +1037,76 @@ This is archived and should be ignored.
 
 		_, migrateHelpStderr, _ := runVV(t, env, "context", "migrate", "--help")
 		assertContains(t, migrateHelpStderr, "migrate", "context migrate help text")
+	})
+
+	// 10e2. context sync
+	t.Run("context_sync", func(t *testing.T) {
+		syncCwd := t.TempDir()
+
+		// Create a legacy agentctx (no .version) to test migration
+		legacyProject := "sync-legacy"
+		legacyAgentctx := filepath.Join(vaultPath, "Projects", legacyProject, "agentctx")
+		os.MkdirAll(filepath.Join(legacyAgentctx, "commands"), 0o755)
+		os.WriteFile(filepath.Join(legacyAgentctx, "resume.md"), []byte("# Resume"), 0o644)
+
+		// Run sync — should migrate 0→2
+		stdout := mustRunVVInDir(t, env, syncCwd, "context", "sync", "--project", legacyProject)
+		assertContains(t, stdout, "v0", "sync shows from version")
+		assertContains(t, stdout, "v2", "sync shows to version")
+
+		// .version should be at latest
+		versionContent := readFile(t, filepath.Join(legacyAgentctx, ".version"))
+		assertContains(t, versionContent, "schema_version = 2", ".version at latest after sync")
+
+		// agentctx symlink at repo root
+		if !isSymlink(filepath.Join(syncCwd, "agentctx")) {
+			t.Error("agentctx symlink not created by sync")
+		}
+
+		// CLAUDE.md has no absolute path
+		claudeContent := readFile(t, filepath.Join(syncCwd, "CLAUDE.md"))
+		assertNotContains(t, claudeContent, vaultPath, "CLAUDE.md should not contain absolute path after sync")
+
+		// .claude/commands is relative symlink
+		cmdsTarget, _ := os.Readlink(filepath.Join(syncCwd, ".claude", "commands"))
+		if cmdsTarget != filepath.Join("..", "agentctx", "commands") {
+			t.Errorf(".claude/commands target = %q after sync", cmdsTarget)
+		}
+
+		// Add a shared command to Templates, run sync again → propagated
+		tmplCmds := filepath.Join(vaultPath, "Templates", "agentctx", "commands")
+		os.MkdirAll(tmplCmds, 0o755)
+		writeFixture(t, tmplCmds, "shared.md", "# Shared Command")
+
+		syncStdout2 := mustRunVVInDir(t, env, syncCwd, "context", "sync", "--project", legacyProject)
+		assertContains(t, syncStdout2, legacyProject, "second sync shows project name")
+
+		// Shared command should be propagated
+		if !fileExists(filepath.Join(legacyAgentctx, "commands", "shared.md")) {
+			t.Error("shared command not propagated by sync")
+		} else {
+			content := readFile(t, filepath.Join(legacyAgentctx, "commands", "shared.md"))
+			assertContains(t, content, "Shared Command", "propagated command content")
+		}
+
+		// --dry-run should not modify files
+		writeFixture(t, tmplCmds, "drytest.md", "# Dry Test")
+		mustRunVVInDir(t, env, syncCwd, "context", "sync", "--project", legacyProject, "--dry-run")
+		if fileExists(filepath.Join(legacyAgentctx, "commands", "drytest.md")) {
+			t.Error("dry-run should not create files")
+		}
+
+		// Third sync propagates drytest.md (dry-run didn't create it)
+		syncStdout3 := mustRunVVInDir(t, env, syncCwd, "context", "sync", "--project", legacyProject)
+		assertContains(t, syncStdout3, legacyProject, "third sync shows project name")
+
+		// Fourth sync — truly idempotent, no changes
+		syncStdout4 := mustRunVVInDir(t, env, syncCwd, "context", "sync", "--project", legacyProject)
+		assertContains(t, syncStdout4, "current", "idempotent sync shows current")
+
+		// Help flag
+		_, syncHelpStderr, _ := runVV(t, env, "context", "sync", "--help")
+		assertContains(t, syncHelpStderr, "sync", "context sync help text")
 	})
 
 	// 10f. export
