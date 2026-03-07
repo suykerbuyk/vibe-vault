@@ -249,7 +249,7 @@ func migrate1to2(ctx MigrationContext) ([]FileAction, error) {
 	actions = append(actions, FileAction{Path: ".claude/commands", Action: "UPDATE"})
 
 	// 4. Add agentctx to .gitignore
-	giAction, err := gitignoreEnsure(filepath.Join(ctx.RepoPath, ".gitignore"), "agentctx")
+	giAction, err := gitignoreEnsure(filepath.Join(ctx.RepoPath, ".gitignore"), "/agentctx")
 	if err != nil {
 		return actions, err
 	}

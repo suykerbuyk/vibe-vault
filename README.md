@@ -432,7 +432,7 @@ vibe-vault/
 │   ├── session-index.json      # Session dedup + cross-linking index
 │   └── archive/                # zstd-compressed transcript copies
 ├── scripts/                    # PII pre-push hook, install script
-└── docs/                       # Architecture, examples, troubleshooting
+└── doc/                        # Architecture, examples, troubleshooting
 ```
 
 Session notes use the naming convention `YYYY-MM-DD-NN.md` where `NN` is the

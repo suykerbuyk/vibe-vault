@@ -35,8 +35,16 @@ recent git history.
 - Point at logs, errors, failing tests - then resolve them
 - Zero context switching required from the user
 
+## Document Conventions
+
+- **resume.md** is a thin gateway — current state, open threads, pointers
+- **doc/** holds stable project reference (architecture, design, testing) — source-controlled
+- **iterations.md** is the append-only archive — completed work details go here
+- Never add file inventories, module tables, or design decisions to resume.md
+
 ## Core Principles
 
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
+- **Definition of Done**: AI can never declare a task as "done," only the human can define done.

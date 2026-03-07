@@ -126,6 +126,13 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 	action := safeWrite(claudeMDPath, generateClaudeMD(), opts.Force)
 	result.Actions = append(result.Actions, FileAction{Path: "CLAUDE.md", Action: action})
 
+	// Repo-side commit.msg → symlink through agentctx
+	commitMsgVault := filepath.Join(agentctx, "commit.msg")
+	safeWrite(commitMsgVault, "", false) // ensure vault-side file exists
+	commitMsgLink := filepath.Join(cwd, "commit.msg")
+	cmAction := safeSymlink(commitMsgLink, filepath.Join("agentctx", "commit.msg"), opts.Force)
+	result.Actions = append(result.Actions, FileAction{Path: "commit.msg", Action: cmAction})
+
 	// Repo-side .claude/commands/ → relative symlink through agentctx
 	dotClaude := filepath.Join(cwd, ".claude")
 	if err := os.MkdirAll(dotClaude, 0o755); err != nil {
@@ -140,7 +147,7 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 	})
 
 	// .gitignore
-	for _, entry := range []string{"CLAUDE.md", "commit.msg", "agentctx"} {
+	for _, entry := range []string{"/CLAUDE.md", "/commit.msg", "/agentctx"} {
 		giAction, err := gitignoreEnsure(filepath.Join(cwd, ".gitignore"), entry)
 		if err != nil {
 			return nil, err
@@ -320,8 +327,15 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 		Action: "UPDATE",
 	})
 
+	// Repo-side commit.msg → symlink through agentctx
+	commitMsgVault := filepath.Join(agentctx, "commit.msg")
+	safeWrite(commitMsgVault, "", false) // ensure vault-side file exists
+	commitMsgLink := filepath.Join(cwd, "commit.msg")
+	safeSymlink(commitMsgLink, filepath.Join("agentctx", "commit.msg"), true)
+	result.Actions = append(result.Actions, FileAction{Path: "commit.msg", Action: "UPDATE"})
+
 	// .gitignore
-	for _, entry := range []string{"CLAUDE.md", "commit.msg", "agentctx"} {
+	for _, entry := range []string{"/CLAUDE.md", "/commit.msg", "/agentctx"} {
 		giAction, err := gitignoreEnsure(filepath.Join(cwd, ".gitignore"), entry)
 		if err != nil {
 			return nil, err
@@ -412,8 +426,10 @@ func gitignoreEnsure(giPath, entry string) (string, error) {
 	}
 
 	lines := strings.Split(string(data), "\n")
+	bare := strings.TrimPrefix(entry, "/")
 	for _, line := range lines {
-		if strings.TrimSpace(line) == entry {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == entry || trimmed == bare {
 			return "", nil
 		}
 	}
@@ -527,17 +543,18 @@ func generateWorkflowMD(project string) string {
 
 ## Files
 
-- **resume.md** — project state, architecture, design decisions
-- **iterations.md** — iteration narratives and project history
+- **resume.md** — current project state, open threads, navigation (thin gateway)
+- **iterations.md** — iteration narratives and project history (append-only archive)
 - **tasks/** — active tasks; **tasks/done/** — completed
 - **commands/** — slash commands (/restart, /wrap)
+- **doc/** — stable project reference: architecture, design decisions, testing (source-controlled)
 
 ## Workflow Rules
 
 - **Never commit without explicit human permission.** Stage files and
   update commit.msg freely, but the actual git commit requires human approval.
-- **Keep commit.msg in sync.** Always write commit.msg to both the repo
-  root and the vault agentctx/ directory.
+- **commit.msg is symlinked.** Write it once at the repo root — it
+  resolves to the vault agentctx/ copy automatically.
 - **Never commit AI context files.** CLAUDE.md, commit.msg, and anything
   under .claude/ are local-only.
 - **Git commit messages are the project's history.** Write them to be
@@ -616,7 +633,8 @@ Never jump to coding short-term fixes without investigation.
 - **Minimal Impact**: Changes should only touch what's necessary
 - **Test Coverage**: Ensure close to 80%% unit test coverage for code changes
 
-Read resume.md for current project state, architecture, and open threads.
+Read resume.md for current project state and open threads. Consult doc/ files
+for stable reference material (architecture, design decisions, test inventory).
 `, project)
 }
 
@@ -626,11 +644,12 @@ func generateRestartMD() string {
 Read the following files to restore full project context:
 
 1. agentctx/workflow.md — behavioral rules and workflow standards
-2. agentctx/resume.md — current project state, architecture, decisions
-3. agentctx/tasks/ — active task files (skip tasks/done/)
+2. agentctx/resume.md — current project state and open threads (thin gateway)
+3. agentctx/tasks/ — active task files, if any exist (skip tasks/done/)
 4. Run ` + "`vv inject`" + ` via Bash to load live vault context (recent sessions,
    open threads, decisions, friction trends, knowledge). Include the
    full output verbatim in your context — do not summarize it.
+5. doc/*.md — stable reference (architecture, design, testing) — read on demand when needed
 
 After reading, briefly confirm what you loaded (test count, open tasks,
 recent session activity from inject, what was last worked on) and ask
@@ -639,26 +658,26 @@ what to work on.
 }
 
 func generateWrapMD() string {
-	return `Update resume.md and its dependent documents to fully reflect the current
-state of the project. These files serve as the single source of truth for
-restoring AI thread context and resuming work on this codebase.
+	return `Update resume.md and its dependent documents to reflect the current state.
+
+resume.md is a THIN GATEWAY — not a diary. Keep it focused on current state,
+open threads, and pointers. Stable reference material belongs in doc/ under
+source control. Completed work details belong in iterations.md only.
 
 Specifically:
 - Ensure all code compiles without errors
 - Ensure all unit and integration tests pass
-- Read the current resume.md and compare against the actual codebase state
-  (files, tests, architecture)
-- Update all sections that are stale: file inventory, test counts, module
-  descriptions, architecture diagrams, design decisions, and test results
+- Update resume.md: current state (test count, iteration count), open threads.
+  Do NOT add file inventories, architecture diagrams, design decisions, or
+  module tables to resume.md — those belong in doc/ files
+- If stable project documentation changed (architecture, design decisions,
+  test structure), update the relevant doc/ file
 - Append a new iteration narrative to iterations.md describing what changed
   in this session and why (past tense, technical detail)
-- Add a corresponding summary row to the Project History table in resume.md
 - Retire completed tasks: check each file in agentctx/tasks/ (not tasks/done/)
   against the session's work — if a task has been implemented, update its
   status to "Done" and move it to tasks/done/
-- Rewrite commit.msg to document all code changes made in this session.
-  Write it to both the repo root and the vault agentctx/ directory so
-  they stay in sync
+- Rewrite commit.msg to document all code changes made in this session
 - Stage all modified and newly added project files (use git add with explicit
   file paths — never use git add -A or git add .)
 
@@ -675,29 +694,38 @@ project: %s
 
 # %s — Working Context
 
+<!-- KEEP THIS FILE THIN. resume.md is a gateway to project context, not a diary.
+     - Stable architecture, design decisions, test inventories -> doc/ (source-controlled)
+     - Completed iteration narratives -> iterations.md (append-only archive)
+     - Active work items -> tasks/ directory
+     Only current state, open threads, and pointers to deeper context belong here. -->
+
 ## What This Project Is
 
-<!-- Brief description of the project -->
+<!-- Brief description of the project, stack, build/test commands -->
 
-## Architecture
+## Current State
 
-<!-- Key architectural decisions and structure -->
-
-## What Was Done (Recent)
-
-<!-- Updated each session with completed work -->
+<!-- Iteration count, test count, what phase the project is in -->
 
 ## Open Threads
 
 <!-- Active tasks, unresolved questions, next steps -->
 
-## Key Files
+## Reference Documents
 
-<!-- Important files and their roles -->
+| Document | Location | Purpose |
+|----------|----------|---------|
+| resume.md | agentctx/ | This file — current state and navigation |
+| workflow.md | agentctx/ | AI workflow rules and pair programming paradigm |
+| iterations.md | agentctx/ | Append-only archive of iteration narratives |
+| tasks/ | agentctx/ | Active task files; tasks/done/ for completed |
 
-## Conventions
-
-<!-- Coding patterns, naming conventions, workflow rules -->
+<!-- Add doc/ entries as project documentation grows:
+| ARCHITECTURE.md | doc/ | Data flow, module responsibilities |
+| DESIGN.md | doc/ | Key design decisions with rationale |
+| TESTING.md | doc/ | Test inventory and coverage |
+-->
 `, project, project)
 }
 
