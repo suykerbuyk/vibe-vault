@@ -11,6 +11,10 @@ import (
 	"strconv"
 	"strings"
 
+	"context"
+	"os/signal"
+	"syscall"
+
 	"github.com/johns/vibe-vault/internal/archive"
 	"github.com/johns/vibe-vault/internal/check"
 	"github.com/johns/vibe-vault/internal/config"
@@ -22,6 +26,7 @@ import (
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/inject"
 	"github.com/johns/vibe-vault/internal/llm"
+	"github.com/johns/vibe-vault/internal/mcp"
 	"github.com/johns/vibe-vault/internal/scaffold"
 	"github.com/johns/vibe-vault/internal/session"
 	"github.com/johns/vibe-vault/internal/stats"
@@ -77,6 +82,9 @@ func main() {
 
 	case "export":
 		runExport()
+
+	case "mcp":
+		runMcp()
 
 	case "templates":
 		runTemplates()
@@ -643,6 +651,24 @@ func runTemplates() {
 
 	fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdTemplates))
 	os.Exit(1)
+}
+
+func runMcp() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdMcp))
+		return
+	}
+	cfg := mustLoadConfig()
+	logger := log.New(os.Stderr, "", log.LstdFlags)
+	srv := mcp.NewServer(mcp.ServerInfo{Name: "vibe-vault", Version: help.Version}, logger)
+	srv.RegisterTool(mcp.NewGetProjectContextTool(cfg.StateDir()))
+	srv.RegisterTool(mcp.NewListProjectsTool(cfg.StateDir()))
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+	if err := srv.Serve(ctx, os.Stdin, os.Stdout); err != nil {
+		logger.Printf("mcp server error: %v", err)
+		os.Exit(1)
+	}
 }
 
 func runIndex() {

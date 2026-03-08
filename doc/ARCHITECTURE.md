@@ -102,6 +102,26 @@ Print summary               Print summary             session.Capture(Force:true
                                                        GenerateContext()
 ```
 
+### MCP Server Flow (`vv mcp`)
+
+```
+Claude Code / AI agent
+        │
+        ▼  (JSON-RPC 2.0 over stdio)
+   ┌──────────┐
+   │ vv mcp   │    bufio.Scanner line-delimited JSON
+   └────┬─────┘
+        │
+        ▼
+   mcp/server.go    Dispatch: initialize, tools/list, tools/call
+        │
+        ├─── get_project_context    → index.Load() → trends.Compute()
+        │                           → inject.Build() → inject.Render()
+        │
+        └─── list_projects          → index.Load() → idx.Projects()
+                                    → trends.Compute() per project
+```
+
 ## Module Responsibilities
 
 | Package | File | Responsibility |
@@ -117,7 +137,10 @@ Print summary               Print summary             session.Capture(Force:true
 | `friction` | `score.go` | `Score()` — weighted composite friction score (0-100): correction density (30), token efficiency (25), file retry (20), error cycles (15), recurring threads (10) |
 | `friction` | `analyze.go` | `Analyze()` — pure-function orchestrator: corrections + narrative signals + token efficiency + thread recurrence → `Result` with score + human-readable signals |
 | `friction` | `format.go` | `ComputeProjectFriction()` — aggregate per-project friction from index; `Format()` — aligned terminal output for `vv friction` |
-| `help` | `commands.go` | Command/Flag/Arg structs, Version var (build-time injection via ldflags), registry of 15 subcommands + 2 hook + 3 context subcommands (init, migrate, sync), ManName() with space→hyphen |
+| `mcp` | `protocol.go` | JSON-RPC 2.0 and MCP message types (Request, Response, InitializeResult, ToolDef, ToolsCallResult, ContentBlock) |
+| `mcp` | `server.go` | Stdio transport: `Server.Serve()` reads newline-delimited JSON, dispatches initialize/tools/list/tools/call, logs tool calls to stderr |
+| `mcp` | `tools.go` | `NewGetProjectContextTool()` — wraps inject pipeline; `NewListProjectsTool()` — wraps index.Projects() with per-project friction trends |
+| `help` | `commands.go` | Command/Flag/Arg structs, Version var (build-time injection via ldflags), registry of 16 subcommands + 2 hook + 3 context subcommands (init, migrate, sync), ManName() with space→hyphen |
 | `help` | `terminal.go` | `FormatTerminal()` and `FormatUsage()` — terminal help output |
 | `help` | `roff.go` | `FormatRoff()` and `FormatRoffTopLevel()` — roff-formatted man pages |
 | `check` | `check.go` | 10 diagnostic checks (config, vault, obsidian, projects, state, index, domains, enrichment, hook, agentctx schema), `Run()` aggregator, `Report.Format()`, `CheckAgentctxSchema()` (pass/warn by version) |

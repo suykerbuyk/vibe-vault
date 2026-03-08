@@ -283,6 +283,31 @@ var expectedTerminal = map[string]string{
 		"  vv export --project myproject          Export one project as JSON\n" +
 		"  vv export --format csv > sessions.csv  Export to file\n",
 
+	"mcp": "vv mcp \u2014 start MCP server for AI agent integration\n" +
+		"\n" +
+		"Usage: vv mcp\n" +
+		"\n" +
+		"Starts a Model Context Protocol (MCP) server that exposes vibe-vault\n" +
+		"tools over JSON-RPC 2.0 on stdin/stdout. This allows AI agents like\n" +
+		"Claude Code to query project context on demand.\n" +
+		"\n" +
+		"Available tools:\n" +
+		"  get_project_context   Condensed project context (sessions, threads,\n" +
+		"                        decisions, friction trends)\n" +
+		"  list_projects         All projects with session counts and date ranges\n" +
+		"\n" +
+		"Configure in Claude Code's settings:\n" +
+		"  {\n" +
+		"    \"mcpServers\": {\n" +
+		"      \"vibe-vault\": {\n" +
+		"        \"command\": \"vv\",\n" +
+		"        \"args\": [\"mcp\"]\n" +
+		"      }\n" +
+		"    }\n" +
+		"  }\n" +
+		"\n" +
+		"The server logs tool calls to stderr for observability.\n",
+
 	"templates": "vv templates \u2014 inspect, compare, and reset vault templates\n" +
 		"\n" +
 		"Usage: vv templates [list | diff | show | reset]\n" +
@@ -336,6 +361,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv trends [--project X]      Show metric trends over time\n" +
 		"  vv inject [--project X]      Output session-start context payload\n" +
 		"  vv export [--format X]       Export session data (JSON or CSV)\n" +
+		"  vv mcp                       Start MCP server (JSON-RPC over stdio)\n" +
 		"  vv templates [list | ...]    Inspect, compare, and reset vault templates\n" +
 		"  vv version                   Print version\n" +
 		"  vv help                      Show this help\n" +
@@ -355,7 +381,7 @@ func TestFormatUsage(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "context", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "templates", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "mcp", "templates", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))

@@ -367,6 +367,34 @@ Output is sorted by date, then session ID.`,
 	SeeAlso: []string{"vv(1)", "vv-stats(1)"},
 }
 
+var CmdMcp = Command{
+	Name:     "mcp",
+	Synopsis: "start MCP server for AI agent integration",
+	Brief:    "Start MCP server (JSON-RPC over stdio)",
+	Usage:    "vv mcp",
+	Description: `Starts a Model Context Protocol (MCP) server that exposes vibe-vault
+tools over JSON-RPC 2.0 on stdin/stdout. This allows AI agents like
+Claude Code to query project context on demand.
+
+Available tools:
+  get_project_context   Condensed project context (sessions, threads,
+                        decisions, friction trends)
+  list_projects         All projects with session counts and date ranges
+
+Configure in Claude Code's settings:
+  {
+    "mcpServers": {
+      "vibe-vault": {
+        "command": "vv",
+        "args": ["mcp"]
+      }
+    }
+  }
+
+The server logs tool calls to stderr for observability.`,
+	SeeAlso: []string{"vv(1)", "vv-inject(1)"},
+}
+
 var CmdVersion = Command{
 	Name:     "version",
 	Synopsis: "print version",
@@ -646,6 +674,7 @@ var Subcommands = []Command{
 	CmdTrends,
 	CmdInject,
 	CmdExport,
+	CmdMcp,
 	CmdTemplates,
 	CmdVersion,
 }

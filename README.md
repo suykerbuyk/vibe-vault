@@ -295,6 +295,7 @@ deterministic heuristics rather than embeddings.
 | `vv trends [--project X]` | Show metric trends over time |
 | `vv inject [--project X]` | Output session-start context payload |
 | `vv context [init \| migrate \| sync]` | Manage vault-resident AI context files |
+| `vv mcp` | Start MCP server for AI agent integration |
 | `vv templates [list \| diff \| show \| reset]` | Inspect, compare, and reset vault templates |
 | `vv version` | Print version |
 
@@ -354,6 +355,27 @@ vv context sync                       # run schema migrations + propagate shared
 vv context sync --all                 # sync all projects (vault-only operations)
 vv context sync --dry-run             # preview changes without modifying files
 ```
+
+**MCP server for AI agent integration:**
+```bash
+vv mcp    # starts JSON-RPC 2.0 server on stdin/stdout
+```
+
+Configure in Claude Code's `~/.claude/settings.json`:
+```json
+{
+  "mcpServers": {
+    "vibe-vault": {
+      "command": "vv",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+This exposes two tools: `get_project_context` (condensed project context) and
+`list_projects` (all projects with session counts). Claude Code calls these on
+demand instead of requiring pre-loaded context.
 
 **Inspect and reset vault templates:**
 ```bash
