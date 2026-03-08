@@ -712,7 +712,7 @@ func shortenPath(path, cwd string) string {
 	if cwd != "" && strings.HasPrefix(path, cwd+"/") {
 		return path[len(cwd)+1:]
 	}
-	return path
+	return sanitize.CompressHome(path)
 }
 
 func truncateStr(s string, maxLen int) string {

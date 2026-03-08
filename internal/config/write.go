@@ -8,9 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/johns/vibe-vault/internal/sanitize"
 )
 
 // ConfigDir returns the vibe-vault config directory path.
@@ -161,16 +162,7 @@ func ProjectConfigTemplate() string {
 }
 
 // CompressHome replaces $HOME prefix with ~/ for portable config values.
+// Delegates to sanitize.CompressHome; kept here for backward compatibility.
 func CompressHome(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return path
-	}
-	if strings.HasPrefix(path, home+"/") {
-		return "~/" + path[len(home)+1:]
-	}
-	if path == home {
-		return "~"
-	}
-	return path
+	return sanitize.CompressHome(path)
 }

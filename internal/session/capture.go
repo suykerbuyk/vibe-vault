@@ -20,6 +20,7 @@ import (
 	"github.com/johns/vibe-vault/internal/knowledge"
 	"github.com/johns/vibe-vault/internal/llm"
 	"github.com/johns/vibe-vault/internal/narrative"
+	"github.com/johns/vibe-vault/internal/sanitize"
 	"github.com/johns/vibe-vault/internal/prose"
 	"github.com/johns/vibe-vault/internal/render"
 	"github.com/johns/vibe-vault/internal/stats"
@@ -248,7 +249,7 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	if !opts.SkipEnrichment && opts.Provider != nil && noteData.ProseDialogue == "" {
 		var filesChanged []string
 		for f := range t.Stats.FilesWritten {
-			filesChanged = append(filesChanged, f)
+			filesChanged = append(filesChanged, sanitize.CompressHome(f))
 		}
 		sort.Strings(filesChanged)
 
@@ -304,7 +305,7 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 
 			var kFilesChanged []string
 			for f := range t.Stats.FilesWritten {
-				kFilesChanged = append(kFilesChanged, f)
+				kFilesChanged = append(kFilesChanged, sanitize.CompressHome(f))
 			}
 			sort.Strings(kFilesChanged)
 
