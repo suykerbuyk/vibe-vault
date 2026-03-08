@@ -215,6 +215,49 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun bool) []File
 	return actions
 }
 
+// migrate3to4 converts CLAUDE.md from a generated file to a symlink through
+// agentctx, ensures vault-side CLAUDE.md exists, and creates vault-side
+// directories and repo-side symlinks for all .claude/ subdirectories.
+func migrate3to4(ctx MigrationContext) ([]FileAction, error) {
+	var actions []FileAction
+
+	// Ensure vault-side CLAUDE.md exists in agentctx
+	claudeContent := readEmbedded("CLAUDE.md")
+	claudeVault := filepath.Join(ctx.AgentctxPath, "CLAUDE.md")
+	action := safeWrite(claudeVault, claudeContent, false)
+	actions = append(actions, FileAction{Path: "agentctx/CLAUDE.md", Action: action})
+
+	// Ensure vault-side directories for all .claude/ subdirs
+	for _, sub := range claudeSubdirs {
+		os.MkdirAll(filepath.Join(ctx.AgentctxPath, sub), 0o755)
+	}
+
+	// Repo-side operations (skip if no repo path)
+	if ctx.RepoPath == "" {
+		return actions, nil
+	}
+
+	// Convert CLAUDE.md from file to symlink
+	claudeMDPath := filepath.Join(ctx.RepoPath, "CLAUDE.md")
+	if info, err := os.Lstat(claudeMDPath); err == nil && info.Mode()&os.ModeSymlink == 0 {
+		os.Remove(claudeMDPath)
+	}
+	linkAction := safeSymlink(claudeMDPath, filepath.Join("agentctx", "CLAUDE.md"), true)
+	actions = append(actions, FileAction{Path: "CLAUDE.md", Action: linkAction})
+
+	// Create .claude/ subdirectory symlinks through agentctx
+	dotClaude := filepath.Join(ctx.RepoPath, ".claude")
+	os.MkdirAll(dotClaude, 0o755)
+	for _, sub := range claudeSubdirs {
+		link := filepath.Join(dotClaude, sub)
+		target := filepath.Join("..", "agentctx", sub)
+		subAction := safeSymlink(link, target, true)
+		actions = append(actions, FileAction{Path: ".claude/" + sub, Action: subAction})
+	}
+
+	return actions, nil
+}
+
 // migrate2to3 adds per-project config.toml overlay template.
 func migrate2to3(ctx MigrationContext) ([]FileAction, error) {
 	var actions []FileAction
@@ -248,16 +291,19 @@ func migrate1to2(ctx MigrationContext) ([]FileAction, error) {
 
 	// 2. Rewrite CLAUDE.md to relative paths
 	claudeMDPath := filepath.Join(ctx.RepoPath, "CLAUDE.md")
-	safeWrite(claudeMDPath, generateClaudeMD(), true)
+	claudeContent := readEmbedded("CLAUDE.md")
+	safeWrite(claudeMDPath, claudeContent, true)
 	actions = append(actions, FileAction{Path: "CLAUDE.md", Action: "UPDATE"})
 
-	// 3. Replace .claude/commands with relative symlink
+	// 3. Replace .claude/ subdirectories with relative symlinks through agentctx
 	dotClaude := filepath.Join(ctx.RepoPath, ".claude")
 	os.MkdirAll(dotClaude, 0o755)
-	cmdsLink := filepath.Join(dotClaude, "commands")
-	cmdsTarget := filepath.Join("..", "agentctx", "commands")
-	safeSymlink(cmdsLink, cmdsTarget, true)
-	actions = append(actions, FileAction{Path: ".claude/commands", Action: "UPDATE"})
+	for _, sub := range claudeSubdirs {
+		link := filepath.Join(dotClaude, sub)
+		target := filepath.Join("..", "agentctx", sub)
+		safeSymlink(link, target, true)
+		actions = append(actions, FileAction{Path: ".claude/" + sub, Action: "UPDATE"})
+	}
 
 	// 4. Add agentctx to .gitignore
 	giAction, err := gitignoreEnsure(filepath.Join(ctx.RepoPath, ".gitignore"), "/agentctx")

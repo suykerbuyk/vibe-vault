@@ -361,7 +361,7 @@ vv context sync --dry-run             # preview changes without modifying files
 vv mcp    # starts JSON-RPC 2.0 server on stdin/stdout
 ```
 
-Configure in Claude Code's `~/.claude/settings.json`:
+Configure in `~/.claude/.mcp.json`:
 ```json
 {
   "mcpServers": {
@@ -441,10 +441,14 @@ vibe-vault/
 ├── Projects/                   # Project-centric organization
 │   └── {project}/
 │       ├── agentctx/           # AI context package (vv context init)
+│       │   ├── CLAUDE.md       # Thin pointer (symlinked from repo root)
 │       │   ├── workflow.md     # Behavioral rules and workflow standards
 │       │   ├── resume.md       # Project state, architecture, decisions
 │       │   ├── iterations.md   # Iteration narratives and history
 │       │   ├── commands/       # Slash commands (/restart, /wrap)
+│       │   ├── rules/          # Claude Code rules
+│       │   ├── skills/         # Claude Code skills
+│       │   ├── agents/         # Claude Code agents
 │       │   └── tasks/          # Active and completed tasks
 │       ├── sessions/           # Session notes (auto-generated)
 │       │   └── YYYY-MM-DD-NN.md
@@ -587,10 +591,12 @@ decisions in full context, with the reasoning preserved.
 
 **2. Portable AI Memory** — `vv context init` scaffolds a self-contained
 `agentctx/` directory per project in the vault, containing behavioral rules,
-project state, iteration history, slash commands, and tasks. `vv context migrate`
-moves existing repo-local files into `agentctx/`. The repo gets a thin CLAUDE.md
-pointer and symlinked commands. This makes project context survive machine
-migrations, searchable across the portfolio, and accessible to any session.
+project state, iteration history, slash commands, rules, skills, agents, and
+tasks. `vv context migrate` moves existing repo-local files into `agentctx/`.
+The repo gets a single `agentctx` symlink to the vault, and everything else
+chains through it: `CLAUDE.md → agentctx/CLAUDE.md`, `.claude/{commands,rules,
+skills,agents} → ../agentctx/{commands,rules,skills,agents}`. Clone the repo,
+restore the vault, and resume with full context on any machine.
 
 **3. AI Behavioral Observability** — Every transcript logs which tools the AI
 used, how many tokens it consumed, whether it needed corrections. Aggregating
@@ -653,7 +659,7 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 ### Test Suite
 
-**684 tests** across 51 test files + **1 integration test** with 22
+**594 tests** across 25 test packages + **1 integration test** with 22
 subtests. The integration test exercises the full pipeline:
 `init` → `process` → `index` → `stats` →
 `backfill` → `archive` → `checkpoint lifecycle` → `friction` →

@@ -128,10 +128,11 @@ Claude Code / AI agent
 |---------|------|----------------|
 | `cmd/vv` | `main.go` | CLI arg parsing, subcommand routing (including hook sub-subcommands), help via `internal/help`, `wantsHelp()` flag guard, unknown flag rejection, `runTrends()` with `--project` and `--weeks` flags, `runInject()` with `--project`/`--format`/`--sections`/`--max-tokens` flags, `runExport()` with `--format`/`--project` flags, `runContext()` with `sync` sub-subcommand (`--project`/`--all`/`--dry-run`/`--force`), `runCheck()` agentctx schema check |
 | `cmd/gen-man` | `main.go` | Generates `man/*.1` files from help registry (Subcommands + HookSubcommands + ContextSubcommands) |
-| `context` | `context.go` | `Init()` — scaffold vault-resident context (workflow.md, resume.md, iterations.md, tasks/, repo-side CLAUDE.md + .claude/commands/, agentctx symlink, .version); `Migrate()` — copy local files to vault + force-update repo-side; helpers: safeWrite, gitignoreEnsure, copyFile/Dir, template generators (relative paths, no absolute vault paths) |
-| `context` | `schema.go` | `VersionFile` TOML struct, `ReadVersion`/`WriteVersion`, `LatestSchemaVersion` const (3), `Migration` type + registry (0→1 writes .version, 1→2 adds symlinks/relative paths, 2→3 adds per-project config.toml), `migrationsFrom()` |
-| `context` | `sync.go` | `Sync()` — run schema migrations + shared command propagation for one or all projects; `SyncOpts`/`SyncResult`/`ProjectSyncResult` types; `discoverProjects()`, `propagateSharedCommands()`, `migrate1to2()`, `migrate2to3()` |
-| `context` | `template.go` | `TemplateVars`, `DefaultVars()`, `resolveTemplate()` (vault Templates/agentctx/ first, fallback to embedded), `applyVars()` ({{PROJECT}}/{{DATE}}), `EnsureVaultTemplates()` (seed 6 template files) |
+| `templates` | `embed.go` | `//go:embed all:agentctx` — embeds 9 agentctx template `.md` files into the binary; `AgentctxFS()` returns the `embed.FS`. Templates use `{{PROJECT}}`/`{{DATE}}` placeholders resolved at runtime |
+| `context` | `context.go` | `Init()` — scaffold vault-resident context (templates from embed.FS, repo-side CLAUDE.md symlink + .claude/{commands,rules,skills,agents} symlinks, agentctx symlink, .version); `Migrate()` — copy local files to vault + force-update repo-side; `claudeSubdirs` var defines .claude/ subdirectories; helpers: safeWrite, safeSymlink, gitignoreEnsure, copyFile/Dir |
+| `context` | `schema.go` | `VersionFile` TOML struct, `ReadVersion`/`WriteVersion`, `LatestSchemaVersion` const (4), `Migration` type + registry (0→1 writes .version, 1→2 adds symlinks/relative paths, 2→3 adds per-project config.toml, 3→4 CLAUDE.md symlink + .claude/ subdirs), `migrationsFrom()` |
+| `context` | `sync.go` | `Sync()` — run schema migrations + shared command propagation for one or all projects; `SyncOpts`/`SyncResult`/`ProjectSyncResult` types; `discoverProjects()`, `propagateSharedCommands()`, `migrate1to2()`, `migrate2to3()`, `migrate3to4()` |
+| `context` | `template.go` | `TemplateVars`, `DefaultVars()`, `resolveTemplate()` (vault Templates/agentctx/ first, fallback to `templates.AgentctxFS()`), `readEmbedded()`, `applyVars()` ({{PROJECT}}/{{DATE}}), `BuiltinTemplates()` (walks embed.FS), `EnsureVaultTemplates()` |
 | `friction` | `types.go` | `Correction`, `Signals`, `Result`, `ProjectFriction` types |
 | `friction` | `detect.go` | `DetectCorrections()` — linguistic (negation, redirect, undo, quality, repetition) + contextual (short negation after long assistant turn) correction detection |
 | `friction` | `score.go` | `Score()` — weighted composite friction score (0-100): correction density (30), token efficiency (25), file retry (20), error cycles (15), recurring threads (10) |
@@ -151,7 +152,7 @@ Claude Code / AI agent
 | `hook` | `handler.go` | Stdin JSON parsing (2s timeout), `handleInput()` dispatch logic (extracted for testability), dispatches SessionEnd/Stop/PreCompact, auto-refresh context on SessionEnd via `GenerateContext()` (no knowledge injection) |
 | `hook` | `setup.go` | `Install()`/`Uninstall()` for `~/.claude/settings.json`: 3 events (SessionEnd, Stop, PreCompact), idempotent JSON manipulation, backup, directory creation |
 | `inject` | `inject.go` | `Build()` — assemble context from index entries and trends; `FormatMarkdown()`/`FormatJSON()` renderers; `Render()` — format + token-budget truncation loop (drops lowest-priority sections); `estimateTokens()` — word count × 1.3 |
-| `scaffold` | `scaffold.go` | `go:embed` vault templates, `Init()` scaffolder with `{{VAULT_NAME}}` replacement |
+| `scaffold` | `scaffold.go` | `go:embed` vault scaffold templates (for `vv init`), `Init()` scaffolder with `{{VAULT_NAME}}` replacement. Distinct from `templates/` which holds agentctx templates for `vv context init` |
 | `transcript` | `parser.go` | Streaming JSONL parser, skips non-conversation types |
 | `transcript` | `types.go` | All data types: Entry (incl. native `IsMeta`, `PlanContent` fields), Message, ContentBlock, Usage, Stats |
 | `transcript` | `stats.go` | Stats aggregation, file tracking, user/assistant text, title heuristics |
@@ -180,6 +181,49 @@ Claude Code / AI agent
 | `noteparse` | `noteparse.go` | Line-based frontmatter parser + body section extraction (decisions, threads, files, commits) |
 | `render` | `markdown.go` | Obsidian note rendering: frontmatter (incl. commits, friction_score, corrections), Session Dialogue / What Happened (conditional), Commits, Friction Signals, Work Performed, tool usage table, wikilinks, related sessions |
 | `sanitize` | `redact.go` | Regex-based XML tag stripping for Claude Code wrapper tags |
+
+## Template System
+
+Two separate template systems serve different purposes:
+
+**Scaffold templates** (`internal/scaffold/templates/`) — used by `vv init` to
+create new Obsidian vaults. Embedded via `//go:embed` in `scaffold.go`. Contains
+vault structure (dashboards, `.obsidian/` config, scripts).
+
+**Agentctx templates** (`templates/agentctx/`) — used by `vv context init` to
+scaffold per-project AI context. Embedded via `//go:embed` in `templates/embed.go`.
+Contains 9 `.md` files: CLAUDE.md, workflow.md, resume.md, iterations.md,
+README.md, and commands/{restart,wrap,license,makefile}.md.
+
+Template resolution (`resolveTemplate()` in `template.go`):
+1. Check vault `Templates/agentctx/{path}` — allows per-vault customization
+2. Fall back to embedded default from `templates.AgentctxFS()`
+3. Apply `{{PROJECT}}` and `{{DATE}}` variable substitution
+
+The `vv templates` subcommand compares vault templates against embedded defaults,
+showing which are customized, missing, or at default.
+
+### Repo-side Symlink Architecture
+
+`vv context init` creates a single real symlink (`agentctx → vault path`), then
+chains everything through it:
+
+```
+repo/
+├── agentctx → ~/obsidian/Vault/Projects/{project}/agentctx/  (absolute)
+├── CLAUDE.md → agentctx/CLAUDE.md                            (relative)
+├── commit.msg → agentctx/commit.msg                          (relative)
+└── .claude/
+    ├── commands → ../agentctx/commands                        (relative)
+    ├── rules → ../agentctx/rules                              (relative)
+    ├── skills → ../agentctx/skills                            (relative)
+    └── agents → ../agentctx/agents                            (relative)
+```
+
+`.claude/` itself remains a real directory (Claude Code stores `settings.json`,
+`settings.local.json`, and `.mcp.json` there), but all four subdirectories are
+symlinks. Schema version 4 (migration `3→4`) converts existing projects to this
+layout.
 
 ## Error Handling
 

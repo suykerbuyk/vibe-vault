@@ -272,16 +272,23 @@ vv context init
 
 This creates:
 - **Vault-side** (`Projects/{project}/agentctx/`):
+  - `CLAUDE.md` — thin pointer (symlinked from repo root)
   - `workflow.md` — behavioral rules (pair programming, plan mode, verification)
   - `resume.md` — project state scaffold
   - `iterations.md` — iteration history
   - `config.toml` — per-project config overlay (all settings commented out)
   - `commands/restart.md`, `commands/wrap.md` — slash commands
+  - `rules/`, `skills/`, `agents/` — Claude Code extensions
   - `tasks/`, `tasks/done/` — task tracking
-- **Repo-side**:
-  - `CLAUDE.md` — thin pointer to the agentctx directory
-  - `.claude/commands/*.md` — symlinks to `agentctx/commands/`
-- Updates `.gitignore` to exclude `CLAUDE.md` and `commit.msg`
+- **Repo-side** (single symlink, everything chains through it):
+  - `agentctx` → vault's `Projects/{project}/agentctx/`
+  - `CLAUDE.md` → `agentctx/CLAUDE.md`
+  - `.claude/commands` → `../agentctx/commands`
+  - `.claude/rules` → `../agentctx/rules`
+  - `.claude/skills` → `../agentctx/skills`
+  - `.claude/agents` → `../agentctx/agents`
+  - `commit.msg` → `agentctx/commit.msg`
+- Updates `.gitignore` to exclude `CLAUDE.md`, `commit.msg`, and `agentctx`
 
 The project name is auto-detected from the git remote. To override:
 
@@ -321,11 +328,13 @@ vv context sync --dry-run          # preview changes
 
 ### How it works after setup
 
+- Only one real symlink exists: `agentctx → vault`. Everything else chains through it
+- `CLAUDE.md → agentctx/CLAUDE.md` — Claude Code reads project instructions from the vault
+- `.claude/{commands,rules,skills,agents}` → `../agentctx/{...}` — all Claude Code extensions live in the vault
 - `/restart` reads `resume.md` from the vault's `agentctx/` directory
 - `/wrap` updates vault-side files (resume, tasks) in `agentctx/`
-- `CLAUDE.md` in the repo is a 5-line pointer referencing `agentctx/`
-- `agentctx/workflow.md` has behavioral rules (loaded via CLAUDE.md → workflow.md chain)
 - Everything is searchable in Obsidian alongside session notes
+- Clone the repo on another machine, point `agentctx` at the vault, and resume with full context
 
 ## 7. Optional: Enable LLM Enrichment
 

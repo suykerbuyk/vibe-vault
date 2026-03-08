@@ -69,9 +69,12 @@ func TestInit_CreatesRepoFiles(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// CLAUDE.md should be a regular file
-	if _, err := os.Stat(filepath.Join(cwd, "CLAUDE.md")); os.IsNotExist(err) {
+	// CLAUDE.md should be a symlink through agentctx
+	claudeInfo, err2 := os.Lstat(filepath.Join(cwd, "CLAUDE.md"))
+	if err2 != nil {
 		t.Error("repo CLAUDE.md not created")
+	} else if claudeInfo.Mode()&os.ModeSymlink == 0 {
+		t.Error("CLAUDE.md should be a symlink")
 	}
 
 	// Commands should be accessible through the directory symlink
@@ -83,7 +86,7 @@ func TestInit_CreatesRepoFiles(t *testing.T) {
 	}
 }
 
-func TestInit_CommandsDirectorySymlink(t *testing.T) {
+func TestInit_ClaudeSubdirSymlinks(t *testing.T) {
 	vault := t.TempDir()
 	cwd := t.TempDir()
 	cfg := testConfig(vault)
@@ -93,26 +96,29 @@ func TestInit_CommandsDirectorySymlink(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// .claude/commands should be a symlink to the directory, not individual files
-	cmdsPath := filepath.Join(cwd, ".claude", "commands")
-	info, err := os.Lstat(cmdsPath)
-	if err != nil {
-		t.Fatalf("commands link not created: %v", err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf(".claude/commands should be a symlink, got mode %v", info.Mode())
-	}
-	target, err := os.Readlink(cmdsPath)
-	if err != nil {
-		t.Fatalf("readlink .claude/commands: %v", err)
-	}
-	if !strings.Contains(target, "agentctx/commands") {
-		t.Errorf("symlink target %q should point to agentctx/commands", target)
+	// All .claude/ subdirectories should be symlinks through agentctx
+	for _, sub := range []string{"commands", "rules", "skills", "agents"} {
+		link := filepath.Join(cwd, ".claude", sub)
+		info, err := os.Lstat(link)
+		if err != nil {
+			t.Fatalf(".claude/%s link not created: %v", sub, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf(".claude/%s should be a symlink, got mode %v", sub, info.Mode())
+		}
+		target, err := os.Readlink(link)
+		if err != nil {
+			t.Fatalf("readlink .claude/%s: %v", sub, err)
+		}
+		expected := filepath.Join("..", "agentctx", sub)
+		if target != expected {
+			t.Errorf(".claude/%s symlink target = %q, want %q", sub, target, expected)
+		}
 	}
 
 	// Commands should be accessible through the symlink
 	for _, name := range []string{"restart.md", "wrap.md"} {
-		path := filepath.Join(cmdsPath, name)
+		path := filepath.Join(cwd, ".claude", "commands", name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			t.Errorf("command %s not accessible through symlink", name)
 		}
@@ -161,10 +167,6 @@ func TestInit_IdempotentSkip(t *testing.T) {
 		t.Fatalf("Init 1: %v", err)
 	}
 
-	// Write sentinel to CLAUDE.md
-	claudePath := filepath.Join(cwd, "CLAUDE.md")
-	os.WriteFile(claudePath, []byte("custom content"), 0o644)
-
 	// Second init without force
 	result, err := Init(cfg, cwd, Opts{Project: "myproject"})
 	if err != nil {
@@ -181,12 +183,6 @@ func TestInit_IdempotentSkip(t *testing.T) {
 	if skipCount == 0 {
 		t.Error("expected SKIP actions on second init, got none")
 	}
-
-	// CLAUDE.md should keep custom content
-	data, _ := os.ReadFile(claudePath)
-	if string(data) != "custom content" {
-		t.Error("CLAUDE.md was overwritten without --force")
-	}
 }
 
 func TestInit_ForceOverwrite(t *testing.T) {
@@ -199,10 +195,6 @@ func TestInit_ForceOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Init 1: %v", err)
 	}
-
-	// Write sentinel
-	claudePath := filepath.Join(cwd, "CLAUDE.md")
-	os.WriteFile(claudePath, []byte("custom content"), 0o644)
 
 	// Force init
 	result, err := Init(cfg, cwd, Opts{Project: "myproject", Force: true})
@@ -217,10 +209,13 @@ func TestInit_ForceOverwrite(t *testing.T) {
 		}
 	}
 
-	// CLAUDE.md should be overwritten
-	data, _ := os.ReadFile(claudePath)
-	if string(data) == "custom content" {
-		t.Error("CLAUDE.md was not overwritten with --force")
+	// CLAUDE.md should be a symlink
+	info, err := os.Lstat(filepath.Join(cwd, "CLAUDE.md"))
+	if err != nil {
+		t.Fatal("CLAUDE.md missing after force init")
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Error("CLAUDE.md should be a symlink after force init")
 	}
 }
 
@@ -268,13 +263,25 @@ func TestInit_ClaudeMDContent(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
+	// CLAUDE.md should be a symlink through agentctx
+	info, err := os.Lstat(filepath.Join(cwd, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("lstat CLAUDE.md: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("CLAUDE.md should be a symlink")
+	}
+	target, _ := os.Readlink(filepath.Join(cwd, "CLAUDE.md"))
+	if target != filepath.Join("agentctx", "CLAUDE.md") {
+		t.Errorf("CLAUDE.md symlink target = %q, want agentctx/CLAUDE.md", target)
+	}
+
+	// Content should be readable and reference agentctx
 	data, err := os.ReadFile(filepath.Join(cwd, "CLAUDE.md"))
 	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
+		t.Fatalf("read CLAUDE.md through symlink: %v", err)
 	}
 	content := string(data)
-
-	// Thin pointer — should reference agentctx (relative, no absolute paths)
 	if !strings.Contains(content, "agentctx") {
 		t.Error("CLAUDE.md missing agentctx reference")
 	}
@@ -479,21 +486,25 @@ func TestMigrate_CopiesLocalCommands(t *testing.T) {
 		}
 	}
 
-	// .claude/commands should now be a directory symlink
-	cmdsPath := filepath.Join(cwd, ".claude", "commands")
-	info, err := os.Lstat(cmdsPath)
-	if err != nil {
-		t.Fatalf("lstat .claude/commands: %v", err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Error(".claude/commands should be a symlink after migrate")
-	}
-	target, _ := os.Readlink(cmdsPath)
-	if !strings.Contains(target, "agentctx/commands") {
-		t.Errorf("symlink target %q should point to agentctx/commands", target)
+	// All .claude/ subdirs should be symlinks through agentctx after migrate
+	for _, sub := range []string{"commands", "rules", "skills", "agents"} {
+		link := filepath.Join(cwd, ".claude", sub)
+		info, err := os.Lstat(link)
+		if err != nil {
+			t.Fatalf("lstat .claude/%s: %v", sub, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Errorf(".claude/%s should be a symlink after migrate", sub)
+		}
+		target, _ := os.Readlink(link)
+		expected := filepath.Join("..", "agentctx", sub)
+		if target != expected {
+			t.Errorf(".claude/%s symlink target = %q, want %q", sub, target, expected)
+		}
 	}
 
 	// All commands should be accessible through the symlink
+	cmdsPath := filepath.Join(cwd, ".claude", "commands")
 	for _, name := range []string{"restart.md", "wrap.md", "custom.md"} {
 		if _, err := os.Stat(filepath.Join(cmdsPath, name)); os.IsNotExist(err) {
 			t.Errorf("command %s not accessible through symlink", name)
@@ -518,14 +529,16 @@ func TestMigrate_SkipsAlreadySymlinkedCommands(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	// .claude/commands should still be a directory symlink
-	cmdsPath := filepath.Join(cwd, ".claude", "commands")
-	info, err := os.Lstat(cmdsPath)
-	if err != nil {
-		t.Fatalf("lstat .claude/commands: %v", err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Error(".claude/commands should still be a symlink")
+	// All .claude/ subdirs should still be symlinks
+	for _, sub := range []string{"commands", "rules", "skills", "agents"} {
+		link := filepath.Join(cwd, ".claude", sub)
+		info, err := os.Lstat(link)
+		if err != nil {
+			t.Fatalf("lstat .claude/%s: %v", sub, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Errorf(".claude/%s should still be a symlink", sub)
+		}
 	}
 }
 
@@ -601,7 +614,7 @@ func TestMigrate_UpdatesRepoFiles(t *testing.T) {
 	cwd := t.TempDir()
 	cfg := testConfig(vault)
 
-	// Write old-style CLAUDE.md
+	// Write old-style CLAUDE.md as a regular file
 	os.WriteFile(filepath.Join(cwd, "CLAUDE.md"), []byte("old content"), 0o644)
 
 	_, err := Migrate(cfg, cwd, Opts{Project: "myproject"})
@@ -609,7 +622,16 @@ func TestMigrate_UpdatesRepoFiles(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	// CLAUDE.md should be force-updated to thin pointer
+	// CLAUDE.md should now be a symlink through agentctx
+	info, err := os.Lstat(filepath.Join(cwd, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("lstat CLAUDE.md: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Error("CLAUDE.md should be a symlink after migrate")
+	}
+
+	// Content should be readable and reference agentctx
 	data, _ := os.ReadFile(filepath.Join(cwd, "CLAUDE.md"))
 	content := string(data)
 	if !strings.Contains(content, "agentctx") {
@@ -680,7 +702,7 @@ func TestInit_AgentctxSymlink(t *testing.T) {
 	}
 }
 
-func TestInit_ClaudeMDNoAbsolutePath(t *testing.T) {
+func TestInit_ClaudeMDSymlink(t *testing.T) {
 	vault := t.TempDir()
 	cwd := t.TempDir()
 	cfg := testConfig(vault)
@@ -690,18 +712,23 @@ func TestInit_ClaudeMDNoAbsolutePath(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	data, _ := os.ReadFile(filepath.Join(cwd, "CLAUDE.md"))
-	content := string(data)
-
-	if strings.Contains(content, vault) {
-		t.Error("CLAUDE.md contains absolute vault path")
+	// CLAUDE.md should be a relative symlink through agentctx
+	target, err := os.Readlink(filepath.Join(cwd, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("readlink CLAUDE.md: %v", err)
 	}
-	if !strings.Contains(content, "agentctx/") {
-		t.Error("CLAUDE.md missing relative agentctx reference")
+	if target != filepath.Join("agentctx", "CLAUDE.md") {
+		t.Errorf("CLAUDE.md symlink target = %q, want relative agentctx/CLAUDE.md", target)
+	}
+
+	// Content should be readable and not contain absolute paths
+	data, _ := os.ReadFile(filepath.Join(cwd, "CLAUDE.md"))
+	if strings.Contains(string(data), vault) {
+		t.Error("CLAUDE.md contains absolute vault path")
 	}
 }
 
-func TestInit_CommandsRelativeSymlink(t *testing.T) {
+func TestInit_ClaudeSubdirsRelativeSymlinks(t *testing.T) {
 	vault := t.TempDir()
 	cwd := t.TempDir()
 	cfg := testConfig(vault)
@@ -711,13 +738,16 @@ func TestInit_CommandsRelativeSymlink(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	cmdsPath := filepath.Join(cwd, ".claude", "commands")
-	target, err := os.Readlink(cmdsPath)
-	if err != nil {
-		t.Fatalf("readlink .claude/commands: %v", err)
-	}
-	if target != filepath.Join("..", "agentctx", "commands") {
-		t.Errorf("commands symlink target = %q, want relative ../agentctx/commands", target)
+	for _, sub := range []string{"commands", "rules", "skills", "agents"} {
+		link := filepath.Join(cwd, ".claude", sub)
+		target, err := os.Readlink(link)
+		if err != nil {
+			t.Fatalf("readlink .claude/%s: %v", sub, err)
+		}
+		expected := filepath.Join("..", "agentctx", sub)
+		if target != expected {
+			t.Errorf(".claude/%s symlink target = %q, want %q", sub, target, expected)
+		}
 	}
 }
 

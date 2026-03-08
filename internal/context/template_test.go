@@ -9,11 +9,10 @@ import (
 
 func TestResolveTemplate_Fallback(t *testing.T) {
 	vault := t.TempDir()
-	fallback := func() string { return "default content" }
 
-	got := resolveTemplate(vault, "workflow.md", TemplateVars{Project: "test"}, fallback)
-	if got != "default content" {
-		t.Errorf("expected fallback content, got %q", got)
+	got := resolveTemplate(vault, "workflow.md", TemplateVars{Project: "test"})
+	if !strings.Contains(got, "test — Workflow") {
+		t.Errorf("expected embedded content with project substitution, got %q", got[:min(len(got), 100)])
 	}
 }
 
@@ -23,9 +22,7 @@ func TestResolveTemplate_VaultOverride(t *testing.T) {
 	os.MkdirAll(tmplDir, 0o755)
 	os.WriteFile(filepath.Join(tmplDir, "workflow.md"), []byte("custom for {{PROJECT}}"), 0o644)
 
-	fallback := func() string { return "default content" }
-
-	got := resolveTemplate(vault, "workflow.md", TemplateVars{Project: "myapp"}, fallback)
+	got := resolveTemplate(vault, "workflow.md", TemplateVars{Project: "myapp"})
 	if got != "custom for myapp" {
 		t.Errorf("expected vault override with substitution, got %q", got)
 	}
@@ -38,7 +35,7 @@ func TestResolveTemplate_VarSubstitution(t *testing.T) {
 	os.WriteFile(filepath.Join(tmplDir, "test.md"), []byte("project={{PROJECT}} date={{DATE}}"), 0o644)
 
 	vars := TemplateVars{Project: "myapp", Date: "2026-03-06"}
-	got := resolveTemplate(vault, "test.md", vars, func() string { return "" })
+	got := resolveTemplate(vault, "test.md", vars)
 	if got != "project=myapp date=2026-03-06" {
 		t.Errorf("got %q", got)
 	}
@@ -73,6 +70,12 @@ func TestEnsureVaultTemplates_Creates(t *testing.T) {
 	if _, err := os.Stat(restart); os.IsNotExist(err) {
 		t.Error("Templates/agentctx/commands/restart.md not created")
 	}
+
+	// CLAUDE.md should exist
+	claude := filepath.Join(vault, "Templates", "agentctx", "CLAUDE.md")
+	if _, err := os.Stat(claude); os.IsNotExist(err) {
+		t.Error("Templates/agentctx/CLAUDE.md not created")
+	}
 }
 
 func TestEnsureVaultTemplates_SkipsExisting(t *testing.T) {
@@ -101,5 +104,27 @@ func TestDefaultVars(t *testing.T) {
 	// Date should be YYYY-MM-DD format
 	if !strings.Contains(vars.Date, "-") || len(vars.Date) != 10 {
 		t.Errorf("Date format unexpected: %q", vars.Date)
+	}
+}
+
+func TestBuiltinTemplates_ContainsCLAUDE(t *testing.T) {
+	bt := BuiltinTemplates()
+	content, ok := bt["CLAUDE.md"]
+	if !ok {
+		t.Fatal("BuiltinTemplates missing CLAUDE.md")
+	}
+	if !strings.Contains(content, "agentctx") {
+		t.Error("CLAUDE.md should reference agentctx")
+	}
+}
+
+func TestReadEmbedded(t *testing.T) {
+	content := readEmbedded("workflow.md")
+	if !strings.Contains(content, "{{PROJECT}}") {
+		t.Error("embedded workflow.md should contain {{PROJECT}} placeholder")
+	}
+	content = readEmbedded("commands/restart.md")
+	if !strings.Contains(content, "Restoring full AI thread context") {
+		t.Error("embedded commands/restart.md has unexpected content")
 	}
 }

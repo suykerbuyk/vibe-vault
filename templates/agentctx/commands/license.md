@@ -67,8 +67,8 @@ Include:  all source files matching typical extensions for the detected language
 (.h, .cpp, .c, .rs, .go, .py, .js, .ts, .java, .rb, .sh, .lua, .sql, etc.)
 
 Exclude:
-- `vendor/`, `third_party/`, `node_modules/`, `target/`, `build/`, `dist/`
-- `prototype/`, `.git/`
+- vendor/, third_party/, node_modules/, target/, build/, dist/
+- prototype/, .git/
 - Generated files (*.pb.go, *_generated.*, etc.)
 - Non-source files (LICENSE, README, Makefile unless it has project logic)
 
@@ -78,14 +78,14 @@ Exclude:
    content), skip it — do not modify the file.
 2. If a file has a banner with a **different year** or **different wording**,
    replace the old banner with the current one (same two lines, in place).
-3. For files with a shebang (`#!`) on line 1, place the banner on lines 2-3
+3. For files with a shebang (#!) on line 1, place the banner on lines 2-3
    (with a blank line between shebang and banner if not already present).
 4. Always leave exactly one blank line between the banner and the first line
    of real code.
 
 ## Step 4: Validate
 
-1. Confirm `LICENSE` exists and contains both license texts.
+1. Confirm LICENSE exists and contains both license texts.
 2. If banners were added, spot-check 2-3 files to confirm correct placement.
 3. Build the project (if a build system exists) to confirm nothing broke.
 4. Run tests (if they exist) to confirm nothing broke.

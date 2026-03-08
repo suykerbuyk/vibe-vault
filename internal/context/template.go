@@ -4,10 +4,13 @@
 package context
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/johns/vibe-vault/templates"
 )
 
 // TemplateVars holds substitution variables for vault templates.
@@ -24,14 +27,24 @@ func DefaultVars(project string) TemplateVars {
 	}
 }
 
+// readEmbedded reads a file from the embedded agentctx FS.
+// relPath is relative to agentctx/, e.g. "workflow.md" or "commands/restart.md".
+func readEmbedded(relPath string) string {
+	data, err := fs.ReadFile(templates.AgentctxFS(), filepath.Join("agentctx", relPath))
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 // resolveTemplate checks vault Templates/agentctx/{relPath} first.
 // If found, applies variable substitution and returns it.
-// Otherwise, calls fallback() for the embedded default.
-func resolveTemplate(vaultPath, relPath string, vars TemplateVars, fallback func() string) string {
+// Otherwise, reads from the embedded template files.
+func resolveTemplate(vaultPath, relPath string, vars TemplateVars) string {
 	tmplPath := filepath.Join(vaultPath, "Templates", "agentctx", relPath)
 	data, err := os.ReadFile(tmplPath)
 	if err != nil {
-		return fallback()
+		return applyVars(readEmbedded(relPath), vars)
 	}
 	return applyVars(string(data), vars)
 }
@@ -48,27 +61,13 @@ func applyVars(content string, vars TemplateVars) string {
 func EnsureVaultTemplates(vaultPath string) []FileAction {
 	tmplDir := filepath.Join(vaultPath, "Templates", "agentctx")
 
-	templates := []struct {
-		rel     string
-		content string
-	}{
-		{"README.md", vaultTemplateReadme},
-		{"workflow.md", vaultTemplateWorkflow},
-		{"resume.md", vaultTemplateResume},
-		{"iterations.md", vaultTemplateIterations},
-		{"commands/restart.md", vaultTemplateRestart},
-		{"commands/wrap.md", vaultTemplateWrap},
-		{"commands/license.md", vaultTemplateLicense},
-		{"commands/makefile.md", vaultTemplateMakefile},
-	}
-
 	var actions []FileAction
-	for _, t := range templates {
-		path := filepath.Join(tmplDir, t.rel)
-		action := safeWrite(path, t.content, false)
+	for relPath, content := range BuiltinTemplates() {
+		path := filepath.Join(tmplDir, relPath)
+		action := safeWrite(path, content, false)
 		if action != "SKIP" {
 			actions = append(actions, FileAction{
-				Path:   filepath.Join("Templates", "agentctx", t.rel),
+				Path:   filepath.Join("Templates", "agentctx", relPath),
 				Action: action,
 			})
 		}
@@ -77,56 +76,21 @@ func EnsureVaultTemplates(vaultPath string) []FileAction {
 }
 
 // BuiltinTemplates returns the canonical agentctx template contents keyed by
-// relative path (e.g. "README.md", "commands/restart.md").
+// relative path (e.g. "README.md", "commands/restart.md", "CLAUDE.md").
 func BuiltinTemplates() map[string]string {
-	return map[string]string{
-		"README.md":            vaultTemplateReadme,
-		"workflow.md":          vaultTemplateWorkflow,
-		"resume.md":            vaultTemplateResume,
-		"iterations.md":        vaultTemplateIterations,
-		"commands/restart.md":  vaultTemplateRestart,
-		"commands/wrap.md":     vaultTemplateWrap,
-		"commands/license.md":  vaultTemplateLicense,
-		"commands/makefile.md": vaultTemplateMakefile,
-	}
+	result := make(map[string]string)
+	fsys := templates.AgentctxFS()
+	fs.WalkDir(fsys, "agentctx", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel("agentctx", path)
+		data, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return nil
+		}
+		result[rel] = string(data)
+		return nil
+	})
+	return result
 }
-
-// --- Vault template defaults ---
-// These are seeded into Templates/agentctx/ for user customization.
-// They use {{PROJECT}} and {{DATE}} variables.
-
-var vaultTemplateReadme = `# Agentctx Templates
-
-These templates are used by ` + "`vv context init`" + ` to scaffold vault-resident
-AI context files for new projects.
-
-## Variables
-
-- ` + "`{{PROJECT}}`" + ` — project name (auto-detected or --project flag)
-- ` + "`{{DATE}}`" + ` — current date (YYYY-MM-DD)
-
-## How it works
-
-When you run ` + "`vv context init`" + `, each file here is checked before
-falling back to the embedded defaults. To customize a template, edit
-the file here. Your changes will be used for all future project inits.
-
-## Shared commands
-
-Files in commands/ are propagated to all projects by ` + "`vv context sync`" + `.
-Project-specific commands always take precedence (never overwritten).
-`
-
-var vaultTemplateWorkflow = generateWorkflowMD("{{PROJECT}}")
-
-var vaultTemplateResume = generateResume("{{PROJECT}}")
-
-var vaultTemplateIterations = generateIterations("{{PROJECT}}")
-
-var vaultTemplateRestart = generateRestartMD()
-
-var vaultTemplateWrap = generateWrapMD()
-
-var vaultTemplateLicense = generateLicenseMD()
-
-var vaultTemplateMakefile = generateMakefileMD()

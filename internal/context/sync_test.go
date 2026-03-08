@@ -406,9 +406,14 @@ func TestMigrate1to2_VaultOnlySkipsRepo(t *testing.T) {
 		t.Fatalf("migrate1to2: %v", err)
 	}
 
-	// Should not have any repo-side actions (agentctx, CLAUDE.md, .claude/commands)
+	// Should not have any repo-side actions (agentctx, CLAUDE.md, .claude/ subdirs)
+	repoSidePaths := map[string]bool{
+		"agentctx": true, "CLAUDE.md": true,
+		".claude/commands": true, ".claude/rules": true,
+		".claude/skills": true, ".claude/agents": true,
+	}
 	for _, a := range actions {
-		if a.Path == "agentctx" || a.Path == "CLAUDE.md" || a.Path == ".claude/commands" {
+		if repoSidePaths[a.Path] {
 			t.Errorf("unexpected repo-side action: %s %s", a.Action, a.Path)
 		}
 	}

@@ -2,7 +2,7 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**~668 unit tests** across ~49 test files + **1 integration test** (23 subtests). All passing.
+**594 unit tests** across 25 test packages + **1 integration test** (22 subtests). All passing.
 
 Run unit tests: `make test` (or `go test -short ./...`)
 Run integration: `make integration` (or `go test -run TestIntegration -timeout 60s ./test/`)
@@ -18,10 +18,10 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 | `config/write_test.go` | 6 | `WriteDefault_CreatesConfig`, `WriteDefault_UpdatesExistingVaultPath`, `WriteDefault_UnchangedExisting`, `WriteDefault_PreservesAllSections`, `WriteDefault_MissingVaultPathKey`, `CompressHome` |
 | `enrichment/enrichment_test.go` | 11 | `Truncate`, `BuildMessages`, `ParseResponse`, `ParseResponse_EmptyChoices`, `ParseResponse_BadJSON`, `ValidateTag`, `Generate_Disabled`, `Generate_NoAPIKey`, `Generate_MockServer`, `Generate_Timeout`, `Generate_ServerError` |
 | `help/help_test.go` | 50 | Terminal output regression (all 15 subcommands incl. inject, export), FormatUsage, registry completeness (15 subcommands), roff structure (subcommands + hook + context subcommands), escapeRoff, ManName (incl. spaces), hook + context subcommand terminal output |
-| `context/context_test.go` | 27 | Init (CreatesVaultFiles, CreatesRepoFiles, CommandsDirectorySymlink, WorkflowMD, IdempotentSkip, ForceOverwrite, ProjectOverride, VaultNotFound, ClaudeMDContent, GitignoreUpdated, GitignoreIdempotent, ProjectDetection, AgentctxSymlink, ClaudeMDNoAbsolutePath, CommandsRelativeSymlink, GitignoreAgentctx, VersionFile), Migrate (CopiesResume, CopiesHistory, CopiesTasks, CopiesLocalCommands, SkipsAlreadySymlinkedCommands, SkipsMissing, SkipsExistingVaultFiles, ForceOverwrite, UpdatesRepoFiles, PreservesOriginals) |
-| `context/schema_test.go` | 9 | ReadVersion (Missing, Roundtrip, Invalid), WriteVersion (Creates, Overwrites), MigrationsFrom (Zero, One, Two, Latest) |
+| `context/context_test.go` | 27 | Init (CreatesVaultFiles, CreatesRepoFiles, ClaudeSubdirSymlinks, WorkflowMD, IdempotentSkip, ForceOverwrite, ProjectOverride, VaultNotFound, ClaudeMDContent, GitignoreUpdated, GitignoreIdempotent, ProjectDetection, AgentctxSymlink, ClaudeMDSymlink, ClaudeSubdirsRelativeSymlinks, GitignoreAgentctx, VersionFile), Migrate (CopiesResume, CopiesHistory, CopiesTasks, CopiesLocalCommands, SkipsAlreadySymlinkedCommands, SkipsMissing, SkipsExistingVaultFiles, ForceOverwrite, UpdatesRepoFiles, PreservesOriginals) |
+| `context/schema_test.go` | 10 | ReadVersion (Missing, Roundtrip, Invalid), WriteVersion (Creates, Overwrites), MigrationsFrom (Zero, One, Two, Three, Latest) |
 | `context/sync_test.go` | 14 | Sync (LegacyProject, AlreadyCurrent, PartialMigration, DryRun, AllMode, PropagatesSharedCommands, ExistingCommandNotOverwritten, Idempotent), Migrate0to1, Migrate1to2 (CreatesSymlink, RewritesCLAUDEMD, RelativeCommands, VaultOnlySkipsRepo), DiscoverProjects, PropagateSharedCommands |
-| `context/template_test.go` | 7 | ResolveTemplate (Fallback, VaultOverride, VarSubstitution), ApplyVars, EnsureVaultTemplates (Creates, SkipsExisting), DefaultVars |
+| `context/template_test.go` | 9 | ResolveTemplate (Fallback, VaultOverride, VarSubstitution), ApplyVars, EnsureVaultTemplates (Creates, SkipsExisting), DefaultVars, BuiltinTemplates_ContainsCLAUDE, ReadEmbedded |
 | `inject/inject_test.go` | 13 | `BuildEmpty`, `BuildSummary`, `BuildSessions`, `BuildSessionsFewEntries`, `BuildOpenThreads`, `BuildDecisions`, `BuildFriction`, `FormatMarkdown`, `FormatJSON`, `RenderTokenBudget`, `RenderSectionsFilter`, `EstimateTokens`, `OpenThreadsResolution`, `SignificantWords` |
 | `hook/handler_test.go` | 13 | `HandleInput_SessionEnd`, `HandleInput_SessionEnd_MissingTranscript`, `HandleInput_EventOverride`, `HandleInput_ClearReason` (now processed), `HandleInput_StopCreatesCheckpoint`, `HandleInput_StopThenSessionEnd`, `HandleInput_StopNoTranscript`, `HandleInput_StopMissingFile`, `HandleInput_UnknownEvent`, `HandleInput_EmptyEvent`, `HandleInput_SessionEnd_RefreshesContext`, `HandleInput_SessionEnd_NoFrictionAlert`, `InputJSON` |
 | `hook/setup_test.go` | 12 | `Install_NoFile`, `Install_EmptyFile`, `Install_ExistingSettingsNoHooks`, `Install_PreservesExistingHooks`, `Install_Idempotent`, `Install_PartialHooks`, `Install_CreatesBackup`, `Install_MalformedJSON`, `Uninstall_RemovesHooks`, `Uninstall_PreservesOtherHooks`, `Uninstall_NotInstalled`, `Uninstall_CleansEmptyHooksMap` |
@@ -54,6 +54,7 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 | `discover/discover_test.go` | 5 | `DiscoverFindsTranscripts`, `DiscoverSubagentDetection`, `DiscoverUUIDFiltering`, `FindBySessionID`, `FindBySessionIDSubagent` |
 | `archive/archive_test.go` | 3 | `ArchiveRoundTrip`, `IsArchived`, `ArchivePath` |
 | `check/check_test.go` | 27 | `CheckVaultPath` (pass/fail), `CheckObsidian` (pass/warn), `CheckProjects` (pass/warn), `CheckStateDir` (pass/warn), `CheckIndex` (pass/warn/fail), `CheckDomains` (all exist/some missing/empty skipped), `CheckEnrichment` (disabled/enabled+key/enabled+no key), `checkHookFile` (pass/warn/fail), `Report.HasFailures` (true/false), `Run` integration, `Status.String`, `CheckAgentctxSchema` (current/outdated/no-agentctx) |
+| `templates/templates_test.go` | 8 | `New` (entry count=13), `DefaultContent`, `DefaultContentReturnsCopy`, `Has`, `Compare` (default/customized/missing), `Reset` (create/reset), `ResetAll` (13 actions), `ResetUnknown` |
 
 ## Integration Test
 

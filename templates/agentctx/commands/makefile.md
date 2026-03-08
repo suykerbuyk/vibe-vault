@@ -3,28 +3,28 @@ Audit or create a Makefile facade for this project's native build system.
 ## Rules
 
 1. **Discover** the native build system by checking for config files:
-   - `CMakeLists.txt` -> CMake
-   - `Cargo.toml` -> Cargo
-   - `go.mod` -> Go
-   - `package.json` -> Node (npm/yarn/pnpm)
-   - `meson.build` -> Meson
+   - CMakeLists.txt -> CMake
+   - Cargo.toml -> Cargo
+   - go.mod -> Go
+   - package.json -> Node (npm/yarn/pnpm)
+   - meson.build -> Meson
 
-2. **Read** any existing `Makefile` to preserve project-specific targets.
+2. **Read** any existing Makefile to preserve project-specific targets.
 
-3. **Create or update** a `Makefile` with these standard targets:
+3. **Create or update** a Makefile with these standard targets:
 
    | Target           | Purpose                          | Safety    |
    |------------------|----------------------------------|-----------|
-   | `make`           | Print help (`.DEFAULT_GOAL`)     | read-only |
-   | `make build`     | Default build                    | mutates   |
-   | `make test`      | Unit tests (builds first)        | mutates   |
-   | `make integration` | Integration tests (builds first) | mutates |
-   | `make install`   | Install to `PREFIX=~/.local`     | mutates   |
-   | `make clean`     | Remove build artifacts           | mutates   |
+   | make             | Print help (.DEFAULT_GOAL)       | read-only |
+   | make build       | Default build                    | mutates   |
+   | make test        | Unit tests (builds first)        | mutates   |
+   | make integration | Integration tests (builds first) | mutates   |
+   | make install     | Install to PREFIX=~/.local       | mutates   |
+   | make clean       | Remove build artifacts           | mutates   |
 
-   Key constraint: **bare `make` MUST show help and NEVER mutate.** Use `.DEFAULT_GOAL := help`.
+   Key constraint: **bare make MUST show help and NEVER mutate.** Use .DEFAULT_GOAL := help.
 
-4. **Validate** by running `make` and confirming it only prints help (exit 0, no build side effects).
+4. **Validate** by running make and confirming it only prints help (exit 0, no build side effects).
 
 ## Adaptation patterns
 
@@ -102,4 +102,4 @@ clean:
 
 ## Help target template
 
-The `help` target should list all targets, overridable variables, and include a "Quick start" recommendation pointing the user to the most common workflow (usually `make build && make test`).
+The help target should list all targets, overridable variables, and include a "Quick start" recommendation pointing the user to the most common workflow (usually make build && make test).
