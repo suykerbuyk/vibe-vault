@@ -26,6 +26,7 @@ import (
 	"github.com/johns/vibe-vault/internal/scaffold"
 	"github.com/johns/vibe-vault/internal/session"
 	"github.com/johns/vibe-vault/internal/stats"
+	"github.com/johns/vibe-vault/internal/templates"
 	"github.com/johns/vibe-vault/internal/trends"
 )
 
@@ -77,6 +78,9 @@ func main() {
 
 	case "export":
 		runExport()
+
+	case "templates":
+		runTemplates()
 
 	case "version":
 		if wantsHelp(os.Args[2:]) {
@@ -519,6 +523,128 @@ func runExport() {
 	}
 
 	fmt.Print(output)
+}
+
+func runTemplates() {
+	args := os.Args[2:]
+
+	if len(args) > 0 {
+		switch args[0] {
+		case "list":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdTemplatesList))
+				return
+			}
+			cfg := mustLoadConfig()
+			reg := templates.New()
+			tmplDir := filepath.Join(cfg.VaultPath, "Templates")
+			for _, fs := range reg.Compare(tmplDir) {
+				fmt.Printf("  %-12s %s\n", fs.Status, fs.Entry.RelPath)
+			}
+			return
+
+		case "diff":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdTemplatesDiff))
+				return
+			}
+			cfg := mustLoadConfig()
+			reg := templates.New()
+			tmplDir := filepath.Join(cfg.VaultPath, "Templates")
+			file := flagValue(args[1:], "--file")
+			if file != "" {
+				d, err := reg.Diff(tmplDir, file)
+				if err != nil {
+					fatal("diff: %v", err)
+				}
+				if d == "" {
+					fmt.Println("no differences")
+				} else {
+					fmt.Print(d)
+				}
+			} else {
+				d := reg.DiffAll(tmplDir)
+				if d == "" {
+					fmt.Println("all templates match defaults")
+				} else {
+					fmt.Print(d)
+				}
+			}
+			return
+
+		case "show":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdTemplatesShow))
+				return
+			}
+			if len(args) < 2 {
+				fatal("usage: vv templates show <name>")
+			}
+			reg := templates.New()
+			content, ok := reg.DefaultContent(args[1])
+			if !ok {
+				fatal("unknown template: %s", args[1])
+			}
+			fmt.Print(string(content))
+			return
+
+		case "reset":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdTemplatesReset))
+				return
+			}
+			cfg := mustLoadConfig()
+			reg := templates.New()
+			tmplDir := filepath.Join(cfg.VaultPath, "Templates")
+			file := flagValue(args[1:], "--file")
+			all := hasFlag(args[1:], "--all")
+			force := hasFlag(args[1:], "--force")
+
+			if file == "" && !all {
+				fatal("specify --file <name> or --all")
+			}
+			if file != "" && !reg.Has(file) {
+				fatal("unknown template: %s", file)
+			}
+
+			if !force {
+				fmt.Println("dry-run (pass --force to apply):")
+				if all {
+					for _, fs := range reg.Compare(tmplDir) {
+						fmt.Printf("  would reset  %s\n", fs.Entry.RelPath)
+					}
+				} else {
+					fmt.Printf("  would reset  %s\n", file)
+				}
+				return
+			}
+
+			if all {
+				actions, err := reg.ResetAll(tmplDir)
+				if err != nil {
+					fatal("reset: %v", err)
+				}
+				for _, a := range actions {
+					fmt.Printf("  %-8s %s\n", a.Action, a.RelPath)
+				}
+			} else {
+				a, err := reg.Reset(tmplDir, file)
+				if err != nil {
+					fatal("reset: %v", err)
+				}
+				fmt.Printf("  %-8s %s\n", a.Action, a.RelPath)
+			}
+			return
+		}
+	}
+
+	if wantsHelp(args) {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdTemplates))
+		return
+	}
+
+	fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdTemplates))
+	os.Exit(1)
 }
 
 func runIndex() {

@@ -522,6 +522,101 @@ symlinks). Run from each repo root without --all for repo-side updates.`,
 	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-context-init(1)"},
 }
 
+var CmdTemplates = Command{
+	Name:     "templates",
+	Synopsis: "inspect, compare, and reset vault templates",
+	Brief:    "Inspect, compare, and reset vault templates",
+	Usage:      "vv templates [list | diff | show | reset]",
+	TableUsage: "vv templates [list | ...]",
+	Description: `Manages vault templates against their built-in defaults. Over time,
+built-in templates evolve with new features and better prompts, but
+vault copies drift. This command makes recalibration easy.
+
+Subcommands:
+  vv templates list              Show all templates with status
+  vv templates diff [--file X]   Unified diff of vault vs defaults
+  vv templates show <name>       Print built-in default to stdout
+  vv templates reset [--file X]  Reset templates to defaults`,
+	SeeAlso: []string{"vv(1)", "vv-context-init(1)"},
+}
+
+var CmdTemplatesList = Command{
+	Name:     "templates list",
+	Synopsis: "list all templates with status",
+	Brief:    "List all templates with status",
+	Usage:    "vv templates list",
+	Description: `Shows all 12 built-in templates with their current status:
+
+  default     Vault copy matches the built-in default
+  customized  Vault copy has been modified
+  missing     Template not found in vault`,
+	SeeAlso: []string{"vv(1)", "vv-templates(1)"},
+}
+
+var CmdTemplatesDiff = Command{
+	Name:     "templates diff",
+	Synopsis: "show differences between vault and default templates",
+	Brief:    "Diff vault templates against defaults",
+	Usage:    "vv templates diff [--file <name>]",
+	Flags: []Flag{
+		{Name: "--file <name>", Desc: "Diff only this template (relative path, e.g. agentctx/workflow.md)"},
+	},
+	Description: `Shows unified diffs between vault template copies and their built-in
+defaults. Without --file, shows diffs for all customized templates.`,
+	Examples: []string{
+		"vv templates diff                            Diff all customized templates",
+		"vv templates diff --file agentctx/resume.md  Diff a specific template",
+	},
+	SeeAlso: []string{"vv(1)", "vv-templates(1)", "vv-templates-reset(1)"},
+}
+
+var CmdTemplatesShow = Command{
+	Name:     "templates show",
+	Synopsis: "print a built-in default template to stdout",
+	Brief:    "Print built-in default to stdout",
+	Usage:    "vv templates show <name>",
+	Args: []Arg{
+		{Name: "name", Desc: "Template relative path (e.g. agentctx/workflow.md, session-summary.md)"},
+	},
+	Description: `Prints the built-in default content of a template to stdout. Useful
+for inspecting defaults without modifying vault files.`,
+	Examples: []string{
+		"vv templates show agentctx/workflow.md",
+		"vv templates show session-summary.md",
+	},
+	SeeAlso: []string{"vv(1)", "vv-templates(1)"},
+}
+
+var CmdTemplatesReset = Command{
+	Name:     "templates reset",
+	Synopsis: "reset vault templates to built-in defaults",
+	Brief:    "Reset vault templates to defaults",
+	Usage:    "vv templates reset [--file <name> | --all] [--force]",
+	Flags: []Flag{
+		{Name: "--file <name>", Desc: "Reset only this template"},
+		{Name: "--all", Desc: "Reset all templates"},
+		{Name: "--force", Desc: "Actually perform the reset (dry-run without this flag)"},
+	},
+	Description: `Overwrites vault template copies with their built-in defaults.
+
+Without --force, performs a dry-run showing what would be reset.
+Requires either --file or --all to specify scope.`,
+	Examples: []string{
+		"vv templates reset --all                              Dry-run: show what would reset",
+		"vv templates reset --all --force                      Reset all templates",
+		"vv templates reset --file agentctx/resume.md --force  Reset one template",
+	},
+	SeeAlso: []string{"vv(1)", "vv-templates(1)", "vv-templates-diff(1)"},
+}
+
+// TemplatesSubcommands is the ordered list of templates sub-subcommands.
+var TemplatesSubcommands = []Command{
+	CmdTemplatesList,
+	CmdTemplatesDiff,
+	CmdTemplatesShow,
+	CmdTemplatesReset,
+}
+
 // HookSubcommands is the ordered list of hook sub-subcommands.
 var HookSubcommands = []Command{
 	CmdHookInstall,
@@ -551,5 +646,6 @@ var Subcommands = []Command{
 	CmdTrends,
 	CmdInject,
 	CmdExport,
+	CmdTemplates,
 	CmdVersion,
 }

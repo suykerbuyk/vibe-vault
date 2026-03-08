@@ -295,6 +295,7 @@ deterministic heuristics rather than embeddings.
 | `vv trends [--project X]` | Show metric trends over time |
 | `vv inject [--project X]` | Output session-start context payload |
 | `vv context [init \| migrate \| sync]` | Manage vault-resident AI context files |
+| `vv templates [list \| diff \| show \| reset]` | Inspect, compare, and reset vault templates |
 | `vv version` | Print version |
 
 ### Common Workflows
@@ -352,6 +353,17 @@ vv context migrate                    # copy existing RESUME.md/HISTORY.md/tasks
 vv context sync                       # run schema migrations + propagate shared commands
 vv context sync --all                 # sync all projects (vault-only operations)
 vv context sync --dry-run             # preview changes without modifying files
+```
+
+**Inspect and reset vault templates:**
+```bash
+vv templates list                                # show all templates with status
+vv templates diff                                # unified diff of all customized templates
+vv templates diff --file agentctx/resume.md      # diff a specific template
+vv templates show session-summary.md             # print built-in default to stdout
+vv templates reset --all                         # dry-run: show what would reset
+vv templates reset --all --force                 # reset all templates to defaults
+vv templates reset --file agentctx/resume.md --force  # reset one template
 ```
 
 **Diagnose issues:**
@@ -623,7 +635,7 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 ### Test Suite
 
-**555 tests** across 48 test files + **1 integration test** with 22
+**684 tests** across 51 test files + **1 integration test** with 22
 subtests. The integration test exercises the full pipeline:
 `init` → `process` → `index` → `knowledge injection` → `stats` →
 `backfill` → `archive` → `checkpoint lifecycle` → `friction` →

@@ -16,6 +16,9 @@ import (
 //go:embed all:templates
 var templates embed.FS
 
+// EmbeddedFS returns the embedded template filesystem.
+func EmbeddedFS() embed.FS { return templates }
+
 // Options controls scaffold behavior.
 type Options struct {
 	GitInit bool // run git init after scaffolding

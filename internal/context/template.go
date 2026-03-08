@@ -76,6 +76,21 @@ func EnsureVaultTemplates(vaultPath string) []FileAction {
 	return actions
 }
 
+// BuiltinTemplates returns the canonical agentctx template contents keyed by
+// relative path (e.g. "README.md", "commands/restart.md").
+func BuiltinTemplates() map[string]string {
+	return map[string]string{
+		"README.md":            vaultTemplateReadme,
+		"workflow.md":          vaultTemplateWorkflow,
+		"resume.md":            vaultTemplateResume,
+		"iterations.md":        vaultTemplateIterations,
+		"commands/restart.md":  vaultTemplateRestart,
+		"commands/wrap.md":     vaultTemplateWrap,
+		"commands/license.md":  vaultTemplateLicense,
+		"commands/makefile.md": vaultTemplateMakefile,
+	}
+}
+
 // --- Vault template defaults ---
 // These are seeded into Templates/agentctx/ for user customization.
 // They use {{PROJECT}} and {{DATE}} variables.

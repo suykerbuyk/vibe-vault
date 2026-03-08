@@ -283,6 +283,20 @@ var expectedTerminal = map[string]string{
 		"  vv export --project myproject          Export one project as JSON\n" +
 		"  vv export --format csv > sessions.csv  Export to file\n",
 
+	"templates": "vv templates \u2014 inspect, compare, and reset vault templates\n" +
+		"\n" +
+		"Usage: vv templates [list | diff | show | reset]\n" +
+		"\n" +
+		"Manages vault templates against their built-in defaults. Over time,\n" +
+		"built-in templates evolve with new features and better prompts, but\n" +
+		"vault copies drift. This command makes recalibration easy.\n" +
+		"\n" +
+		"Subcommands:\n" +
+		"  vv templates list              Show all templates with status\n" +
+		"  vv templates diff [--file X]   Unified diff of vault vs defaults\n" +
+		"  vv templates show <name>       Print built-in default to stdout\n" +
+		"  vv templates reset [--file X]  Reset templates to defaults\n",
+
 	"version": "vv version \u2014 print version\n" +
 		"\n" +
 		"Usage: vv version\n",
@@ -322,6 +336,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv trends [--project X]      Show metric trends over time\n" +
 		"  vv inject [--project X]      Output session-start context payload\n" +
 		"  vv export [--format X]       Export session data (JSON or CSV)\n" +
+		"  vv templates [list | ...]    Inspect, compare, and reset vault templates\n" +
 		"  vv version                   Print version\n" +
 		"  vv help                      Show this help\n" +
 		"\n" +
@@ -340,7 +355,7 @@ func TestFormatUsage(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "context", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "templates", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))
@@ -406,6 +421,7 @@ func TestFormatRoffStructure(t *testing.T) {
 
 	allCmds := append(Subcommands, HookSubcommands...)
 	allCmds = append(allCmds, ContextSubcommands...)
+	allCmds = append(allCmds, TemplatesSubcommands...)
 	// Test each subcommand has required sections
 	for _, cmd := range allCmds {
 		t.Run(cmd.Name, func(t *testing.T) {

@@ -2,7 +2,7 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**566 unit tests** across 48 test files + **1 integration test** (22 subtests). All passing.
+**684 unit tests** across 51 test files + **1 integration test** (22 subtests). All passing.
 
 Run unit tests: `make test` (or `go test -short ./...`)
 Run integration: `make integration` (or `go test -run TestIntegration -timeout 60s ./test/`)
