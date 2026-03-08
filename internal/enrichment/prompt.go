@@ -63,10 +63,10 @@ func buildUserPrompt(input PromptInput) string {
 	var b strings.Builder
 
 	// Metadata section
-	b.WriteString(fmt.Sprintf("## Session Metadata\n"))
-	b.WriteString(fmt.Sprintf("- Duration: %d minutes\n", input.Duration))
-	b.WriteString(fmt.Sprintf("- User messages: %d\n", input.UserMessages))
-	b.WriteString(fmt.Sprintf("- Assistant messages: %d\n", input.AsstMessages))
+	b.WriteString("## Session Metadata\n")
+	fmt.Fprintf(&b, "- Duration: %d minutes\n", input.Duration)
+	fmt.Fprintf(&b, "- User messages: %d\n", input.UserMessages)
+	fmt.Fprintf(&b, "- Assistant messages: %d\n", input.AsstMessages)
 
 	// Tool usage
 	if len(input.ToolCounts) > 0 {
@@ -78,7 +78,7 @@ func buildUserPrompt(input PromptInput) string {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			b.WriteString(fmt.Sprintf("- %s: %d\n", k, input.ToolCounts[k]))
+			fmt.Fprintf(&b, "- %s: %d\n", k, input.ToolCounts[k])
 		}
 	}
 
@@ -86,7 +86,7 @@ func buildUserPrompt(input PromptInput) string {
 	if len(input.FilesChanged) > 0 {
 		b.WriteString("\n## Files Changed\n")
 		for _, f := range input.FilesChanged {
-			b.WriteString(fmt.Sprintf("- %s\n", f))
+			fmt.Fprintf(&b, "- %s\n", f)
 		}
 	}
 
@@ -95,10 +95,10 @@ func buildUserPrompt(input PromptInput) string {
 		b.WriteString("\n## Heuristic Analysis\n")
 		b.WriteString("The following was extracted heuristically. Refine rather than replace.\n")
 		if input.NarrativeSummary != "" {
-			b.WriteString(fmt.Sprintf("- Summary: %s\n", input.NarrativeSummary))
+			fmt.Fprintf(&b, "- Summary: %s\n", input.NarrativeSummary)
 		}
 		if input.NarrativeTag != "" {
-			b.WriteString(fmt.Sprintf("- Tag: %s\n", input.NarrativeTag))
+			fmt.Fprintf(&b, "- Tag: %s\n", input.NarrativeTag)
 		}
 		if len(input.Activities) > 0 {
 			b.WriteString("- Activities:\n")
@@ -107,10 +107,10 @@ func buildUserPrompt(input PromptInput) string {
 				max = 20
 			}
 			for _, a := range input.Activities[:max] {
-				b.WriteString(fmt.Sprintf("  - %s\n", a))
+				fmt.Fprintf(&b, "  - %s\n", a)
 			}
 			if len(input.Activities) > 20 {
-				b.WriteString(fmt.Sprintf("  - ... and %d more\n", len(input.Activities)-20))
+				fmt.Fprintf(&b, "  - ... and %d more\n", len(input.Activities)-20)
 			}
 		}
 	}

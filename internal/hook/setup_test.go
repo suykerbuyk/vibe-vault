@@ -169,8 +169,8 @@ func TestInstall_Idempotent(t *testing.T) {
 	}
 
 	// Second install — should be a no-op
-	if err := Install(); err != nil {
-		t.Fatal(err)
+	if installErr := Install(); installErr != nil {
+		t.Fatal(installErr)
 	}
 
 	second, err := os.ReadFile(path)
@@ -234,8 +234,8 @@ func TestInstall_CreatesBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Install(); err != nil {
-		t.Fatal(err)
+	if installErr := Install(); installErr != nil {
+		t.Fatal(installErr)
 	}
 
 	backupContent, err := os.ReadFile(path + ".vv.bak")

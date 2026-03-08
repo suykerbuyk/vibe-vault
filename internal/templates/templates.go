@@ -48,7 +48,7 @@ func New() *Registry {
 
 	// Scaffold templates: discover top-level Templates/ files (skip agentctx/ subtree)
 	scaffoldFS := scaffold.EmbeddedFS()
-	fs.WalkDir(scaffoldFS, "templates/Templates", func(path string, d fs.DirEntry, err error) error {
+	_ = fs.WalkDir(scaffoldFS, "templates/Templates", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}

@@ -133,7 +133,7 @@ func CheckProjects(projDir string) Result {
 
 func countMD(dir string) int {
 	count := 0
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -276,7 +276,7 @@ func CheckAgentctxSchema(vaultPath, project string, latestVersion int) *Result {
 		if strings.HasPrefix(line, "schema_version") {
 			parts := strings.SplitN(line, "=", 2)
 			if len(parts) == 2 {
-				fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &version)
+				_, _ = fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &version)
 			}
 		}
 	}

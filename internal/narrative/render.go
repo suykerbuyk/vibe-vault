@@ -41,9 +41,9 @@ func RenderWorkPerformed(segments []Segment) string {
 			segNum++
 
 			if nonEmpty > 1 {
-				b.WriteString(fmt.Sprintf("### Segment %d\n", segNum))
+				fmt.Fprintf(&b, "### Segment %d\n", segNum)
 				if seg.UserRequest != "" {
-					b.WriteString(fmt.Sprintf("> \"%s\"\n", seg.UserRequest))
+					fmt.Fprintf(&b, "> \"%s\"\n", seg.UserRequest)
 				}
 				b.WriteString("\n")
 			}
@@ -64,7 +64,7 @@ func renderActivities(b *strings.Builder, activities []Activity, totalSession in
 	}
 
 	for _, a := range activities {
-		b.WriteString(fmt.Sprintf("- %s\n", a.Description))
+		fmt.Fprintf(b, "- %s\n", a.Description)
 	}
 }
 
@@ -78,18 +78,18 @@ func renderFilteredActivities(b *strings.Builder, activities []Activity) {
 		switch a.Kind {
 		case KindFileCreate, KindFileModify, KindTestRun, KindGitCommit, KindGitPush,
 			KindDecision, KindPlanMode, KindDelegation, KindBuild:
-			b.WriteString(fmt.Sprintf("- %s\n", a.Description))
+			fmt.Fprintf(b, "- %s\n", a.Description)
 			continue
 		case KindError:
-			b.WriteString(fmt.Sprintf("- %s\n", a.Description))
+			fmt.Fprintf(b, "- %s\n", a.Description)
 			continue
 		case KindExplore:
-			b.WriteString(fmt.Sprintf("- %s\n", a.Description))
+			fmt.Fprintf(b, "- %s\n", a.Description)
 			continue
 		}
 
 		if a.IsError {
-			b.WriteString(fmt.Sprintf("- %s\n", a.Description))
+			fmt.Fprintf(b, "- %s\n", a.Description)
 			continue
 		}
 
@@ -97,7 +97,7 @@ func renderFilteredActivities(b *strings.Builder, activities []Activity) {
 		if a.Kind == KindCommand {
 			commandCount++
 			if commandCount <= commandMax {
-				b.WriteString(fmt.Sprintf("- %s\n", a.Description))
+				fmt.Fprintf(b, "- %s\n", a.Description)
 			}
 		}
 	}
@@ -105,6 +105,6 @@ func renderFilteredActivities(b *strings.Builder, activities []Activity) {
 	// Summary for omitted commands
 	omitted := commandCount - commandMax
 	if omitted > 0 {
-		b.WriteString(fmt.Sprintf("- ... and %d more commands\n", omitted))
+		fmt.Fprintf(b, "- ... and %d more commands\n", omitted)
 	}
 }

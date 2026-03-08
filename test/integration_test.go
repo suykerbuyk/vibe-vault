@@ -583,7 +583,7 @@ func TestIntegration(t *testing.T) {
 		if !ok {
 			t.Fatal("session-stop-001 not in index after Stop")
 		}
-		if checkpoint, ok := stopEntry["checkpoint"].(bool); !ok || !checkpoint {
+		if checkpoint, isOk := stopEntry["checkpoint"].(bool); !isOk || !checkpoint {
 			t.Errorf("expected checkpoint=true in index, got %v", stopEntry["checkpoint"])
 		}
 

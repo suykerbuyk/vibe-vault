@@ -203,7 +203,9 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun bool) []File
 		if err != nil {
 			continue
 		}
-		os.MkdirAll(projectCmdsDir, 0o755)
+		if err := os.MkdirAll(projectCmdsDir, 0o755); err != nil {
+			continue
+		}
 		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
 			continue
 		}
@@ -229,7 +231,7 @@ func migrate3to4(ctx MigrationContext) ([]FileAction, error) {
 
 	// Ensure vault-side directories for all .claude/ subdirs
 	for _, sub := range claudeSubdirs {
-		os.MkdirAll(filepath.Join(ctx.AgentctxPath, sub), 0o755)
+		_ = os.MkdirAll(filepath.Join(ctx.AgentctxPath, sub), 0o755)
 	}
 
 	// Repo-side operations (skip if no repo path)
@@ -247,7 +249,7 @@ func migrate3to4(ctx MigrationContext) ([]FileAction, error) {
 
 	// Create .claude/ subdirectory symlinks through agentctx
 	dotClaude := filepath.Join(ctx.RepoPath, ".claude")
-	os.MkdirAll(dotClaude, 0o755)
+	_ = os.MkdirAll(dotClaude, 0o755)
 	for _, sub := range claudeSubdirs {
 		link := filepath.Join(dotClaude, sub)
 		target := filepath.Join("..", "agentctx", sub)
@@ -297,7 +299,7 @@ func migrate1to2(ctx MigrationContext) ([]FileAction, error) {
 
 	// 3. Replace .claude/ subdirectories with relative symlinks through agentctx
 	dotClaude := filepath.Join(ctx.RepoPath, ".claude")
-	os.MkdirAll(dotClaude, 0o755)
+	_ = os.MkdirAll(dotClaude, 0o755)
 	for _, sub := range claudeSubdirs {
 		link := filepath.Join(dotClaude, sub)
 		target := filepath.Join("..", "agentctx", sub)

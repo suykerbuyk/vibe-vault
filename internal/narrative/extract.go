@@ -171,11 +171,6 @@ func extractActivitiesWithHistory(entries []transcript.Entry, cwd string, knownF
 	return activities
 }
 
-// extractActivities processes entries from one segment into activities.
-func extractActivities(entries []transcript.Entry, cwd string) []Activity {
-	return extractActivitiesWithHistory(entries, cwd, nil)
-}
-
 // classifyToolUse maps a tool call to an Activity.
 func classifyToolUse(tu transcript.ContentBlock, result *ToolResult, ts time.Time, cwd string) *Activity {
 	isErr := result != nil && result.IsError
@@ -683,7 +678,7 @@ func parseCommitResult(output string) (sha, msg string) {
 		return "", ""
 	}
 	for _, c := range candidate {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
 			return "", ""
 		}
 	}

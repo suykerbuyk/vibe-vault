@@ -173,7 +173,7 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 	}
 
 	// Report enrichment status in output.
-	enrichTag := "heuristic"
+	var enrichTag string
 	if providerName, model, reason := llm.Available(cfg.Enrichment); reason == "" {
 		enrichTag = fmt.Sprintf("enriched by %s/%s", providerName, model)
 	} else if cfg.Enrichment.Enabled {

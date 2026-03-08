@@ -30,7 +30,7 @@ func RenderTimeline(segments []Segment) string {
 			timeStr := ts.Format("15:04")
 
 			icon := activityIcon(a.Kind)
-			b.WriteString(fmt.Sprintf("%s  %s %s\n", timeStr, icon, a.Description))
+			fmt.Fprintf(&b, "%s  %s %s\n", timeStr, icon, a.Description)
 		}
 	}
 

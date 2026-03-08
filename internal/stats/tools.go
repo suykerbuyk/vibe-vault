@@ -127,8 +127,8 @@ func RenderToolEffectiveness(te *ToolEffectiveness) string {
 				b.WriteString("|------|------|--------|--------------|\n")
 				hasErrorTools = true
 			}
-			b.WriteString(fmt.Sprintf("| %s | %d | %d | %.0f%% |\n",
-				tm.Name, tm.Uses, tm.Errors, tm.SuccessRate))
+			fmt.Fprintf(&b, "| %s | %d | %d | %.0f%% |\n",
+				tm.Name, tm.Uses, tm.Errors, tm.SuccessRate)
 		}
 	}
 
@@ -140,7 +140,7 @@ func RenderToolEffectiveness(te *ToolEffectiveness) string {
 	if len(te.Struggles) > 0 {
 		b.WriteString("**Struggle patterns detected:**\n\n")
 		for _, s := range te.Struggles {
-			b.WriteString(fmt.Sprintf("- `%s` — %d edit cycles\n", s.File, s.Cycles))
+			fmt.Fprintf(&b, "- `%s` — %d edit cycles\n", s.File, s.Cycles)
 		}
 		b.WriteString("\n")
 	}

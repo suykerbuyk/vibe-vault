@@ -120,10 +120,10 @@ func FormatMarkdown(r Result, sections []string) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("# Context: %s\n", r.Project))
+	fmt.Fprintf(&b, "# Context: %s\n", r.Project)
 
 	if sectionSet[SectionSummary] && r.Summary != "" {
-		b.WriteString(fmt.Sprintf("\n## Summary\n\n%s\n", r.Summary))
+		fmt.Fprintf(&b, "\n## Summary\n\n%s\n", r.Summary)
 	}
 
 	if sectionSet[SectionSessions] && len(r.Sessions) > 0 {
@@ -143,20 +143,20 @@ func FormatMarkdown(r Result, sections []string) string {
 	if sectionSet[SectionThreads] && len(r.Threads) > 0 {
 		b.WriteString("\n## Open Threads\n\n")
 		for _, t := range r.Threads {
-			b.WriteString(fmt.Sprintf("- %s\n", t))
+			fmt.Fprintf(&b, "- %s\n", t)
 		}
 	}
 
 	if sectionSet[SectionDecisions] && len(r.Decisions) > 0 {
 		b.WriteString("\n## Decisions\n\n")
 		for _, d := range r.Decisions {
-			b.WriteString(fmt.Sprintf("- %s\n", d))
+			fmt.Fprintf(&b, "- %s\n", d)
 		}
 	}
 
 	if sectionSet[SectionFriction] && r.Friction != nil {
-		b.WriteString(fmt.Sprintf("\n## Friction\n\nTrend: %s (avg %.1f)\n",
-			r.Friction.Direction, r.Friction.Average))
+		fmt.Fprintf(&b, "\n## Friction\n\nTrend: %s (avg %.1f)\n",
+			r.Friction.Direction, r.Friction.Average)
 	}
 
 	return b.String()

@@ -76,89 +76,89 @@ func SessionNote(d NoteData) string {
 
 	// Frontmatter
 	b.WriteString("---\n")
-	b.WriteString(fmt.Sprintf("date: %s\n", d.Date))
+	fmt.Fprintf(&b, "date: %s\n", d.Date)
 	b.WriteString("type: session\n")
-	b.WriteString(fmt.Sprintf("project: %s\n", d.Project))
+	fmt.Fprintf(&b, "project: %s\n", d.Project)
 	if d.Branch != "" {
-		b.WriteString(fmt.Sprintf("branch: %s\n", d.Branch))
+		fmt.Fprintf(&b, "branch: %s\n", d.Branch)
 	}
-	b.WriteString(fmt.Sprintf("domain: %s\n", d.Domain))
+	fmt.Fprintf(&b, "domain: %s\n", d.Domain)
 	if d.Model != "" {
-		b.WriteString(fmt.Sprintf("model: %s\n", d.Model))
+		fmt.Fprintf(&b, "model: %s\n", d.Model)
 	}
-	b.WriteString(fmt.Sprintf("session_id: \"%s\"\n", d.SessionID))
-	b.WriteString(fmt.Sprintf("iteration: %d\n", d.Iteration))
-	b.WriteString(fmt.Sprintf("duration_minutes: %d\n", d.Duration))
-	b.WriteString(fmt.Sprintf("messages: %d\n", d.Messages))
-	b.WriteString(fmt.Sprintf("tokens_in: %d\n", d.InputTokens))
-	b.WriteString(fmt.Sprintf("tokens_out: %d\n", d.OutputTokens))
+	fmt.Fprintf(&b, "session_id: \"%s\"\n", d.SessionID)
+	fmt.Fprintf(&b, "iteration: %d\n", d.Iteration)
+	fmt.Fprintf(&b, "duration_minutes: %d\n", d.Duration)
+	fmt.Fprintf(&b, "messages: %d\n", d.Messages)
+	fmt.Fprintf(&b, "tokens_in: %d\n", d.InputTokens)
+	fmt.Fprintf(&b, "tokens_out: %d\n", d.OutputTokens)
 	if d.TotalTools > 0 {
-		b.WriteString(fmt.Sprintf("tool_uses: %d\n", d.TotalTools))
+		fmt.Fprintf(&b, "tool_uses: %d\n", d.TotalTools)
 		var toolNames []string
 		for name := range d.ToolCounts {
 			toolNames = append(toolNames, name)
 		}
 		sort.Strings(toolNames)
-		b.WriteString(fmt.Sprintf("tools: [%s]\n", strings.Join(toolNames, ", ")))
+		fmt.Fprintf(&b, "tools: [%s]\n", strings.Join(toolNames, ", "))
 	}
 	status := d.Status
 	if status == "" {
 		status = "completed"
 	}
-	b.WriteString(fmt.Sprintf("status: %s\n", status))
+	fmt.Fprintf(&b, "status: %s\n", status)
 	if len(d.Commits) > 0 {
 		var shas []string
 		for _, c := range d.Commits {
 			shas = append(shas, c.SHA)
 		}
-		b.WriteString(fmt.Sprintf("commits: [%s]\n", strings.Join(shas, ", ")))
+		fmt.Fprintf(&b, "commits: [%s]\n", strings.Join(shas, ", "))
 	}
 	if d.FrictionScore > 0 {
-		b.WriteString(fmt.Sprintf("friction_score: %d\n", d.FrictionScore))
+		fmt.Fprintf(&b, "friction_score: %d\n", d.FrictionScore)
 	}
 	if d.Corrections > 0 {
-		b.WriteString(fmt.Sprintf("corrections: %d\n", d.Corrections))
+		fmt.Fprintf(&b, "corrections: %d\n", d.Corrections)
 	}
 	if d.ThinkingBlocks > 0 {
-		b.WriteString(fmt.Sprintf("thinking_blocks: %d\n", d.ThinkingBlocks))
+		fmt.Fprintf(&b, "thinking_blocks: %d\n", d.ThinkingBlocks)
 	}
 	if d.CognitiveComplexity != "" {
-		b.WriteString(fmt.Sprintf("cognitive_complexity: %s\n", d.CognitiveComplexity))
+		fmt.Fprintf(&b, "cognitive_complexity: %s\n", d.CognitiveComplexity)
 	}
 	if d.AvgTurnMs > 0 {
-		b.WriteString(fmt.Sprintf("avg_turn_ms: %d\n", d.AvgTurnMs))
+		fmt.Fprintf(&b, "avg_turn_ms: %d\n", d.AvgTurnMs)
 	}
 	if d.MaxTurnMs > 0 {
-		b.WriteString(fmt.Sprintf("max_turn_ms: %d\n", d.MaxTurnMs))
+		fmt.Fprintf(&b, "max_turn_ms: %d\n", d.MaxTurnMs)
 	}
 	if d.SessionName != "" {
-		b.WriteString(fmt.Sprintf("session_name: \"%s\"\n", escapeYAML(d.SessionName)))
+		fmt.Fprintf(&b, "session_name: \"%s\"\n", escapeYAML(d.SessionName))
 	}
 	if d.CCVersion != "" {
-		b.WriteString(fmt.Sprintf("claude_code_version: \"%s\"\n", d.CCVersion))
+		fmt.Fprintf(&b, "claude_code_version: \"%s\"\n", d.CCVersion)
 	}
 	if len(d.AllBranches) > 1 {
-		b.WriteString(fmt.Sprintf("branches: [%s]\n", strings.Join(d.AllBranches, ", ")))
+		fmt.Fprintf(&b, "branches: [%s]\n", strings.Join(d.AllBranches, ", "))
 	}
 	if d.AutoCompactions > 0 {
-		b.WriteString(fmt.Sprintf("auto_compactions: %d\n", d.AutoCompactions))
+		fmt.Fprintf(&b, "auto_compactions: %d\n", d.AutoCompactions)
 	}
 	if d.EstimatedCostUSD > 0 {
-		b.WriteString(fmt.Sprintf("estimated_cost_usd: %.2f\n", d.EstimatedCostUSD))
+		fmt.Fprintf(&b, "estimated_cost_usd: %.2f\n", d.EstimatedCostUSD)
 	}
 	if len(d.SessionTags) > 0 {
-		b.WriteString(fmt.Sprintf("tags: [%s]\n", strings.Join(d.SessionTags, ", ")))
+		fmt.Fprintf(&b, "tags: [%s]\n", strings.Join(d.SessionTags, ", "))
 	} else if d.Tag != "" {
-		b.WriteString(fmt.Sprintf("tags: [vv-session, %s]\n", d.Tag))
+		fmt.Fprintf(&b, "tags: [vv-session, %s]\n", d.Tag)
 	} else {
 		b.WriteString("tags: [vv-session]\n")
 	}
-	b.WriteString(fmt.Sprintf("summary: \"%s\"\n", escapeYAML(d.Summary)))
+	fmt.Fprintf(&b, "summary: \"%s\"\n", escapeYAML(d.Summary))
 	if d.PreviousNote != "" {
-		b.WriteString(fmt.Sprintf("previous: \"[[%s]]\"\n", d.PreviousNote))
+		fmt.Fprintf(&b, "previous: \"[[%s]]\"\n", d.PreviousNote)
 	}
 	if d.ParentSession != "" {
-		b.WriteString(fmt.Sprintf("parent_session: \"%s\"\n", d.ParentSession))
+		fmt.Fprintf(&b, "parent_session: \"%s\"\n", d.ParentSession)
 	}
 	if len(d.RelatedNotes) > 0 {
 		b.WriteString("related: [")
@@ -166,14 +166,14 @@ func SessionNote(d NoteData) string {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString(fmt.Sprintf("\"[[%s]]\"", r.Name))
+			fmt.Fprintf(&b, "\"[[%s]]\"", r.Name)
 		}
 		b.WriteString("]\n")
 	}
 	b.WriteString("---\n\n")
 
 	// Title
-	b.WriteString(fmt.Sprintf("# %s\n\n", d.Title))
+	fmt.Fprintf(&b, "# %s\n\n", d.Title)
 
 	// Session Dialogue / What Happened
 	if d.ProseDialogue != "" {
@@ -182,14 +182,14 @@ func SessionNote(d NoteData) string {
 		b.WriteString("\n")
 	} else {
 		b.WriteString("## What Happened\n\n")
-		b.WriteString(fmt.Sprintf("%s\n\n", d.Summary))
+		fmt.Fprintf(&b, "%s\n\n", d.Summary)
 	}
 
 	// What Changed
 	if len(d.FilesChanged) > 0 {
 		b.WriteString("## What Changed\n\n")
 		for _, f := range d.FilesChanged {
-			b.WriteString(fmt.Sprintf("- `%s`\n", f))
+			fmt.Fprintf(&b, "- `%s`\n", f)
 		}
 		b.WriteString("\n")
 	}
@@ -198,7 +198,7 @@ func SessionNote(d NoteData) string {
 	if len(d.Commits) > 0 {
 		b.WriteString("## Commits\n\n")
 		for _, c := range d.Commits {
-			b.WriteString(fmt.Sprintf("- `%s` %s\n", c.SHA, c.Message))
+			fmt.Fprintf(&b, "- `%s` %s\n", c.SHA, c.Message)
 		}
 		b.WriteString("\n")
 	}
@@ -213,7 +213,7 @@ func SessionNote(d NoteData) string {
 	// Tool Usage
 	if d.TotalTools > 0 {
 		b.WriteString("## Tool Usage\n\n")
-		b.WriteString(fmt.Sprintf("**Total: %d tool calls**\n\n", d.TotalTools))
+		fmt.Fprintf(&b, "**Total: %d tool calls**\n\n", d.TotalTools)
 		b.WriteString("| Tool | Count |\n")
 		b.WriteString("|------|-------|\n")
 		var toolNames []string
@@ -222,7 +222,7 @@ func SessionNote(d NoteData) string {
 		}
 		sort.Strings(toolNames)
 		for _, name := range toolNames {
-			b.WriteString(fmt.Sprintf("| %s | %d |\n", name, d.ToolCounts[name]))
+			fmt.Fprintf(&b, "| %s | %d |\n", name, d.ToolCounts[name])
 		}
 		b.WriteString("\n")
 	}
@@ -237,7 +237,7 @@ func SessionNote(d NoteData) string {
 	if len(d.Decisions) > 0 {
 		b.WriteString("## Key Decisions\n\n")
 		for _, d := range d.Decisions {
-			b.WriteString(fmt.Sprintf("- %s\n", d))
+			fmt.Fprintf(&b, "- %s\n", d)
 		}
 		b.WriteString("\n")
 	}
@@ -246,7 +246,7 @@ func SessionNote(d NoteData) string {
 	if len(d.OpenThreads) > 0 {
 		b.WriteString("## Open Threads\n\n")
 		for _, t := range d.OpenThreads {
-			b.WriteString(fmt.Sprintf("- [ ] %s\n", t))
+			fmt.Fprintf(&b, "- [ ] %s\n", t)
 		}
 		b.WriteString("\n")
 	}
@@ -255,7 +255,7 @@ func SessionNote(d NoteData) string {
 	if len(d.ReasoningHighlights) > 0 {
 		b.WriteString("## Reasoning Highlights\n\n")
 		for _, rh := range d.ReasoningHighlights {
-			b.WriteString(fmt.Sprintf("- %s\n", rh))
+			fmt.Fprintf(&b, "- %s\n", rh)
 		}
 		b.WriteString("\n")
 	}
@@ -270,9 +270,9 @@ func SessionNote(d NoteData) string {
 	// Friction Signals
 	if d.FrictionScore >= 15 && len(d.FrictionSignals) > 0 {
 		b.WriteString("## Friction Signals\n\n")
-		b.WriteString(fmt.Sprintf("**Friction score: %d/100**\n\n", d.FrictionScore))
+		fmt.Fprintf(&b, "**Friction score: %d/100**\n\n", d.FrictionScore)
 		for _, sig := range d.FrictionSignals {
-			b.WriteString(fmt.Sprintf("- %s\n", sig))
+			fmt.Fprintf(&b, "- %s\n", sig)
 		}
 		b.WriteString("\n")
 	}
@@ -281,7 +281,7 @@ func SessionNote(d NoteData) string {
 	if len(d.RelatedNotes) > 0 {
 		b.WriteString("## Related Sessions\n\n")
 		for _, r := range d.RelatedNotes {
-			b.WriteString(fmt.Sprintf("- [[%s]] — %s\n", r.Name, r.Reason))
+			fmt.Fprintf(&b, "- [[%s]] — %s\n", r.Name, r.Reason)
 		}
 		b.WriteString("\n")
 	}
@@ -289,7 +289,7 @@ func SessionNote(d NoteData) string {
 	// Footer
 	b.WriteString("---\n")
 	if d.EnrichedBy != "" {
-		b.WriteString(fmt.Sprintf("*vv v0.1.0 | enriched by %s*\n", d.EnrichedBy))
+		fmt.Fprintf(&b, "*vv v0.1.0 | enriched by %s*\n", d.EnrichedBy)
 	} else {
 		b.WriteString("*vv v0.1.0*\n")
 	}

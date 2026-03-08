@@ -62,7 +62,7 @@ func Format(projects []ProjectFriction, totalEntries int, projectFilter string) 
 	var b strings.Builder
 
 	if projectFilter != "" {
-		b.WriteString(fmt.Sprintf("Friction Analysis: %s\n", projectFilter))
+		fmt.Fprintf(&b, "Friction Analysis: %s\n", projectFilter)
 	} else {
 		b.WriteString("Friction Analysis\n")
 	}
@@ -90,10 +90,10 @@ func Format(projects []ProjectFriction, totalEntries int, projectFilter string) 
 	}
 
 	b.WriteString("Overview\n")
-	b.WriteString(fmt.Sprintf("  Sessions with data   %d / %d\n", totalSessions, totalEntries))
-	b.WriteString(fmt.Sprintf("  Avg friction score   %.0f / 100\n", globalAvg))
-	b.WriteString(fmt.Sprintf("  Total corrections    %d\n", totalCorrections))
-	b.WriteString(fmt.Sprintf("  High friction (≥40)  %d sessions\n\n", totalHighFriction))
+	fmt.Fprintf(&b, "  Sessions with data   %d / %d\n", totalSessions, totalEntries)
+	fmt.Fprintf(&b, "  Avg friction score   %.0f / 100\n", globalAvg)
+	fmt.Fprintf(&b, "  Total corrections    %d\n", totalCorrections)
+	fmt.Fprintf(&b, "  High friction (≥40)  %d sessions\n\n", totalHighFriction)
 
 	// Per-project breakdown
 	if len(projects) > 1 || projectFilter == "" {
@@ -103,8 +103,8 @@ func Format(projects []ProjectFriction, totalEntries int, projectFilter string) 
 			if pf.MaxScore >= 40 {
 				indicator = "⚡"
 			}
-			b.WriteString(fmt.Sprintf("  %s %-20s avg:%3.0f  max:%3d  corrections:%d  (%d sessions)\n",
-				indicator, pf.Project, pf.AvgScore, pf.MaxScore, pf.TotalCorrections, pf.Sessions))
+			fmt.Fprintf(&b, "  %s %-20s avg:%3.0f  max:%3d  corrections:%d  (%d sessions)\n",
+				indicator, pf.Project, pf.AvgScore, pf.MaxScore, pf.TotalCorrections, pf.Sessions)
 		}
 		b.WriteString("\n")
 	}

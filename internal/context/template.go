@@ -80,7 +80,7 @@ func EnsureVaultTemplates(vaultPath string) []FileAction {
 func BuiltinTemplates() map[string]string {
 	result := make(map[string]string)
 	fsys := templates.AgentctxFS()
-	fs.WalkDir(fsys, "agentctx", func(path string, d fs.DirEntry, err error) error {
+	_ = fs.WalkDir(fsys, "agentctx", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}

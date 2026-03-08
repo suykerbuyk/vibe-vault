@@ -75,13 +75,13 @@ func (idx *Index) ProjectContext(project string, opts ContextOptions) string {
 	// Frontmatter
 	b.WriteString("---\n")
 	b.WriteString("type: project-context\n")
-	b.WriteString(fmt.Sprintf("project: %s\n", project))
-	b.WriteString(fmt.Sprintf("generated: %s\n", opts.Now.Format("2006-01-02T15:04:05")))
-	b.WriteString(fmt.Sprintf("sessions: %d\n", len(entries)))
+	fmt.Fprintf(&b, "project: %s\n", project)
+	fmt.Fprintf(&b, "generated: %s\n", opts.Now.Format("2006-01-02T15:04:05"))
+	fmt.Fprintf(&b, "sessions: %d\n", len(entries))
 	b.WriteString("---\n\n")
 
 	// Title
-	b.WriteString(fmt.Sprintf("# %s\n\n", project))
+	fmt.Fprintf(&b, "# %s\n\n", project)
 
 	// Session Timeline — tiered by recency
 	recentCutoff := opts.Now.AddDate(0, 0, -opts.TimelineRecentDays)
@@ -132,10 +132,10 @@ func (idx *Index) ProjectContext(project string, opts ContextOptions) string {
 		var lastDate string
 		for _, d := range decisions {
 			if d.date != lastDate {
-				b.WriteString(fmt.Sprintf("**%s**\n", d.date))
+				fmt.Fprintf(&b, "**%s**\n", d.date)
 				lastDate = d.date
 			}
-			b.WriteString(fmt.Sprintf("- %s\n", d.text))
+			fmt.Fprintf(&b, "- %s\n", d.text)
 		}
 		b.WriteString("\n")
 	}
@@ -145,7 +145,7 @@ func (idx *Index) ProjectContext(project string, opts ContextOptions) string {
 	if len(threads) > 0 {
 		b.WriteString("## Open Threads\n\n")
 		for _, t := range threads {
-			b.WriteString(fmt.Sprintf("- [ ] %s\n", t))
+			fmt.Fprintf(&b, "- [ ] %s\n", t)
 		}
 		b.WriteString("\n")
 	}
@@ -163,7 +163,7 @@ func (idx *Index) ProjectContext(project string, opts ContextOptions) string {
 	if len(frictionPatterns) > 0 {
 		b.WriteString("## Friction Patterns\n\n")
 		for _, fp := range frictionPatterns {
-			b.WriteString(fmt.Sprintf("- %s\n", fp))
+			fmt.Fprintf(&b, "- %s\n", fp)
 		}
 		b.WriteString("\n")
 	}
@@ -173,7 +173,7 @@ func (idx *Index) ProjectContext(project string, opts ContextOptions) string {
 	if len(keyFiles) > 0 {
 		b.WriteString("## Key Files\n\n")
 		for _, kf := range keyFiles {
-			b.WriteString(fmt.Sprintf("- `%s` (%d sessions)\n", kf.path, kf.count))
+			fmt.Fprintf(&b, "- `%s` (%d sessions)\n", kf.path, kf.count)
 		}
 		b.WriteString("\n")
 	}

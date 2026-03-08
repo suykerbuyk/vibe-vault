@@ -46,8 +46,8 @@ func TestSync_LegacyProject(t *testing.T) {
 
 	// agentctx symlink should exist at cwd
 	linkPath := filepath.Join(cwd, "agentctx")
-	if info, err := os.Lstat(linkPath); err != nil {
-		t.Errorf("agentctx symlink not created: %v", err)
+	if info, lstatErr := os.Lstat(linkPath); lstatErr != nil {
+		t.Errorf("agentctx symlink not created: %v", lstatErr)
 	} else if info.Mode()&os.ModeSymlink == 0 {
 		t.Error("agentctx should be a symlink")
 	}

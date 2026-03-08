@@ -1,46 +1,54 @@
+version: "2"
 run:
-  timeout: 3m
   modules-download-mode: readonly
-
 linters:
-  enable:
-    - errcheck
-    - staticcheck
-    - govet
-    - ineffassign
-    - unused
   disable:
-    - gomnd
+    - depguard
+    - exhaustruct
     - funlen
-    - wsl
     - gochecknoglobals
     - gochecknoinits
-    - exhaustruct
-    - depguard
     - ireturn
-    - varnamelen
-    - nlreturn
-    - wrapcheck
-    - nonamedreturns
+    - mnd
     - musttag
+    - nlreturn
+    - nonamedreturns
     - testpackage
-
-linters-settings:
-  govet:
-    enable:
-      - shadow
-  errcheck:
-    check-type-assertions: true
-    check-blank: false
-  staticcheck:
-    checks:
-      - all
-
+    - varnamelen
+    - wrapcheck
+    - wsl
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+    govet:
+      enable:
+        - shadow
+    staticcheck:
+      checks:
+        - all
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-rules:
-    # Allow unchecked errors in test files (e.g. cleanup calls)
-    - path: _test\.go
-      linters:
-        - errcheck
   max-issues-per-linter: 50
   max-same-issues: 5
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

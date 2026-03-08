@@ -52,7 +52,7 @@ func renderElements(b *strings.Builder, elements []Element) {
 			if i > 0 && !prevWasMarker {
 				b.WriteString("\n")
 			}
-			b.WriteString(fmt.Sprintf("*%s*\n", el.Marker.Text))
+			fmt.Fprintf(b, "*%s*\n", el.Marker.Text)
 			prevWasMarker = true
 		}
 	}
@@ -62,9 +62,9 @@ func renderElements(b *strings.Builder, elements []Element) {
 func renderTurn(b *strings.Builder, t *Turn) {
 	if t.Role == "user" {
 		lines := strings.Split(t.Text, "\n")
-		b.WriteString(fmt.Sprintf("> **User:** %s\n", lines[0]))
+		fmt.Fprintf(b, "> **User:** %s\n", lines[0])
 		for _, line := range lines[1:] {
-			b.WriteString(fmt.Sprintf("> %s\n", line))
+			fmt.Fprintf(b, "> %s\n", line)
 		}
 	} else {
 		b.WriteString(t.Text)

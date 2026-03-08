@@ -395,11 +395,12 @@ func formatOutcomes(segments []Segment) string {
 
 	// Test results
 	if testRuns > 0 {
-		if testFails == 0 {
+		switch testFails {
+		case 0:
 			parts = append(parts, "tests pass")
-		} else if testFails == testRuns {
+		case testRuns:
 			parts = append(parts, "tests fail")
-		} else {
+		default:
 			parts = append(parts, "mixed tests")
 		}
 	}

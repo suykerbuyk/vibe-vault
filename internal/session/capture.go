@@ -88,8 +88,8 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 
 	// Acquire index lock to prevent concurrent corruption
 	stateDir := cfg.StateDir()
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		log.Printf("warning: could not create state dir: %v", err)
+	if mkdirErr := os.MkdirAll(stateDir, 0o755); mkdirErr != nil {
+		log.Printf("warning: could not create state dir: %v", mkdirErr)
 	}
 	indexLockPath := filepath.Join(stateDir, "session-index.json")
 	fl, lockErr := index.Lock(indexLockPath)
@@ -98,7 +98,7 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	}
 	defer func() {
 		if fl != nil {
-			fl.Unlock()
+			_ = fl.Unlock()
 		}
 	}()
 

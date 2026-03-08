@@ -133,8 +133,8 @@ func runInit() {
 
 	fmt.Printf("Creating vault at %s\n", absTarget)
 
-	if err := scaffold.Init(absTarget, scaffold.Options{GitInit: gitInit}); err != nil {
-		fatal("init: %v", err)
+	if initErr := scaffold.Init(absTarget, scaffold.Options{GitInit: gitInit}); initErr != nil {
+		fatal("init: %v", initErr)
 	}
 
 	cfgPath, action, err := config.WriteDefault(absTarget)
