@@ -6,7 +6,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/johns/vibe-vault/internal/help"
@@ -23,7 +25,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	date := time.Now().Format("2006-01-02")
+	date := commitDate()
 
 	// Top-level man page
 	if err := write(dir, "vv.1", help.FormatRoffTopLevel(help.TopLevel, help.Subcommands, date)); err != nil {
@@ -57,6 +59,19 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+// commitDate returns the committer date of HEAD in YYYY-MM-DD format.
+// This makes man page output deterministic for a given commit, avoiding
+// spurious git diffs from date/version changes on every rebuild.
+func commitDate() string {
+	out, err := exec.Command("git", "log", "-1", "--format=%cd", "--date=short").Output()
+	if err == nil {
+		if d := strings.TrimSpace(string(out)); d != "" {
+			return d
+		}
+	}
+	return time.Now().Format("2006-01-02")
 }
 
 func write(dir, name, content string) error {

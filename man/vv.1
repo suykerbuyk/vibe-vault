@@ -1,4 +1,4 @@
-.TH VV 1 "2026-03-07" "vv 0.7.1-1-g1b5fd75-dirty" "Vibe-Vault Manual"
+.TH VV 1 "2026-03-08" "vv 0.7.1-7-g826bf02" "Vibe-Vault Manual"
 .SH NAME
 vv \- vibe\-vault session capture
 .SH SYNOPSIS
@@ -54,6 +54,12 @@ Output session\-start context payload
 .B "vv export [\-\-format X]"
 Export session data (JSON or CSV)
 .TP
+.B "vv mcp"
+Start MCP server (JSON\-RPC over stdio)
+.TP
+.B "vv templates [list | ...]"
+Inspect, compare, and reset vault templates
+.TP
 .B "vv version"
 Print version
 .SH CONFIGURATION
@@ -73,4 +79,6 @@ Configuration file: ~/.config/vibe-vault/config.toml
 .BR vv\-trends (1),
 .BR vv\-inject (1),
 .BR vv\-export (1),
+.BR vv\-mcp (1),
+.BR vv\-templates (1),
 .BR vv\-version (1)
