@@ -11,6 +11,36 @@ import (
 	"time"
 )
 
+// ContextOptions controls history.md rendering and pruning behavior.
+type ContextOptions struct {
+	AlertThreshold       int       // friction score threshold for alerts (0 = disabled)
+	Now                  time.Time // reference time for recency (zero = time.Now())
+	TimelineRecentDays   int       // full detail window (default 7)
+	TimelineWindowDays   int       // condensed window (default 30)
+	DecisionStaleDays    int       // decay threshold (default 90)
+	KeyFilesRecencyBoost int       // multiplier for recent file sessions (default 3)
+}
+
+// normalize fills zero-value fields with sensible defaults.
+func (o ContextOptions) normalize() ContextOptions {
+	if o.Now.IsZero() {
+		o.Now = time.Now()
+	}
+	if o.TimelineRecentDays <= 0 {
+		o.TimelineRecentDays = 7
+	}
+	if o.TimelineWindowDays <= 0 {
+		o.TimelineWindowDays = 30
+	}
+	if o.DecisionStaleDays <= 0 {
+		o.DecisionStaleDays = 90
+	}
+	if o.KeyFilesRecencyBoost <= 0 {
+		o.KeyFilesRecencyBoost = 3
+	}
+	return o
+}
+
 // Projects returns a sorted list of unique project names in the index.
 func (idx *Index) Projects() []string {
 	seen := make(map[string]bool)
@@ -26,8 +56,9 @@ func (idx *Index) Projects() []string {
 }
 
 // ProjectContext generates an Obsidian markdown context document for a project.
-// alertThreshold is the friction score threshold for alerts (0 = disabled).
-func (idx *Index) ProjectContext(project string, alertThreshold int) string {
+func (idx *Index) ProjectContext(project string, opts ContextOptions) string {
+	opts = opts.normalize()
+
 	entries := idx.projectEntries(project)
 	if len(entries) == 0 {
 		return ""
@@ -45,36 +76,57 @@ func (idx *Index) ProjectContext(project string, alertThreshold int) string {
 	b.WriteString("---\n")
 	b.WriteString("type: project-context\n")
 	b.WriteString(fmt.Sprintf("project: %s\n", project))
-	b.WriteString(fmt.Sprintf("generated: %s\n", time.Now().Format("2006-01-02T15:04:05")))
+	b.WriteString(fmt.Sprintf("generated: %s\n", opts.Now.Format("2006-01-02T15:04:05")))
 	b.WriteString(fmt.Sprintf("sessions: %d\n", len(entries)))
 	b.WriteString("---\n\n")
 
 	// Title
 	b.WriteString(fmt.Sprintf("# %s\n\n", project))
 
-	// Session Timeline
+	// Session Timeline — tiered by recency
+	recentCutoff := opts.Now.AddDate(0, 0, -opts.TimelineRecentDays)
+	windowCutoff := opts.Now.AddDate(0, 0, -opts.TimelineWindowDays)
+
 	b.WriteString("## Session Timeline\n\n")
 	for _, e := range entries {
+		entryDate := parseDate(e.Date)
+
+		if entryDate.Before(windowCutoff) {
+			// Older than window: omitted from timeline
+			continue
+		}
+
 		noteName := filenameNoExt(e.NotePath)
-		line := fmt.Sprintf("- [[%s]]", noteName)
-		if e.ParentUUID != "" {
-			line += " ↩continued"
+
+		if !entryDate.Before(recentCutoff) {
+			// Recent: full detail
+			line := fmt.Sprintf("- [[%s]]", noteName)
+			if e.ParentUUID != "" {
+				line += " ↩continued"
+			}
+			if e.Tag != "" {
+				line += fmt.Sprintf(" #%s", e.Tag)
+			}
+			if e.FrictionScore >= 30 {
+				line += fmt.Sprintf(" ⚡%d", e.FrictionScore)
+			}
+			if e.Summary != "" {
+				line += fmt.Sprintf(" — %s", e.Summary)
+			}
+			b.WriteString(line + "\n")
+		} else {
+			// Window: condensed (date, title/wikilink, tag only)
+			line := fmt.Sprintf("- [[%s]]", noteName)
+			if e.Tag != "" {
+				line += fmt.Sprintf(" #%s", e.Tag)
+			}
+			b.WriteString(line + "\n")
 		}
-		if e.Tag != "" {
-			line += fmt.Sprintf(" #%s", e.Tag)
-		}
-		if e.FrictionScore >= 30 {
-			line += fmt.Sprintf(" ⚡%d", e.FrictionScore)
-		}
-		if e.Summary != "" {
-			line += fmt.Sprintf(" — %s", e.Summary)
-		}
-		b.WriteString(line + "\n")
 	}
 	b.WriteString("\n")
 
-	// Key Decisions — grouped by date, deduped
-	decisions := collectDecisions(entries)
+	// Key Decisions — with staleness decay and permanence markers
+	decisions := collectDecisionsWithDecay(entries, opts)
 	if len(decisions) > 0 {
 		b.WriteString("## Key Decisions\n\n")
 		var lastDate string
@@ -99,8 +151,8 @@ func (idx *Index) ProjectContext(project string, alertThreshold int) string {
 	}
 
 	// Friction Alert — recent sessions above threshold
-	if alertThreshold > 0 {
-		frictionAlert := collectFrictionAlert(entries, alertThreshold)
+	if opts.AlertThreshold > 0 {
+		frictionAlert := collectFrictionAlert(entries, opts.AlertThreshold)
 		if frictionAlert != "" {
 			b.WriteString(frictionAlert)
 		}
@@ -116,8 +168,8 @@ func (idx *Index) ProjectContext(project string, alertThreshold int) string {
 		b.WriteString("\n")
 	}
 
-	// Key Files — files appearing in >= 3 sessions
-	keyFiles := collectKeyFiles(entries)
+	// Key Files — with recency weighting
+	keyFiles := collectKeyFilesWeighted(entries, opts)
 	if len(keyFiles) > 0 {
 		b.WriteString("## Key Files\n\n")
 		for _, kf := range keyFiles {
@@ -147,19 +199,97 @@ type datedDecision struct {
 	text string
 }
 
-func collectDecisions(entries []SessionEntry) []datedDecision {
+// collectDecisionsWithDecay returns deduplicated decisions with staleness pruning.
+// Decisions not referenced in recent sessions (within DecisionStaleDays) are dropped
+// unless they contain [permanent] or [core] markers. Capped at 15 results.
+func collectDecisionsWithDecay(entries []SessionEntry, opts ContextOptions) []datedDecision {
+	staleCutoff := opts.Now.AddDate(0, 0, -opts.DecisionStaleDays)
+
+	// First pass: collect unique decisions with their original date
 	seen := make(map[string]bool)
-	var decisions []datedDecision
+	type decisionInfo struct {
+		date     string
+		text     string
+		lastSeen string // date of most recent session referencing this decision
+	}
+	var allDecisions []decisionInfo
 
 	for _, e := range entries {
 		for _, d := range e.Decisions {
 			if !seen[d] {
 				seen[d] = true
-				decisions = append(decisions, datedDecision{date: e.Date, text: d})
+				allDecisions = append(allDecisions, decisionInfo{
+					date:     e.Date,
+					text:     d,
+					lastSeen: e.Date,
+				})
 			}
 		}
 	}
-	return decisions
+
+	// Second pass: update lastSeen by checking if later sessions reference
+	// each decision (significant word overlap with summaries or decisions)
+	for i := range allDecisions {
+		dWords := significantWords(allDecisions[i].text)
+		if len(dWords) == 0 {
+			continue
+		}
+		for _, e := range entries {
+			if e.Date <= allDecisions[i].lastSeen {
+				continue
+			}
+			// Check against session's decisions and summary
+			if isReferencedIn(dWords, e) {
+				allDecisions[i].lastSeen = e.Date
+			}
+		}
+	}
+
+	// Filter: keep decisions that are permanent, or whose lastSeen is recent enough
+	var result []datedDecision
+	for _, d := range allDecisions {
+		if isPermanentDecision(d.text) {
+			result = append(result, datedDecision{date: d.date, text: d.text})
+			continue
+		}
+		lastSeenDate := parseDate(d.lastSeen)
+		if !lastSeenDate.Before(staleCutoff) {
+			result = append(result, datedDecision{date: d.date, text: d.text})
+		}
+	}
+
+	// Cap at 15
+	if len(result) > 15 {
+		result = result[len(result)-15:]
+	}
+
+	return result
+}
+
+// isReferencedIn checks if a decision's significant words overlap with a session's
+// decisions or summary.
+func isReferencedIn(decisionWords []string, e SessionEntry) bool {
+	// Check against each decision in the session
+	for _, d := range e.Decisions {
+		overlap := len(setIntersection(decisionWords, significantWords(d)))
+		if overlap >= 2 {
+			return true
+		}
+	}
+	// Check against summary
+	if e.Summary != "" {
+		overlap := len(setIntersection(decisionWords, significantWords(e.Summary)))
+		if overlap >= 2 {
+			return true
+		}
+	}
+	return false
+}
+
+// isPermanentDecision checks for [permanent] or [core] markers in decision text.
+func isPermanentDecision(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, "[permanent]") || strings.Contains(lower, "[core]")
 }
 
 func collectOpenThreads(entries []SessionEntry) []string {
@@ -214,28 +344,49 @@ func isResolvedByDecisions(thread string, decisions []string) bool {
 
 type keyFile struct {
 	path  string
-	count int
+	count int // weighted count for display, raw session count for sorting
 }
 
-func collectKeyFiles(entries []SessionEntry) []keyFile {
-	counts := make(map[string]int)
+// collectKeyFilesWeighted returns key files with recency-based weighting.
+// Sessions within 14 days count boost×, within 30 days count 2×, older count 1×.
+// Threshold: weighted score >= 5.
+func collectKeyFilesWeighted(entries []SessionEntry, opts ContextOptions) []keyFile {
+	recent14 := opts.Now.AddDate(0, 0, -14)
+	recent30 := opts.Now.AddDate(0, 0, -30)
+	boost := opts.KeyFilesRecencyBoost
+
+	scores := make(map[string]int)
+	rawCounts := make(map[string]int)
+
 	for _, e := range entries {
+		entryDate := parseDate(e.Date)
+		var weight int
+		switch {
+		case !entryDate.Before(recent14):
+			weight = boost
+		case !entryDate.Before(recent30):
+			weight = 2
+		default:
+			weight = 1
+		}
 		for _, f := range e.FilesChanged {
-			counts[f]++
+			scores[f] += weight
+			rawCounts[f]++
 		}
 	}
 
 	var files []keyFile
-	for path, count := range counts {
-		if count >= 3 {
-			files = append(files, keyFile{path: path, count: count})
+	for path, score := range scores {
+		if score >= 5 {
+			files = append(files, keyFile{path: path, count: rawCounts[path]})
 		}
 	}
 
-	// Sort by count descending
+	// Sort by weighted score descending, then path for stability
 	sort.Slice(files, func(i, j int) bool {
-		if files[i].count != files[j].count {
-			return files[i].count > files[j].count
+		si, sj := scores[files[i].path], scores[files[j].path]
+		if si != sj {
+			return si > sj
 		}
 		return files[i].path < files[j].path
 	})
@@ -271,7 +422,7 @@ func collectFrictionAlert(entries []SessionEntry, threshold int) string {
 		return ""
 	}
 
-	return fmt.Sprintf("## \u26a0 Friction Alert\n\nRecent sessions average friction **%.0f** (threshold: %d).\n%d of %d recent sessions exceeded threshold.\nConsider: review recent corrections for recurring patterns.\n\n", avg, threshold, highCount, len(recent))
+	return fmt.Sprintf("## ⚠ Friction Alert\n\nRecent sessions average friction **%.0f** (threshold: %d).\n%d of %d recent sessions exceeded threshold.\nConsider: review recent corrections for recurring patterns.\n\n", avg, threshold, highCount, len(recent))
 }
 
 func collectFrictionPatterns(entries []SessionEntry) []string {
@@ -320,4 +471,10 @@ func filenameNoExt(path string) string {
 		return base[:len(base)-len(ext)]
 	}
 	return base
+}
+
+// parseDate parses a YYYY-MM-DD date string, returning zero time on failure.
+func parseDate(s string) time.Time {
+	t, _ := time.Parse("2006-01-02", s)
+	return t
 }

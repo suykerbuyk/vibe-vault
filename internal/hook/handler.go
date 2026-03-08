@@ -194,7 +194,13 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 		return nil
 	}
 
-	genResult, err := index.GenerateContext(idx, cfg.VaultPath, cfg.Friction.AlertThreshold)
+	genResult, err := index.GenerateContext(idx, cfg.VaultPath, index.ContextOptions{
+		AlertThreshold:       cfg.Friction.AlertThreshold,
+		TimelineRecentDays:   cfg.History.TimelineRecentDays,
+		TimelineWindowDays:   cfg.History.TimelineWindowDays,
+		DecisionStaleDays:    cfg.History.DecisionStaleDays,
+		KeyFilesRecencyBoost: cfg.History.KeyFilesRecencyBoost,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "vv: warning: context refresh failed: %v\n", err)
 		return nil

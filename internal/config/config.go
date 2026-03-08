@@ -25,6 +25,15 @@ type Config struct {
 	Archive    ArchiveConfig    `toml:"archive"`
 	Friction   FrictionConfig   `toml:"friction"`
 	Pricing    PricingConfig    `toml:"pricing"`
+	History    HistoryConfig    `toml:"history"`
+}
+
+// HistoryConfig controls history.md pruning and decay behavior.
+type HistoryConfig struct {
+	TimelineRecentDays   int `toml:"timeline_recent_days"`   // full detail (default 7)
+	TimelineWindowDays   int `toml:"timeline_window_days"`   // condensed (default 30)
+	DecisionStaleDays    int `toml:"decision_stale_days"`    // decay threshold (default 90)
+	KeyFilesRecencyBoost int `toml:"key_files_recency_boost"` // multiplier for recent sessions (default 3)
 }
 
 // TagsConfig controls tags applied to session notes.
@@ -96,6 +105,12 @@ func DefaultConfig() Config {
 		},
 		Friction: FrictionConfig{
 			AlertThreshold: 40,
+		},
+		History: HistoryConfig{
+			TimelineRecentDays:   7,
+			TimelineWindowDays:   30,
+			DecisionStaleDays:    90,
+			KeyFilesRecencyBoost: 3,
 		},
 	}
 }
@@ -218,6 +233,18 @@ func (c Config) Overlay(projectConfigPath string) Config {
 	}
 	if md.IsDefined("pricing", "models") {
 		c.Pricing.Models = overlay.Pricing.Models
+	}
+	if md.IsDefined("history", "timeline_recent_days") {
+		c.History.TimelineRecentDays = overlay.History.TimelineRecentDays
+	}
+	if md.IsDefined("history", "timeline_window_days") {
+		c.History.TimelineWindowDays = overlay.History.TimelineWindowDays
+	}
+	if md.IsDefined("history", "decision_stale_days") {
+		c.History.DecisionStaleDays = overlay.History.DecisionStaleDays
+	}
+	if md.IsDefined("history", "key_files_recency_boost") {
+		c.History.KeyFilesRecencyBoost = overlay.History.KeyFilesRecencyBoost
 	}
 
 	return c

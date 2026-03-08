@@ -16,14 +16,13 @@ type GenerateResult struct {
 
 // GenerateContext writes per-project history.md files. It uses the
 // already-loaded index (no rebuild) so it's fast enough for post-hook use.
-// alertThreshold is the friction alert threshold (0 = disabled).
-func GenerateContext(idx *Index, vaultPath string, alertThreshold int) (*GenerateResult, error) {
+func GenerateContext(idx *Index, vaultPath string, opts ContextOptions) (*GenerateResult, error) {
 	result := &GenerateResult{}
 
 	// Generate per-project context documents
 	projectsDir := filepath.Join(vaultPath, "Projects")
 	for _, project := range idx.Projects() {
-		doc := idx.ProjectContext(project, alertThreshold)
+		doc := idx.ProjectContext(project, opts)
 		dir := filepath.Join(projectsDir, project)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			log.Printf("warning: create dir for %s: %v", project, err)

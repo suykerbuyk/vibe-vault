@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -739,6 +740,15 @@ func TestSignificantWords(t *testing.T) {
 
 // --- Context document tests ---
 
+// recentOpts returns ContextOptions with Now set close to the test dates,
+// ensuring all sessions fall within the "recent" (full detail) window.
+func recentOpts(alertThreshold int) ContextOptions {
+	return ContextOptions{
+		AlertThreshold: alertThreshold,
+		Now:            time.Date(2026, 2, 25, 0, 0, 0, 0, time.UTC),
+	}
+}
+
 func TestProjectContextTimeline(t *testing.T) {
 	idx := &Index{Entries: make(map[string]SessionEntry)}
 
@@ -753,7 +763,7 @@ func TestProjectContextTimeline(t *testing.T) {
 		Summary: "Second session", Tag: "implementation",
 	}
 
-	doc := idx.ProjectContext("proj", 0)
+	doc := idx.ProjectContext("proj", recentOpts(0))
 
 	if !contains(doc, "[[2026-02-20-01]]") {
 		t.Error("missing first session wikilink")
@@ -783,7 +793,7 @@ func TestProjectContextContinuedSession(t *testing.T) {
 		Summary: "Continued work", ParentUUID: "external-uuid-xyz",
 	}
 
-	doc := idx.ProjectContext("proj", 0)
+	doc := idx.ProjectContext("proj", recentOpts(0))
 
 	if !contains(doc, "[[2026-02-20-02]] ↩continued") {
 		t.Error("continued session should have ↩continued marker in timeline")
@@ -807,7 +817,7 @@ func TestProjectContextDecisionDedup(t *testing.T) {
 		Decisions: []string{"Use JWT auth", "Add rate limiting"}, // "Use JWT auth" is duplicate
 	}
 
-	doc := idx.ProjectContext("proj", 0)
+	doc := idx.ProjectContext("proj", recentOpts(0))
 
 	// Count occurrences of "Use JWT auth" in decisions section
 	count := countOccurrences(doc, "Use JWT auth")
@@ -830,7 +840,7 @@ func TestProjectContextThreadResolution(t *testing.T) {
 		Decisions: []string{"completed authentication system with JWT"},
 	}
 
-	doc := idx.ProjectContext("proj", 0)
+	doc := idx.ProjectContext("proj", recentOpts(0))
 
 	// "implement authentication system" should be filtered out
 	// because "completed authentication system with JWT" resolves it
@@ -842,6 +852,8 @@ func TestProjectContextThreadResolution(t *testing.T) {
 func TestProjectContextKeyFiles(t *testing.T) {
 	idx := &Index{Entries: make(map[string]SessionEntry)}
 
+	// Use recent dates so recency weighting applies (within 14 days of Now)
+	now := time.Date(2026, 2, 25, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 4; i++ {
 		id := string(rune('a'+i)) + "-session"
 		files := []string{"main.go"}
@@ -855,13 +867,17 @@ func TestProjectContextKeyFiles(t *testing.T) {
 		}
 	}
 
-	doc := idx.ProjectContext("proj", 0)
+	doc := idx.ProjectContext("proj", ContextOptions{Now: now})
 
+	// With default boost=3 and 4 recent sessions: main.go = 4*3 = 12 (>= 5, shown)
 	if !contains(doc, "`main.go` (4 sessions)") {
 		t.Error("main.go should appear as key file with 4 sessions")
 	}
-	if contains(doc, "`rare.go`") {
-		t.Error("rare.go should not appear (only 2 sessions, threshold is 3)")
+	// rare.go = 2*3 = 6 (>= 5, now shown with recency weighting)
+	// The old test expected rare.go to not appear (old threshold was 3 raw sessions).
+	// With recency weighting, 2 recent sessions * 3 = score 6 >= threshold 5, so it shows.
+	if !contains(doc, "`rare.go`") {
+		t.Error("rare.go should appear (2 recent sessions * boost 3 = score 6 >= threshold 5)")
 	}
 }
 
@@ -929,7 +945,7 @@ func TestProjectContextFrictionAlert(t *testing.T) {
 		}
 	}
 
-	doc := idx.ProjectContext("proj", 40)
+	doc := idx.ProjectContext("proj", recentOpts(40))
 
 	if !contains(doc, "## ⚠ Friction Alert") {
 		t.Error("expected friction alert section for avg friction 50 with threshold 40")
@@ -953,7 +969,7 @@ func TestProjectContextFrictionAlertBelowThreshold(t *testing.T) {
 		}
 	}
 
-	doc := idx.ProjectContext("proj", 40)
+	doc := idx.ProjectContext("proj", recentOpts(40))
 
 	if contains(doc, "Friction Alert") {
 		t.Error("should not have friction alert for avg friction 20 with threshold 40")
@@ -973,10 +989,365 @@ func TestProjectContextFrictionAlertDisabled(t *testing.T) {
 		}
 	}
 
-	doc := idx.ProjectContext("proj", 0)
+	doc := idx.ProjectContext("proj", recentOpts(0))
 
 	if contains(doc, "Friction Alert") {
 		t.Error("should not have friction alert when threshold is 0")
+	}
+}
+
+// --- Tiered timeline tests ---
+
+func TestTimelineTieredRendering(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+	now := time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC)
+
+	// Recent (within 7 days): full detail
+	idx.Entries["s-recent"] = SessionEntry{
+		SessionID: "s-recent", Project: "proj", Date: "2026-03-05",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-03-05-01.md",
+		Summary: "Recent work", Tag: "implementation", FrictionScore: 35,
+	}
+	// Window (8-30 days): condensed
+	idx.Entries["s-window"] = SessionEntry{
+		SessionID: "s-window", Project: "proj", Date: "2026-02-15",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-02-15-01.md",
+		Summary: "Window work", Tag: "debugging", FrictionScore: 45,
+	}
+	// Old (>30 days): omitted
+	idx.Entries["s-old"] = SessionEntry{
+		SessionID: "s-old", Project: "proj", Date: "2026-01-01",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-01-01-01.md",
+		Summary: "Old work", Tag: "planning", FrictionScore: 50,
+	}
+
+	doc := idx.ProjectContext("proj", ContextOptions{Now: now})
+
+	// Recent: should have full detail (summary, friction, tag)
+	if !contains(doc, "— Recent work") {
+		t.Error("recent session should have summary")
+	}
+	if !contains(doc, "⚡35") {
+		t.Error("recent session should have friction indicator")
+	}
+
+	// Window: should have tag but NOT summary or friction
+	if !contains(doc, "[[2026-02-15-01]]") {
+		t.Error("window session should appear in timeline")
+	}
+	if !contains(doc, "[[2026-02-15-01]] #debugging") {
+		t.Error("window session should have tag")
+	}
+	if contains(doc, "— Window work") {
+		t.Error("window session should NOT have summary (condensed)")
+	}
+	if contains(doc, "⚡45") {
+		t.Error("window session should NOT have friction indicator (condensed)")
+	}
+
+	// Old: should NOT appear in timeline
+	if contains(doc, "[[2026-01-01-01]]") {
+		t.Error("old session should be omitted from timeline")
+	}
+
+	// Session count in frontmatter should still reflect ALL sessions
+	if !contains(doc, "sessions: 3") {
+		t.Error("session count should include all sessions, not just visible ones")
+	}
+}
+
+func TestTimelineCustomWindows(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+	now := time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC)
+
+	// Session 20 days ago — within custom recent window of 25 days
+	idx.Entries["s1"] = SessionEntry{
+		SessionID: "s1", Project: "proj", Date: "2026-02-16",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-02-16-01.md",
+		Summary: "Should be full detail",
+	}
+
+	doc := idx.ProjectContext("proj", ContextOptions{
+		Now:                now,
+		TimelineRecentDays: 25,
+		TimelineWindowDays: 60,
+	})
+
+	// With 25-day recent window, this session should have full detail
+	if !contains(doc, "— Should be full detail") {
+		t.Error("session within custom recent window should have summary")
+	}
+}
+
+// --- Decision decay tests ---
+
+func TestDecisionDecayStaleDropped(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	// Decision from 120 days ago, never referenced again
+	idx.Entries["s-old"] = SessionEntry{
+		SessionID: "s-old", Project: "proj", Date: "2026-02-01",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-02-01-01.md",
+		Decisions: []string{"Use SQLite for storage"},
+	}
+	// Recent session with unrelated decision
+	idx.Entries["s-recent"] = SessionEntry{
+		SessionID: "s-recent", Project: "proj", Date: "2026-05-30",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-05-30-01.md",
+		Decisions: []string{"Add rate limiting"},
+	}
+
+	doc := idx.ProjectContext("proj", ContextOptions{Now: now})
+
+	if contains(doc, "Use SQLite") {
+		t.Error("stale decision (120 days, unreferenced) should be pruned")
+	}
+	if !contains(doc, "Add rate limiting") {
+		t.Error("recent decision should be kept")
+	}
+}
+
+func TestDecisionDecayReferencedKept(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	// Old decision
+	idx.Entries["s-old"] = SessionEntry{
+		SessionID: "s-old", Project: "proj", Date: "2026-02-01",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-02-01-01.md",
+		Decisions: []string{"Use stdlib HTTP client for providers"},
+	}
+	// Recent session that references the old decision
+	idx.Entries["s-recent"] = SessionEntry{
+		SessionID: "s-recent", Project: "proj", Date: "2026-05-30",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-05-30-01.md",
+		Decisions: []string{"Keep stdlib HTTP client, no SDK dependency"},
+	}
+
+	doc := idx.ProjectContext("proj", ContextOptions{Now: now})
+
+	if !contains(doc, "Use stdlib HTTP client for providers") {
+		t.Error("decision referenced by recent session should survive decay")
+	}
+}
+
+func TestDecisionPermanentMarker(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	// Old decision with [permanent] marker, never referenced
+	idx.Entries["s-old"] = SessionEntry{
+		SessionID: "s-old", Project: "proj", Date: "2026-01-01",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-01-01-01.md",
+		Decisions: []string{"Use stdlib HTTP, no SDK dependencies [permanent]"},
+	}
+
+	doc := idx.ProjectContext("proj", ContextOptions{Now: now})
+
+	if !contains(doc, "[permanent]") {
+		t.Error("decision with [permanent] marker should survive decay regardless of age")
+	}
+}
+
+func TestDecisionCoreMarker(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	idx.Entries["s-old"] = SessionEntry{
+		SessionID: "s-old", Project: "proj", Date: "2026-01-01",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-01-01-01.md",
+		Decisions: []string{"Dual Apache/MIT license [core]"},
+	}
+
+	doc := idx.ProjectContext("proj", ContextOptions{Now: now})
+
+	if !contains(doc, "[core]") {
+		t.Error("decision with [core] marker should survive decay regardless of age")
+	}
+}
+
+func TestDecisionCap15(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+	now := time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC)
+
+	// Add 20 unique decisions across recent sessions
+	for i := 0; i < 20; i++ {
+		id := fmt.Sprintf("s-%d", i)
+		idx.Entries[id] = SessionEntry{
+			SessionID: id, Project: "proj",
+			Date:      fmt.Sprintf("2026-03-%02d", (i%7)+1),
+			Iteration: i + 1,
+			NotePath:  fmt.Sprintf("Projects/proj/sessions/2026-03-%02d-%02d.md", (i%7)+1, i+1),
+			Decisions: []string{fmt.Sprintf("Decision number %d is unique", i)},
+		}
+	}
+
+	doc := idx.ProjectContext("proj", ContextOptions{Now: now})
+
+	// Count decision lines
+	decisionCount := 0
+	for _, line := range strings.Split(doc, "\n") {
+		if strings.HasPrefix(line, "- Decision number") {
+			decisionCount++
+		}
+	}
+	if decisionCount > 15 {
+		t.Errorf("decisions should be capped at 15, got %d", decisionCount)
+	}
+}
+
+// --- Key files recency weighting tests ---
+
+func TestKeyFilesRecencyWeighting(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+	now := time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC)
+
+	// Old file: touched in 10 sessions 60 days ago (weight=1 each, score=10)
+	for i := 0; i < 10; i++ {
+		id := fmt.Sprintf("s-old-%d", i)
+		idx.Entries[id] = SessionEntry{
+			SessionID: id, Project: "proj", Date: "2026-01-08",
+			Iteration: i + 1, NotePath: "Projects/proj/sessions/note.md",
+			FilesChanged: []string{"old_file.go"},
+		}
+	}
+
+	// Recent file: touched in 2 sessions within 14 days (weight=3 each, score=6)
+	for i := 0; i < 2; i++ {
+		id := fmt.Sprintf("s-recent-%d", i)
+		idx.Entries[id] = SessionEntry{
+			SessionID: id, Project: "proj", Date: "2026-03-06",
+			Iteration: i + 1, NotePath: "Projects/proj/sessions/note2.md",
+			FilesChanged: []string{"recent_file.go"},
+		}
+	}
+
+	doc := idx.ProjectContext("proj", ContextOptions{Now: now})
+
+	// Both should appear (both score >= 5)
+	if !contains(doc, "old_file.go") {
+		t.Error("old_file.go should appear (score 10)")
+	}
+	if !contains(doc, "recent_file.go") {
+		t.Error("recent_file.go should appear (score 6)")
+	}
+}
+
+func TestKeyFilesOldBelowThreshold(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+	now := time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC)
+
+	// File touched in 4 sessions 60 days ago (weight=1 each, score=4 < threshold 5)
+	for i := 0; i < 4; i++ {
+		id := fmt.Sprintf("s-old-%d", i)
+		idx.Entries[id] = SessionEntry{
+			SessionID: id, Project: "proj", Date: "2026-01-08",
+			Iteration: i + 1, NotePath: "Projects/proj/sessions/note.md",
+			FilesChanged: []string{"marginally_used.go"},
+		}
+	}
+
+	doc := idx.ProjectContext("proj", ContextOptions{Now: now})
+
+	if contains(doc, "marginally_used.go") {
+		t.Error("file with weighted score 4 should not appear (threshold 5)")
+	}
+}
+
+func TestKeyFilesMidRangeRecency(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+	now := time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC)
+
+	// File touched 3 times within 30 days (weight=2 each, score=6)
+	for i := 0; i < 3; i++ {
+		id := fmt.Sprintf("s-mid-%d", i)
+		idx.Entries[id] = SessionEntry{
+			SessionID: id, Project: "proj", Date: "2026-02-20",
+			Iteration: i + 1, NotePath: "Projects/proj/sessions/note.md",
+			FilesChanged: []string{"mid_file.go"},
+		}
+	}
+
+	doc := idx.ProjectContext("proj", ContextOptions{Now: now})
+
+	if !contains(doc, "mid_file.go") {
+		t.Error("mid_file.go should appear (score 6 >= threshold 5)")
+	}
+}
+
+// --- Edge cases ---
+
+func TestProjectContextSingleSession(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+
+	idx.Entries["s1"] = SessionEntry{
+		SessionID: "s1", Project: "proj", Date: "2026-03-08",
+		Iteration: 1, NotePath: "Projects/proj/sessions/2026-03-08-01.md",
+		Summary: "Only session", Tag: "planning",
+		Decisions: []string{"Initial architecture [permanent]"},
+	}
+
+	doc := idx.ProjectContext("proj", ContextOptions{
+		Now: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+	})
+
+	if !contains(doc, "sessions: 1") {
+		t.Error("should show 1 session")
+	}
+	if !contains(doc, "— Only session") {
+		t.Error("single session should show in timeline with full detail")
+	}
+	if !contains(doc, "Initial architecture [permanent]") {
+		t.Error("decision should appear")
+	}
+}
+
+func TestProjectContextAllOldSessions(t *testing.T) {
+	idx := &Index{Entries: make(map[string]SessionEntry)}
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	// All sessions older than 30 days
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("s-%d", i)
+		idx.Entries[id] = SessionEntry{
+			SessionID: id, Project: "proj",
+			Date:      fmt.Sprintf("2026-01-%02d", i+1),
+			Iteration: 1, NotePath: fmt.Sprintf("Projects/proj/sessions/2026-01-%02d-01.md", i+1),
+			Summary:   fmt.Sprintf("Old session %d", i),
+		}
+	}
+
+	doc := idx.ProjectContext("proj", ContextOptions{Now: now})
+
+	// Timeline should be empty (all sessions beyond window)
+	if contains(doc, "[[2026-01-") {
+		t.Error("all sessions beyond window should be omitted from timeline")
+	}
+	// But the document should still be generated with session count
+	if !contains(doc, "sessions: 5") {
+		t.Error("session count should include all sessions")
+	}
+}
+
+func TestIsPermanentDecision(t *testing.T) {
+	tests := []struct {
+		text string
+		want bool
+	}{
+		{"Use stdlib HTTP [permanent]", true},
+		{"Use stdlib HTTP [PERMANENT]", true},
+		{"Use stdlib HTTP [Permanent]", true},
+		{"Dual license [core]", true},
+		{"Dual license [CORE]", true},
+		{"Regular decision about core logic", false},
+		{"No markers here", false},
+	}
+	for _, tt := range tests {
+		got := isPermanentDecision(tt.text)
+		if got != tt.want {
+			t.Errorf("isPermanentDecision(%q) = %v, want %v", tt.text, got, tt.want)
+		}
 	}
 }
 

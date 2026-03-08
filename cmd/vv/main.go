@@ -664,7 +664,7 @@ func runIndex() {
 
 	fmt.Printf("indexed %d sessions\n", count)
 
-	if _, err := index.GenerateContext(idx, cfg.VaultPath, cfg.Friction.AlertThreshold); err != nil {
+	if _, err := index.GenerateContext(idx, cfg.VaultPath, contextOpts(cfg)); err != nil {
 		log.Printf("warning: generate context: %v", err)
 	} else {
 		for _, project := range idx.Projects() {
@@ -930,7 +930,7 @@ func runReprocess() {
 	// Regenerate context docs for affected projects
 	if len(affectedProjects) > 0 {
 		idx, _ = index.Load(cfg.StateDir())
-		if _, err := index.GenerateContext(idx, cfg.VaultPath, cfg.Friction.AlertThreshold); err != nil {
+		if _, err := index.GenerateContext(idx, cfg.VaultPath, contextOpts(cfg)); err != nil {
 			log.Printf("warning: generate context: %v", err)
 		} else {
 			for project := range affectedProjects {
@@ -1004,6 +1004,16 @@ func removeFlag(args []string, flag string) []string {
 		}
 	}
 	return out
+}
+
+func contextOpts(cfg config.Config) index.ContextOptions {
+	return index.ContextOptions{
+		AlertThreshold:       cfg.Friction.AlertThreshold,
+		TimelineRecentDays:   cfg.History.TimelineRecentDays,
+		TimelineWindowDays:   cfg.History.TimelineWindowDays,
+		DecisionStaleDays:    cfg.History.DecisionStaleDays,
+		KeyFilesRecencyBoost: cfg.History.KeyFilesRecencyBoost,
+	}
 }
 
 func fatal(format string, args ...interface{}) {
