@@ -14,7 +14,6 @@ import (
 
 	"github.com/johns/vibe-vault/internal/config"
 	"github.com/johns/vibe-vault/internal/index"
-	"github.com/johns/vibe-vault/internal/knowledge"
 	"github.com/johns/vibe-vault/internal/llm"
 	"github.com/johns/vibe-vault/internal/session"
 )
@@ -195,24 +194,7 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 		return nil
 	}
 
-	// Read knowledge notes for injection into context docs
-	var summaries []index.KnowledgeSummary
-	if notes, kerr := knowledge.ReadNotes(cfg.VaultPath); kerr == nil {
-		for _, n := range notes {
-			summaries = append(summaries, index.KnowledgeSummary{
-				Type:       n.Type,
-				Title:      n.Title,
-				Summary:    n.Summary,
-				Project:    n.Project,
-				Category:   n.Category,
-				Date:       n.Date,
-				Confidence: n.Confidence,
-				NotePath:   n.NotePath,
-			})
-		}
-	}
-
-	genResult, err := index.GenerateContext(idx, cfg.VaultPath, summaries, cfg.Friction.AlertThreshold)
+	genResult, err := index.GenerateContext(idx, cfg.VaultPath, cfg.Friction.AlertThreshold)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "vv: warning: context refresh failed: %v\n", err)
 		return nil

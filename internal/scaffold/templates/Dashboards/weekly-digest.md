@@ -40,19 +40,6 @@ SORT key DESC
 LIMIT 12
 ```
 
-## Recent Knowledge Captured
-
-```dataview
-TABLE
-  date AS "Date",
-  type AS "Type",
-  domain AS "Domain",
-  summary AS "Summary"
-FROM "Knowledge"
-WHERE date >= date(today) - dur(7 days)
-SORT date DESC
-```
-
 ## By Domain (This Week)
 
 ### Work

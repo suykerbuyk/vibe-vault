@@ -43,10 +43,6 @@ detect.go    │   │   │   │
                          │
         friction/        │    Correction detection, composite friction scoring (0-100)
         analyze.go       │    (from dialogue + narrative + token efficiency + threads)
-                         │
-        knowledge/       │    Separate LLM call: extract lessons + decisions from
-        enrich.go        │    correction→resolution pairs (gated: friction >= 30 or
-                         │    decisions >= 2, confidence >= 0.7)
                          ▼
             index/            Score related sessions (shared files, threads, branch, tag)
             related.go
@@ -58,8 +54,8 @@ detect.go    │   │   │   │
                     index.Save()   .vibe-vault/session-index.json
                          │
                          ▼  (SessionEnd only, not Stop checkpoints)
-            index/            Load index, read knowledge notes
-            generate.go       GenerateContext() → history.md + _knowledge.md
+            index/            Load index
+            generate.go       GenerateContext() → history.md
 ```
 
 ### Index Rebuild Flow (`vv index`)
@@ -81,8 +77,7 @@ index/index.go       Build enriched SessionEntry for each note
 index.Save()         Write .vibe-vault/session-index.json
     │
     ▼
-index/generate.go    GenerateContext(): read knowledge notes, write history.md
-    │                per project + Knowledge/_knowledge.md cross-project
+index/generate.go    GenerateContext(): write history.md per project
     ▼
 Done
 ```
@@ -104,14 +99,14 @@ For each transcript:         For each entry:          For each entry:
     ▼                            ▼                       │
 Print summary               Print summary             session.Capture(Force:true)
                             (src MB → arch MB)            │
-                                                       GenerateContext() (w/ knowledge)
+                                                       GenerateContext()
 ```
 
 ## Module Responsibilities
 
 | Package | File | Responsibility |
 |---------|------|----------------|
-| `cmd/vv` | `main.go` | CLI arg parsing, subcommand routing (including hook sub-subcommands), help via `internal/help`, `wantsHelp()` flag guard, unknown flag rejection, `runTrends()` with `--project` and `--weeks` flags, `runInject()` with `--project`/`--format`/`--sections`/`--max-tokens` flags, `runExport()` with `--format`/`--project` flags, `readKnowledgeSummaries()` helper for index/reprocess/inject, `runContext()` with `sync` sub-subcommand (`--project`/`--all`/`--dry-run`/`--force`), `runCheck()` agentctx schema check |
+| `cmd/vv` | `main.go` | CLI arg parsing, subcommand routing (including hook sub-subcommands), help via `internal/help`, `wantsHelp()` flag guard, unknown flag rejection, `runTrends()` with `--project` and `--weeks` flags, `runInject()` with `--project`/`--format`/`--sections`/`--max-tokens` flags, `runExport()` with `--format`/`--project` flags, `runContext()` with `sync` sub-subcommand (`--project`/`--all`/`--dry-run`/`--force`), `runCheck()` agentctx schema check |
 | `cmd/gen-man` | `main.go` | Generates `man/*.1` files from help registry (Subcommands + HookSubcommands + ContextSubcommands) |
 | `context` | `context.go` | `Init()` — scaffold vault-resident context (workflow.md, resume.md, iterations.md, tasks/, repo-side CLAUDE.md + .claude/commands/, agentctx symlink, .version); `Migrate()` — copy local files to vault + force-update repo-side; helpers: safeWrite, gitignoreEnsure, copyFile/Dir, template generators (relative paths, no absolute vault paths) |
 | `context` | `schema.go` | `VersionFile` TOML struct, `ReadVersion`/`WriteVersion`, `LatestSchemaVersion` const (3), `Migration` type + registry (0→1 writes .version, 1→2 adds symlinks/relative paths, 2→3 adds per-project config.toml), `migrationsFrom()` |
@@ -130,9 +125,9 @@ Print summary               Print summary             session.Capture(Force:true
 | `config` | `config.go` | TOML config with XDG paths, `~` expansion, defaults, `SessionTag()`/`SessionTags()` for configurable session tags, `Overlay()` for per-project config, `WithProjectOverlay()` loads `Projects/{project}/agentctx/config.toml` |
 | `config` | `write.go` | Write/update config.toml with action status, ConfigDir(), CompressHome(), updateVaultPath(), `ProjectConfigTemplate()` for per-project overlay scaffolds |
 | `discover` | `discover.go` | Walk directories for UUID-named `.jsonl` transcripts, subagent detection, FindBySessionID |
-| `hook` | `handler.go` | Stdin JSON parsing (2s timeout), `handleInput()` dispatch logic (extracted for testability), dispatches SessionEnd/Stop/PreCompact, auto-refresh context on SessionEnd via `GenerateContext()` |
+| `hook` | `handler.go` | Stdin JSON parsing (2s timeout), `handleInput()` dispatch logic (extracted for testability), dispatches SessionEnd/Stop/PreCompact, auto-refresh context on SessionEnd via `GenerateContext()` (no knowledge injection) |
 | `hook` | `setup.go` | `Install()`/`Uninstall()` for `~/.claude/settings.json`: 3 events (SessionEnd, Stop, PreCompact), idempotent JSON manipulation, backup, directory creation |
-| `inject` | `inject.go` | `Build()` — assemble context from index entries, knowledge, trends; `FormatMarkdown()`/`FormatJSON()` renderers; `Render()` — format + token-budget truncation loop (drops lowest-priority sections); `estimateTokens()` — word count × 1.3 |
+| `inject` | `inject.go` | `Build()` — assemble context from index entries and trends; `FormatMarkdown()`/`FormatJSON()` renderers; `Render()` — format + token-budget truncation loop (drops lowest-priority sections); `estimateTokens()` — word count × 1.3 |
 | `scaffold` | `scaffold.go` | `go:embed` vault templates, `Init()` scaffolder with `{{VAULT_NAME}}` replacement |
 | `transcript` | `parser.go` | Streaming JSONL parser, skips non-conversation types |
 | `transcript` | `types.go` | All data types: Entry (incl. native `IsMeta`, `PlanContent` fields), Message, ContentBlock, Usage, Stats |
@@ -152,22 +147,15 @@ Print summary               Print summary             session.Capture(Force:true
 | `stats` | `export.go` | `ExportEntries()` — filter, sort, and convert `SessionEntry` map to `[]ExportEntry`; `ExportJSON()` and `ExportCSV()` serializers |
 | `trends` | `trends.go` | `Compute()` — weekly bucketing by ISO week, 4-week rolling averages, anomaly detection (1.5σ), direction analysis (improving/worsening/stable), `--project` filter, `--weeks` display limit |
 | `trends` | `format.go` | `Format()` — aligned terminal output: overview (direction arrows), per-metric week tables with rolling avg, anomaly markers (spike/dip), anomalies summary; token/duration/int formatting helpers |
-| `knowledge` | `types.go` | `Note`, `CorrectionPair`, `ExtractInput` types |
-| `knowledge` | `extract.go` | `PairCorrections()` — walks prose dialogue to pair friction corrections (by TurnIndex) with subsequent assistant responses/markers |
-| `knowledge` | `enrich.go` | `Enrich()` — LLM call (reuses `EnrichmentConfig`) to synthesize lessons ("Don't X because Y") and decisions ("Chose X over Y because Z") with confidence scores |
-| `knowledge` | `render.go` | `RenderNote()` — Obsidian markdown for knowledge notes (lesson: "What Was Learned", decision: "Context"); frontmatter with confidence, source_sessions, category |
-| `knowledge` | `read.go` | `ReadNotes()` — walk Knowledge/learnings/ and decisions/ directories, parse frontmatter from .md files, skip .gitkeep and archived notes, populate NotePath |
-| `knowledge` | `write.go` | `WriteNote()` — write to `Knowledge/{learnings,decisions}/{date}-{slug}.md`, no-overwrite dedup, title→slug conversion |
-| `session` | `capture.go` | Orchestration via `CaptureOpts`: parse → detect → **project config overlay** → index → **narrative** → **prose** → **commits** → enrich (skipped when prose succeeds) → **friction** → **knowledge** (separate LLM call, gated on friction >= 30 or decisions >= 2) → relate → render → write. Force mode reuses existing iteration to overwrite in place |
+| `session` | `capture.go` | Orchestration via `CaptureOpts`: parse → detect → **project config overlay** → index → **narrative** → **prose** → **commits** → enrich (skipped when prose succeeds) → **friction** → relate → render → write. Force mode reuses existing iteration to overwrite in place |
 | `session` | `detect.go` | Git remote origin + CWD-based project name, config-based domain detection |
-| `index` | `index.go` | Enriched SessionEntry + TranscriptPath + Commits + Friction + KnowledgeNotes + token/message counts, JSON index: dedup, iteration counting, cross-linking |
-| `index` | `rebuild.go` | `Rebuild()` — walk Projects/*/sessions/, parse via noteparse, preserve TranscriptPaths from old index, backfill token/message counts, parse corrections + knowledge_notes from frontmatter |
+| `index` | `index.go` | Enriched SessionEntry + TranscriptPath + Commits + Friction + token/message counts, JSON index: dedup, iteration counting, cross-linking |
+| `index` | `rebuild.go` | `Rebuild()` — walk Projects/*/sessions/, parse via noteparse, preserve TranscriptPaths from old index, backfill token/message counts |
 | `index` | `related.go` | `RelatedSessions()` — multi-signal scoring (files, threads, branch, tag) |
-| `index` | `context.go` | `KnowledgeSummary` type, `ProjectContext()` — per-project history.md (timeline with friction indicators, decisions, threads, friction patterns, learned patterns from knowledge notes, key files) |
-| `index` | `generate.go` | `GenerateContext()` — shared function writing per-project `history.md` + cross-project `_knowledge.md`; `GenerateResult` type with metrics; used by `runIndex()`, `runReprocess()`, and `handleSessionEnd()` |
-| `index` | `crossknowledge.go` | `CrossProjectKnowledge()` — generates `Knowledge/_knowledge.md` for categories spanning 2+ projects or containing project-agnostic notes |
-| `noteparse` | `noteparse.go` | Line-based frontmatter parser + body section extraction (decisions, threads, files, commits, knowledge_notes) |
-| `render` | `markdown.go` | Obsidian note rendering: frontmatter (incl. commits, friction_score, corrections, knowledge_notes), Session Dialogue / What Happened (conditional), Commits, Friction Signals, Knowledge Captured, Work Performed, tool usage table, wikilinks, related sessions |
+| `index` | `context.go` | `ProjectContext()` — per-project history.md (timeline with friction indicators, decisions, threads, friction patterns, key files) |
+| `index` | `generate.go` | `GenerateContext()` — shared function writing per-project `history.md` + seeding per-project `knowledge.md`; `GenerateResult` type with metrics; used by `runIndex()`, `runReprocess()`, and `handleSessionEnd()` |
+| `noteparse` | `noteparse.go` | Line-based frontmatter parser + body section extraction (decisions, threads, files, commits) |
+| `render` | `markdown.go` | Obsidian note rendering: frontmatter (incl. commits, friction_score, corrections), Session Dialogue / What Happened (conditional), Commits, Friction Signals, Work Performed, tool usage table, wikilinks, related sessions |
 | `sanitize` | `redact.go` | Regex-based XML tag stripping for Claude Code wrapper tags |
 
 ## Error Handling

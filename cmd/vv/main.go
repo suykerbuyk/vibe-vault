@@ -21,7 +21,6 @@ import (
 	"github.com/johns/vibe-vault/internal/hook"
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/inject"
-	"github.com/johns/vibe-vault/internal/knowledge"
 	"github.com/johns/vibe-vault/internal/llm"
 	"github.com/johns/vibe-vault/internal/scaffold"
 	"github.com/johns/vibe-vault/internal/session"
@@ -468,7 +467,6 @@ func runInject() {
 		fmt.Fprintf(os.Stderr, "vv: no sessions found for project %q\n", project)
 	}
 
-	summaries := readKnowledgeSummaries(cfg.VaultPath)
 	trendResult := trends.Compute(idx.Entries, project, 4)
 
 	opts := inject.Opts{
@@ -478,7 +476,7 @@ func runInject() {
 		MaxTokens: maxTokens,
 	}
 
-	result := inject.Build(idx.Entries, summaries, trendResult, opts)
+	result := inject.Build(idx.Entries, trendResult, opts)
 	output, err := inject.Render(result, opts)
 	if err != nil {
 		fatal("render: %v", err)
@@ -666,17 +664,11 @@ func runIndex() {
 
 	fmt.Printf("indexed %d sessions\n", count)
 
-	summaries := readKnowledgeSummaries(cfg.VaultPath)
-
-	genResult, err := index.GenerateContext(idx, cfg.VaultPath, summaries, cfg.Friction.AlertThreshold)
-	if err != nil {
+	if _, err := index.GenerateContext(idx, cfg.VaultPath, cfg.Friction.AlertThreshold); err != nil {
 		log.Printf("warning: generate context: %v", err)
 	} else {
 		for _, project := range idx.Projects() {
 			fmt.Printf("  context: %s\n", filepath.Join("Projects", project, "history.md"))
-		}
-		if genResult.KnowledgeWritten {
-			fmt.Println("  knowledge: Knowledge/_knowledge.md")
 		}
 	}
 }
@@ -938,16 +930,11 @@ func runReprocess() {
 	// Regenerate context docs for affected projects
 	if len(affectedProjects) > 0 {
 		idx, _ = index.Load(cfg.StateDir())
-		summaries := readKnowledgeSummaries(cfg.VaultPath)
-		genResult, err := index.GenerateContext(idx, cfg.VaultPath, summaries, cfg.Friction.AlertThreshold)
-		if err != nil {
+		if _, err := index.GenerateContext(idx, cfg.VaultPath, cfg.Friction.AlertThreshold); err != nil {
 			log.Printf("warning: generate context: %v", err)
 		} else {
 			for project := range affectedProjects {
 				fmt.Printf("  context: %s\n", filepath.Join("Projects", project, "history.md"))
-			}
-			if genResult.KnowledgeWritten {
-				fmt.Println("  knowledge: Knowledge/_knowledge.md")
 			}
 		}
 	}
@@ -1017,28 +1004,6 @@ func removeFlag(args []string, flag string) []string {
 		}
 	}
 	return out
-}
-
-func readKnowledgeSummaries(vaultPath string) []index.KnowledgeSummary {
-	notes, err := knowledge.ReadNotes(vaultPath)
-	if err != nil {
-		log.Printf("warning: read knowledge notes: %v", err)
-		return nil
-	}
-	var summaries []index.KnowledgeSummary
-	for _, n := range notes {
-		summaries = append(summaries, index.KnowledgeSummary{
-			Type:       n.Type,
-			Title:      n.Title,
-			Summary:    n.Summary,
-			Project:    n.Project,
-			Category:   n.Category,
-			Date:       n.Date,
-			Confidence: n.Confidence,
-			NotePath:   n.NotePath,
-		})
-	}
-	return summaries
 }
 
 func fatal(format string, args ...interface{}) {

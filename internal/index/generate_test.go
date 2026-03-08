@@ -28,7 +28,7 @@ func TestGenerateContext_WritesHistoryMd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := GenerateContext(idx, vaultPath, nil, 0)
+	result, err := GenerateContext(idx, vaultPath, 0)
 	if err != nil {
 		t.Fatalf("GenerateContext: %v", err)
 	}
@@ -61,48 +61,30 @@ func TestGenerateContext_WritesKnowledgeMd(t *testing.T) {
 		SessionID: "gen-k1", NotePath: "Projects/proj1/sessions/2026-03-01-01.md",
 		Project: "proj1", Date: "2026-03-01", Iteration: 1,
 	})
-	idx.Add(SessionEntry{
-		SessionID: "gen-k2", NotePath: "Projects/proj2/sessions/2026-03-01-01.md",
-		Project: "proj2", Date: "2026-03-01", Iteration: 1,
-	})
 	if err := idx.Save(); err != nil {
 		t.Fatal(err)
 	}
 
-	// Two knowledge notes from different projects in the same category
-	summaries := []KnowledgeSummary{
-		{
-			Type: "lesson", Title: "Always test edge cases",
-			Summary: "Edge case testing prevents regressions",
-			Project: "proj1", Category: "testing", Date: "2026-03-01",
-			NotePath: "Knowledge/learnings/2026-03-01-edge-cases.md",
-		},
-		{
-			Type: "lesson", Title: "Use table-driven tests",
-			Summary: "Table-driven tests improve coverage",
-			Project: "proj2", Category: "testing", Date: "2026-03-01",
-			NotePath: "Knowledge/learnings/2026-03-01-table-tests.md",
-		},
-	}
-
-	result, err := GenerateContext(idx, vaultPath, summaries, 0)
+	result, err := GenerateContext(idx, vaultPath, 0)
 	if err != nil {
 		t.Fatalf("GenerateContext: %v", err)
 	}
-
-	if !result.KnowledgeWritten {
-		t.Error("expected KnowledgeWritten = true")
+	if result.ProjectsUpdated != 1 {
+		t.Errorf("ProjectsUpdated = %d, want 1", result.ProjectsUpdated)
 	}
 
-	crossPath := filepath.Join(vaultPath, "Knowledge", "_knowledge.md")
-	data, err := os.ReadFile(crossPath)
+	// Per-project knowledge.md should be seeded
+	knowledgePath := filepath.Join(vaultPath, "Projects", "proj1", "knowledge.md")
+	data, err := os.ReadFile(knowledgePath)
 	if err != nil {
-		t.Fatalf("read _knowledge.md: %v", err)
+		t.Fatalf("read knowledge.md: %v", err)
 	}
-
 	content := string(data)
-	if !contains(content, "## testing") {
-		t.Error("missing testing category")
+	if !contains(content, "# Knowledge — proj1") {
+		t.Error("missing knowledge title")
+	}
+	if !contains(content, "## Decisions") {
+		t.Error("missing Decisions section")
 	}
 }
 
@@ -112,16 +94,13 @@ func TestGenerateContext_NoSessions(t *testing.T) {
 
 	idx, _ := Load(stateDir)
 
-	result, err := GenerateContext(idx, vaultPath, nil, 0)
+	result, err := GenerateContext(idx, vaultPath, 0)
 	if err != nil {
 		t.Fatalf("GenerateContext: %v", err)
 	}
 
 	if result.ProjectsUpdated != 0 {
 		t.Errorf("ProjectsUpdated = %d, want 0", result.ProjectsUpdated)
-	}
-	if result.KnowledgeWritten {
-		t.Error("expected KnowledgeWritten = false for empty index")
 	}
 }
 
@@ -144,7 +123,7 @@ func TestGenerateContext_MultipleProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := GenerateContext(idx, vaultPath, nil, 0)
+	result, err := GenerateContext(idx, vaultPath, 0)
 	if err != nil {
 		t.Fatalf("GenerateContext: %v", err)
 	}

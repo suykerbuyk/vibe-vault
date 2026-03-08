@@ -52,7 +52,6 @@ type NoteData struct {
 	FrictionScore   int                // Composite friction score 0-100
 	Corrections     int                // Count of detected user corrections
 	FrictionSignals []string           // Human-readable friction signal descriptions
-	KnowledgeNotes  []string           // Relative vault paths to extracted knowledge notes
 
 	// Phase 4: Extended data fields
 	ThinkingBlocks      int      // count of thinking blocks
@@ -171,16 +170,6 @@ func SessionNote(d NoteData) string {
 		}
 		b.WriteString("]\n")
 	}
-	if len(d.KnowledgeNotes) > 0 {
-		b.WriteString("knowledge_notes: [")
-		for i, kn := range d.KnowledgeNotes {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			b.WriteString(fmt.Sprintf("\"%s\"", kn))
-		}
-		b.WriteString("]\n")
-	}
 	b.WriteString("---\n\n")
 
 	// Title
@@ -284,17 +273,6 @@ func SessionNote(d NoteData) string {
 		b.WriteString(fmt.Sprintf("**Friction score: %d/100**\n\n", d.FrictionScore))
 		for _, sig := range d.FrictionSignals {
 			b.WriteString(fmt.Sprintf("- %s\n", sig))
-		}
-		b.WriteString("\n")
-	}
-
-	// Knowledge Captured
-	if len(d.KnowledgeNotes) > 0 {
-		b.WriteString("## Knowledge Captured\n\n")
-		for _, kn := range d.KnowledgeNotes {
-			// Extract filename without extension for wikilink
-			name := filenameNoExt(kn)
-			b.WriteString(fmt.Sprintf("- [[%s]]\n", name))
 		}
 		b.WriteString("\n")
 	}
@@ -430,15 +408,6 @@ func escapeYAML(s string) string {
 	s = strings.ReplaceAll(s, "\\", "\\\\")
 	s = strings.ReplaceAll(s, "\"", "\\\"")
 	return s
-}
-
-func filenameNoExt(path string) string {
-	base := filepath.Base(path)
-	ext := filepath.Ext(base)
-	if ext != "" {
-		return base[:len(base)-len(ext)]
-	}
-	return base
 }
 
 func shortenPath(path, cwd string) string {

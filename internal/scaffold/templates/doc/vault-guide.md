@@ -112,7 +112,7 @@ Every note requires this frontmatter:
 ```yaml
 ---
 date: YYYY-MM-DD          # required
-type: session|decision|pattern|learning|knowledge  # required
+type: session              # required
 domain: work|personal|opensource  # required
 status: active|completed|archived  # required
 tags: []                   # required, from controlled vocabulary
@@ -121,7 +121,6 @@ project: ""                # optional, project name
 model: ""                  # optional, Claude model used
 duration_minutes:          # optional, session length
 source_sessions: []        # optional, links to related sessions
-category: ""               # optional, knowledge category
 ---
 ```
 
@@ -167,10 +166,6 @@ Workspace directories are configured in `~/.config/vibe-vault/config.toml`.
 Only use these tags to keep the vault searchable and consistent:
 
 - `vv-session` — Session log/summary
-- `knowledge` — Extracted knowledge note
-- `decision` — Architectural or design decision
-- `pattern` — Reusable pattern discovered
-- `learning` — Lesson learned (what worked/failed)
 - `research` — Research findings
 - `implementation` — Implementation work
 - `debugging` — Bug investigation/fix
@@ -183,9 +178,7 @@ Only use these tags to keep the vault searchable and consistent:
 | Folder | Purpose |
 |--------|---------|
 | `Projects/{project}/sessions/` | Session logs organized by project, named `YYYY-MM-DD-NN.md` |
-| `Knowledge/decisions/` | Architectural and design decisions |
-| `Knowledge/patterns/` | Reusable patterns and approaches |
-| `Knowledge/learnings/` | Lessons learned from successes and failures |
+| `Projects/{project}/knowledge.md` | Per-project knowledge (decisions, patterns, learnings) |
 | `Projects/` | Project-specific index notes |
 | `Templates/` | Templater templates for new notes |
 | `Dashboards/` | Dataview-powered overview pages (sessions, decisions, action-items, weekly-digest, by-project, analytics) |
@@ -212,7 +205,7 @@ Only use these tags to keep the vault searchable and consistent:
 When accessing vault knowledge — whether via `/recall` or ad-hoc ("look up that decision about enrichment") — follow the two-pass pattern to minimize context usage:
 
 1. **Check auto-loaded summaries first** — VaultContextLoader already injected frontmatter summaries at session start (look for "Vault Knowledge (Auto-loaded)" in your context). If the answer is there, stop. Zero additional cost.
-2. **Grep, don't bulk-read** — Use `Grep` to search `summary:` fields and note bodies for the topic. Read only the frontmatter (first 15 lines) of matches to assess relevance.
+2. **Grep, don't bulk-read** — Use `Grep` to search `summary:` fields and note bodies in `Projects/` for the topic. Read only the frontmatter (first 15 lines) of matches to assess relevance.
 3. **Read selectively** — Only `Read` full note bodies for the 2-3 most relevant matches. Never bulk-read an entire directory.
 4. **Cap at 5 full reads** — If you need more than 5 note bodies, you should be using `/recall` with filters, not ad-hoc access.
 

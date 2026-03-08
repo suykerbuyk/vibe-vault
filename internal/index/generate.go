@@ -11,21 +11,19 @@ import (
 
 // GenerateResult holds metrics from a GenerateContext call.
 type GenerateResult struct {
-	ProjectsUpdated  int
-	KnowledgeWritten bool
+	ProjectsUpdated int
 }
 
-// GenerateContext writes per-project history.md and cross-project _knowledge.md
-// files. It uses the already-loaded index (no rebuild) so it's fast enough for
-// post-hook use. Callers provide knowledge summaries (may be nil).
+// GenerateContext writes per-project history.md files. It uses the
+// already-loaded index (no rebuild) so it's fast enough for post-hook use.
 // alertThreshold is the friction alert threshold (0 = disabled).
-func GenerateContext(idx *Index, vaultPath string, summaries []KnowledgeSummary, alertThreshold int) (*GenerateResult, error) {
+func GenerateContext(idx *Index, vaultPath string, alertThreshold int) (*GenerateResult, error) {
 	result := &GenerateResult{}
 
 	// Generate per-project context documents
 	projectsDir := filepath.Join(vaultPath, "Projects")
 	for _, project := range idx.Projects() {
-		doc := idx.ProjectContext(project, summaries, alertThreshold)
+		doc := idx.ProjectContext(project, alertThreshold)
 		dir := filepath.Join(projectsDir, project)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			log.Printf("warning: create dir for %s: %v", project, err)
@@ -37,19 +35,13 @@ func GenerateContext(idx *Index, vaultPath string, summaries []KnowledgeSummary,
 			continue
 		}
 		result.ProjectsUpdated++
-	}
 
-	// Generate cross-project knowledge document
-	if len(summaries) > 0 {
-		crossDoc := CrossProjectKnowledge(summaries)
-		if crossDoc != "" {
-			crossPath := filepath.Join(vaultPath, "Knowledge", "_knowledge.md")
-			if err := os.MkdirAll(filepath.Dir(crossPath), 0o755); err != nil {
-				log.Printf("warning: create Knowledge dir: %v", err)
-			} else if err := os.WriteFile(crossPath, []byte(crossDoc), 0o644); err != nil {
-				log.Printf("warning: write cross-project knowledge: %v", err)
-			} else {
-				result.KnowledgeWritten = true
+		// Seed per-project knowledge.md if it doesn't exist
+		knowledgePath := filepath.Join(dir, "knowledge.md")
+		if _, err := os.Stat(knowledgePath); os.IsNotExist(err) {
+			content := "# Knowledge — " + project + "\n\n## Decisions\n\n## Patterns\n\n## Learnings\n"
+			if err := os.WriteFile(knowledgePath, []byte(content), 0o644); err != nil {
+				log.Printf("warning: write knowledge.md for %s: %v", project, err)
 			}
 		}
 	}

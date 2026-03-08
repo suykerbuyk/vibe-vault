@@ -426,15 +426,11 @@ vibe-vault/
 │       │   └── tasks/          # Active and completed tasks
 │       ├── sessions/           # Session notes (auto-generated)
 │       │   └── YYYY-MM-DD-NN.md
+│       ├── knowledge.md        # Per-project knowledge (manual, seeded by vv)
 │       └── history.md          # Per-project context doc (auto-generated)
-├── Knowledge/
-│   ├── decisions/              # Architectural decisions
-│   ├── patterns/               # Reusable patterns
-│   └── learnings/              # Lessons learned
 ├── Dashboards/
 │   ├── sessions.md             # All sessions (Dataview)
 │   ├── by-project.md           # Sessions grouped by project
-│   ├── decisions.md            # Decision log
 │   ├── action-items.md         # Open threads across sessions
 │   └── weekly-digest.md        # Weekly activity summary
 ├── Templates/                  # Templater templates for manual notes
@@ -592,7 +588,7 @@ built on data vv already captures.
 | 6 | Session analytics — narrative extraction, prose dialogue, `vv stats`, semantic summaries | Complete |
 | 7 | Behavioral analysis — correction detection, friction scoring, `vv friction` | Complete |
 | 8 | Analytics & trends — dashboards, metric trends, `vv trends` | Complete |
-| 9 | Portable AI memory — vault-resident context, knowledge capture, cross-project patterns | Complete |
+| 9 | Portable AI memory — vault-resident context, per-project knowledge templates | Complete |
 
 ### Context as Code Connections
 
@@ -603,7 +599,7 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 | **Observability** — log every context chunk, surface "missing context" signals | Tool usage tracking, friction detection, correction patterns, `vv stats`, `vv friction` |
 | **Testing** — statistical grading across runs, regression detection | `vv trends` anomaly detection, weekly metric tracking, friction trend analysis |
 | **Version control** — context is versioned, auditable, diffable | Session notes are markdown in git, indexed and cross-linked |
-| **Reuse** — context registries, versioned modules | Per-project `history.md`, semantic summaries, knowledge notes, `agentctx/` portable context |
+| **Reuse** — context registries, versioned modules | Per-project `history.md`, semantic summaries, `agentctx/` portable context |
 | **CI/CD** — automated context pipelines, auto-refresh | Backfill pipeline, reprocess on upgrade, index rebuild |
 
 ### What's Out of Scope
@@ -637,7 +633,7 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 **684 tests** across 51 test files + **1 integration test** with 22
 subtests. The integration test exercises the full pipeline:
-`init` → `process` → `index` → `knowledge injection` → `stats` →
+`init` → `process` → `index` → `stats` →
 `backfill` → `archive` → `checkpoint lifecycle` → `friction` →
 `trends` → `inject` → `context init/migrate` → `context sync` →
 `export` → `reprocess`.

@@ -753,7 +753,7 @@ func TestProjectContextTimeline(t *testing.T) {
 		Summary: "Second session", Tag: "implementation",
 	}
 
-	doc := idx.ProjectContext("proj", nil, 0)
+	doc := idx.ProjectContext("proj", 0)
 
 	if !contains(doc, "[[2026-02-20-01]]") {
 		t.Error("missing first session wikilink")
@@ -783,7 +783,7 @@ func TestProjectContextContinuedSession(t *testing.T) {
 		Summary: "Continued work", ParentUUID: "external-uuid-xyz",
 	}
 
-	doc := idx.ProjectContext("proj", nil, 0)
+	doc := idx.ProjectContext("proj", 0)
 
 	if !contains(doc, "[[2026-02-20-02]] ↩continued") {
 		t.Error("continued session should have ↩continued marker in timeline")
@@ -807,7 +807,7 @@ func TestProjectContextDecisionDedup(t *testing.T) {
 		Decisions: []string{"Use JWT auth", "Add rate limiting"}, // "Use JWT auth" is duplicate
 	}
 
-	doc := idx.ProjectContext("proj", nil, 0)
+	doc := idx.ProjectContext("proj", 0)
 
 	// Count occurrences of "Use JWT auth" in decisions section
 	count := countOccurrences(doc, "Use JWT auth")
@@ -830,7 +830,7 @@ func TestProjectContextThreadResolution(t *testing.T) {
 		Decisions: []string{"completed authentication system with JWT"},
 	}
 
-	doc := idx.ProjectContext("proj", nil, 0)
+	doc := idx.ProjectContext("proj", 0)
 
 	// "implement authentication system" should be filtered out
 	// because "completed authentication system with JWT" resolves it
@@ -855,7 +855,7 @@ func TestProjectContextKeyFiles(t *testing.T) {
 		}
 	}
 
-	doc := idx.ProjectContext("proj", nil, 0)
+	doc := idx.ProjectContext("proj", 0)
 
 	if !contains(doc, "`main.go` (4 sessions)") {
 		t.Error("main.go should appear as key file with 4 sessions")
@@ -915,70 +915,6 @@ func TestIndexSaveLoad(t *testing.T) {
 	}
 }
 
-// --- Knowledge injection tests ---
-
-func TestProjectContextLearnedPatterns(t *testing.T) {
-	idx := &Index{Entries: make(map[string]SessionEntry)}
-
-	idx.Entries["s1"] = SessionEntry{
-		SessionID: "s1", Project: "proj", Date: "2026-02-20",
-		Iteration: 1, NotePath: "Projects/proj/sessions/2026-02-20-01.md",
-		Summary: "First session",
-	}
-
-	knowledge := []KnowledgeSummary{
-		{
-			Type:     "lesson",
-			Title:    "Always validate input",
-			Summary:  "Input validation prevents downstream errors",
-			Project:  "proj",
-			Category: "error-handling",
-			NotePath: "Knowledge/learnings/2026-02-28-always-validate-input.md",
-		},
-	}
-
-	doc := idx.ProjectContext("proj", knowledge, 0)
-
-	if !contains(doc, "## Learned Patterns") {
-		t.Error("missing Learned Patterns section")
-	}
-	if !contains(doc, "[[2026-02-28-always-validate-input]]") {
-		t.Error("missing knowledge note wikilink")
-	}
-	if !contains(doc, "Input validation prevents downstream errors") {
-		t.Error("missing knowledge summary")
-	}
-}
-
-func TestProjectContextAgnosticKnowledge(t *testing.T) {
-	idx := &Index{Entries: make(map[string]SessionEntry)}
-
-	idx.Entries["s1"] = SessionEntry{
-		SessionID: "s1", Project: "proj", Date: "2026-02-20",
-		Iteration: 1, NotePath: "Projects/proj/sessions/2026-02-20-01.md",
-	}
-
-	knowledge := []KnowledgeSummary{
-		{
-			Type:     "lesson",
-			Title:    "Cross-project pattern",
-			Summary:  "This applies everywhere",
-			Project:  "", // agnostic
-			Category: "testing",
-			NotePath: "Knowledge/learnings/2026-02-28-cross-project-pattern.md",
-		},
-	}
-
-	doc := idx.ProjectContext("proj", knowledge, 0)
-
-	if !contains(doc, "## Learned Patterns") {
-		t.Error("agnostic knowledge should appear in Learned Patterns")
-	}
-	if !contains(doc, "[[2026-02-28-cross-project-pattern]]") {
-		t.Error("missing agnostic knowledge wikilink")
-	}
-}
-
 func TestProjectContextFrictionAlert(t *testing.T) {
 	idx := &Index{Entries: make(map[string]SessionEntry)}
 
@@ -993,7 +929,7 @@ func TestProjectContextFrictionAlert(t *testing.T) {
 		}
 	}
 
-	doc := idx.ProjectContext("proj", nil, 40)
+	doc := idx.ProjectContext("proj", 40)
 
 	if !contains(doc, "## ⚠ Friction Alert") {
 		t.Error("expected friction alert section for avg friction 50 with threshold 40")
@@ -1017,7 +953,7 @@ func TestProjectContextFrictionAlertBelowThreshold(t *testing.T) {
 		}
 	}
 
-	doc := idx.ProjectContext("proj", nil, 40)
+	doc := idx.ProjectContext("proj", 40)
 
 	if contains(doc, "Friction Alert") {
 		t.Error("should not have friction alert for avg friction 20 with threshold 40")
@@ -1037,94 +973,10 @@ func TestProjectContextFrictionAlertDisabled(t *testing.T) {
 		}
 	}
 
-	doc := idx.ProjectContext("proj", nil, 0)
+	doc := idx.ProjectContext("proj", 0)
 
 	if contains(doc, "Friction Alert") {
 		t.Error("should not have friction alert when threshold is 0")
-	}
-}
-
-func TestCrossProjectKnowledge(t *testing.T) {
-	knowledge := []KnowledgeSummary{
-		{
-			Type:     "lesson",
-			Title:    "Pattern A",
-			Summary:  "Summary A",
-			Project:  "proj1",
-			Category: "testing",
-			NotePath: "Knowledge/learnings/2026-02-28-pattern-a.md",
-		},
-		{
-			Type:     "lesson",
-			Title:    "Pattern B",
-			Summary:  "Summary B",
-			Project:  "proj2",
-			Category: "testing",
-			NotePath: "Knowledge/learnings/2026-02-28-pattern-b.md",
-		},
-		{
-			Type:     "decision",
-			Title:    "Single project only",
-			Summary:  "Only for proj1",
-			Project:  "proj1",
-			Category: "architecture",
-			NotePath: "Knowledge/decisions/2026-02-28-single-project.md",
-		},
-	}
-
-	doc := CrossProjectKnowledge(knowledge)
-
-	if doc == "" {
-		t.Fatal("expected non-empty cross-project knowledge doc")
-	}
-	if !contains(doc, "## testing") {
-		t.Error("missing testing category (spans 2 projects)")
-	}
-	if contains(doc, "## architecture") {
-		t.Error("architecture should not appear (only 1 project)")
-	}
-	if !contains(doc, "[[2026-02-28-pattern-a]]") {
-		t.Error("missing pattern A wikilink")
-	}
-	if !contains(doc, "[[2026-02-28-pattern-b]]") {
-		t.Error("missing pattern B wikilink")
-	}
-}
-
-func TestCrossProjectKnowledgeAgnostic(t *testing.T) {
-	knowledge := []KnowledgeSummary{
-		{
-			Type:     "lesson",
-			Title:    "Universal pattern",
-			Summary:  "Applies everywhere",
-			Project:  "", // agnostic
-			Category: "workflow",
-			NotePath: "Knowledge/learnings/2026-02-28-universal.md",
-		},
-	}
-
-	doc := CrossProjectKnowledge(knowledge)
-
-	if doc == "" {
-		t.Fatal("expected non-empty doc for agnostic knowledge")
-	}
-	if !contains(doc, "## workflow") {
-		t.Error("missing workflow category")
-	}
-	if !contains(doc, "[[2026-02-28-universal]]") {
-		t.Error("missing agnostic note wikilink")
-	}
-}
-
-func TestCrossProjectKnowledgeEmpty(t *testing.T) {
-	doc := CrossProjectKnowledge(nil)
-	if doc != "" {
-		t.Error("expected empty doc for nil knowledge")
-	}
-
-	doc = CrossProjectKnowledge([]KnowledgeSummary{})
-	if doc != "" {
-		t.Error("expected empty doc for empty knowledge")
 	}
 }
 

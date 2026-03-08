@@ -93,7 +93,6 @@ func Rebuild(projectsDir, stateDir string) (*Index, int, error) {
 			FilesChanged:   note.FilesChanged,
 			Branch:         note.Branch,
 			Commits:        note.Commits,
-			KnowledgeNotes: note.KnowledgeNotes,
 		}
 
 		// Extract title from frontmatter or first heading

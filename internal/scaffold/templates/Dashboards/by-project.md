@@ -75,14 +75,3 @@ WHERE type = "session" AND domain = "opensource" AND project != null AND project
 SORT project ASC, date DESC
 ```
 
-## Decisions by Project
-
-```dataview
-TABLE
-  date AS "Date",
-  summary AS "Summary"
-FROM "Knowledge/decisions"
-WHERE project != null AND project != ""
-GROUP BY project
-SORT key ASC
-```

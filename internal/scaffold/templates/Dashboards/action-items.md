@@ -19,16 +19,6 @@ GROUP BY file.link
 SORT file.frontmatter.date DESC
 ```
 
-## Open Tasks from Knowledge Notes
-
-```dataview
-TASK
-FROM "Knowledge"
-WHERE !completed
-GROUP BY file.link
-SORT file.frontmatter.date DESC
-```
-
 ## By Domain
 
 ### Work Action Items

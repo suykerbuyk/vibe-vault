@@ -21,7 +21,6 @@ const (
 	SectionThreads   = "threads"
 	SectionDecisions = "decisions"
 	SectionFriction  = "friction"
-	SectionKnowledge = "knowledge"
 )
 
 // AllSections lists sections in priority order — truncation drops from the end.
@@ -31,7 +30,6 @@ var AllSections = []string{
 	SectionThreads,
 	SectionDecisions,
 	SectionFriction,
-	SectionKnowledge,
 }
 
 // Inject configuration constants.
@@ -65,14 +63,6 @@ type FrictionSummary struct {
 	Average   float64 `json:"average"`
 }
 
-// KnowledgeItem is a condensed knowledge note for injection output.
-type KnowledgeItem struct {
-	Type    string `json:"type"`
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
-	Date    string `json:"date"`
-}
-
 // Result is the structured inject output.
 type Result struct {
 	Project   string          `json:"project"`
@@ -81,11 +71,10 @@ type Result struct {
 	Threads   []string        `json:"threads,omitempty"`
 	Decisions []string        `json:"decisions,omitempty"`
 	Friction  *FrictionSummary `json:"friction,omitempty"`
-	Knowledge []KnowledgeItem `json:"knowledge,omitempty"`
 }
 
-// Build assembles a Result from index entries, knowledge summaries, and trend data.
-func Build(entries map[string]index.SessionEntry, knowledge []index.KnowledgeSummary, trendResult trends.Result, opts Opts) Result {
+// Build assembles a Result from index entries and trend data.
+func Build(entries map[string]index.SessionEntry, trendResult trends.Result, opts Opts) Result {
 	r := Result{Project: opts.Project}
 
 	projectEntries := projectEntriesByDateDesc(entries, opts.Project)
@@ -116,9 +105,6 @@ func Build(entries map[string]index.SessionEntry, knowledge []index.KnowledgeSum
 
 	// Friction from trends
 	r.Friction = frictionFromTrends(trendResult)
-
-	// Knowledge
-	r.Knowledge = relevantKnowledge(knowledge, opts.Project, 5)
 
 	return r
 }
@@ -171,13 +157,6 @@ func FormatMarkdown(r Result, sections []string) string {
 	if sectionSet[SectionFriction] && r.Friction != nil {
 		b.WriteString(fmt.Sprintf("\n## Friction\n\nTrend: %s (avg %.1f)\n",
 			r.Friction.Direction, r.Friction.Average))
-	}
-
-	if sectionSet[SectionKnowledge] && len(r.Knowledge) > 0 {
-		b.WriteString("\n## Knowledge\n\n")
-		for _, k := range r.Knowledge {
-			b.WriteString(fmt.Sprintf("- [%s] %s — %s\n", k.Type, k.Title, k.Summary))
-		}
 	}
 
 	return b.String()
@@ -331,36 +310,6 @@ func frictionFromTrends(r trends.Result) *FrictionSummary {
 	return nil
 }
 
-func relevantKnowledge(summaries []index.KnowledgeSummary, project string, n int) []KnowledgeItem {
-	var filtered []index.KnowledgeSummary
-	for _, k := range summaries {
-		if k.Project == project || k.Project == "" {
-			filtered = append(filtered, k)
-		}
-	}
-
-	// Sort by date descending
-	sort.Slice(filtered, func(i, j int) bool {
-		return filtered[i].Date > filtered[j].Date
-	})
-
-	cap := n
-	if len(filtered) < cap {
-		cap = len(filtered)
-	}
-
-	var items []KnowledgeItem
-	for _, k := range filtered[:cap] {
-		items = append(items, KnowledgeItem{
-			Type:    k.Type,
-			Title:   k.Title,
-			Summary: k.Summary,
-			Date:    k.Date,
-		})
-	}
-	return items
-}
-
 // isResolvedByDecisions checks if a thread has significant word overlap with any decision.
 func isResolvedByDecisions(thread string, decisions []string) bool {
 	threadWords := significantWords(thread)
@@ -443,9 +392,6 @@ func filterResult(r Result, sections []string) Result {
 	}
 	if sectionSet[SectionFriction] {
 		filtered.Friction = r.Friction
-	}
-	if sectionSet[SectionKnowledge] {
-		filtered.Knowledge = r.Knowledge
 	}
 	return filtered
 }

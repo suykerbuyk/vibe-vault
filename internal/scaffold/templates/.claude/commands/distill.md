@@ -9,42 +9,11 @@ Review recent session notes from the vault and extract durable knowledge worth p
    - **Patterns** — Reusable approaches or techniques worth remembering (e.g., "Bun spawn needs explicit stdio config", "Use fire-and-forget git commits in hooks")
    - **Learnings** — Lessons from what worked or failed (e.g., "Frontmatter parsing is faster than full YAML parse for simple fields")
 
-3. **Check for duplicates** — Before creating a new note, scan existing files in `Knowledge/decisions/`, `Knowledge/patterns/`, and `Knowledge/learnings/` to avoid duplicating knowledge that already exists.
+3. **Check for duplicates** — Before adding knowledge, check the project's `knowledge.md` to avoid duplicating insights that already exist.
 
-4. **Create Knowledge notes** with proper frontmatter for each unique insight:
+4. **Update the project's knowledge.md** file at `Projects/{project}/knowledge.md` with new insights. Each project has a simple knowledge file with sections for Decisions, Patterns, and Learnings.
 
-```markdown
----
-date: YYYY-MM-DD
-type: decision|pattern|learning
-domain: work|personal|opensource
-status: active
-tags:
-  - [appropriate tag from: knowledge, decision, pattern, learning]
-summary: "One-line description of the insight"
-project: "project-name-if-applicable"
-source_sessions:
-  - "[[YYYY-MM-DD-NN]]"
----
-
-# Title
-
-## Context
-
-[What situation led to this insight]
-
-## Insight
-
-[The actual decision/pattern/learning]
-
-## Rationale
-
-[Why this matters for future work]
-```
-
-5. **File naming**: Use `YYYY-MM-DD_slug.md` format in the appropriate `Knowledge/` subdirectory.
-
-6. **Git commit** the new notes: `git add Knowledge/ && git commit -m "distill: extract knowledge from recent sessions"`
+5. **Git commit** the changes: `git add Projects/ && git commit -m "distill: extract knowledge from recent sessions"`
 
 ## Quality Filters
 
@@ -52,7 +21,7 @@ source_sessions:
 - Skip session-specific details (timestamps, ISC counts, specific file paths)
 - Skip trivial sessions with no meaningful output
 - Prefer **concrete and actionable** insights over vague observations
-- Each note should be self-contained — readable without the source session
+- Each entry should be self-contained — readable without the source session
 
 ## Arguments
 

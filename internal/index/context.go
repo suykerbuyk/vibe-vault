@@ -11,19 +11,6 @@ import (
 	"time"
 )
 
-// KnowledgeSummary holds a knowledge note's key fields for injection into
-// project context documents and cross-project knowledge files.
-type KnowledgeSummary struct {
-	Type       string  // "lesson" or "decision"
-	Title      string
-	Summary    string
-	Project    string  // empty = project-agnostic
-	Category   string
-	Date       string
-	Confidence float64
-	NotePath   string // relative vault path for wikilinks
-}
-
 // Projects returns a sorted list of unique project names in the index.
 func (idx *Index) Projects() []string {
 	seen := make(map[string]bool)
@@ -40,7 +27,7 @@ func (idx *Index) Projects() []string {
 
 // ProjectContext generates an Obsidian markdown context document for a project.
 // alertThreshold is the friction score threshold for alerts (0 = disabled).
-func (idx *Index) ProjectContext(project string, knowledge []KnowledgeSummary, alertThreshold int) string {
+func (idx *Index) ProjectContext(project string, alertThreshold int) string {
 	entries := idx.projectEntries(project)
 	if len(entries) == 0 {
 		return ""
@@ -125,16 +112,6 @@ func (idx *Index) ProjectContext(project string, knowledge []KnowledgeSummary, a
 		b.WriteString("## Friction Patterns\n\n")
 		for _, fp := range frictionPatterns {
 			b.WriteString(fmt.Sprintf("- %s\n", fp))
-		}
-		b.WriteString("\n")
-	}
-
-	// Learned Patterns — from knowledge notes
-	learnedPatterns := collectLearnedPatterns(knowledge, project)
-	if len(learnedPatterns) > 0 {
-		b.WriteString("## Learned Patterns\n\n")
-		for _, lp := range learnedPatterns {
-			b.WriteString(fmt.Sprintf("- [[%s]] — %s\n", lp.noteSlug, lp.summary))
 		}
 		b.WriteString("\n")
 	}
@@ -333,25 +310,6 @@ func collectFrictionPatterns(entries []SessionEntry) []string {
 		patterns = append(patterns, fmt.Sprintf("Average friction score: %.0f/100", avgScore))
 	}
 
-	return patterns
-}
-
-type learnedPattern struct {
-	noteSlug string
-	summary  string
-}
-
-func collectLearnedPatterns(knowledge []KnowledgeSummary, project string) []learnedPattern {
-	var patterns []learnedPattern
-	for _, k := range knowledge {
-		if k.Project == project || k.Project == "" {
-			slug := filenameNoExt(k.NotePath)
-			patterns = append(patterns, learnedPattern{
-				noteSlug: slug,
-				summary:  k.Summary,
-			})
-		}
-	}
 	return patterns
 }
 

@@ -28,9 +28,7 @@ Notes land in `Projects/{project}/sessions/YYYY-MM-DD-NN.md` and are queryable v
 
 ```
 Projects/{project}/sessions/  Auto-generated session notes
-Knowledge/decisions/      Architectural decisions
-Knowledge/patterns/       Reusable patterns
-Knowledge/learnings/      Lessons learned
+Projects/{project}/knowledge.md  Per-project knowledge (manual)
 Dashboards/               Dataview-powered views
 Templates/                Templater templates
 ```

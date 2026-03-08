@@ -24,7 +24,6 @@ func TestInit_CreatesVault(t *testing.T) {
 		".obsidian/app.json",
 		".obsidian/appearance.json",
 		"Projects/.gitkeep",
-		"Knowledge/decisions/.gitkeep",
 		"Dashboards/sessions.md",
 		"Templates/session-summary.md",
 		"scripts/install-hooks.sh",

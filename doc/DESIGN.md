@@ -28,8 +28,8 @@ Key architectural and design decisions in vibe-vault, with rationale.
 6. **Notes organized by project, not date:** Session notes go to
    `Projects/{project}/sessions/YYYY-MM-DD-NN.md` rather than a date-based
    hierarchy. This keeps related sessions together in Obsidian's file explorer
-   and separates session notes from project-level files (history.md, future
-   tasks/, Knowledge/).
+   and separates session notes from project-level files (history.md,
+   knowledge.md, tasks/).
 
 7. **Two dependencies (BurntSushi/toml, klauspost/compress):** Minimal
    dependency tree for a tool that runs on every session end. Enrichment uses
@@ -43,7 +43,7 @@ Key architectural and design decisions in vibe-vault, with rationale.
    `net/http` -- no SDK dependencies -- preserving the minimal dependency
    philosophy. `NewProvider(cfg)` factory routes by `cfg.Provider` field and
    wraps with `WithRetry()` (single retry with 2s backoff on transient errors).
-   `enrichment.Generate()` and `knowledge.Enrich()` accept `llm.Provider`
+   `enrichment.Generate()` accepts `llm.Provider`
    instead of building their own HTTP clients. Provider instantiated once in
    `hook/handler.go` and passed through `CaptureOpts`.
 
@@ -138,18 +138,14 @@ Key architectural and design decisions in vibe-vault, with rationale.
     are stored most-recent-first for display, oldest-first internally for
     computation.
 
-22. **Knowledge extraction as separate LLM call with double gate:**
-    `knowledge.Enrich()` runs independently of the enrichment LLM call --
-    enrichment is skipped when prose dialogue exists, but high-friction prose
-    sessions are the most interesting for lessons. Two gates prevent noise:
-    (1) trigger gate (friction >= 30 or decisions >= 2 -- only sessions with
-    signal), (2) confidence gate (>= 0.7 -- only high-confidence extractions
-    are written). Correction->resolution pairing (`PairCorrections`) walks the
-    prose dialogue to match friction corrections by TurnIndex with the
-    assistant response that followed, giving the LLM structured input rather
-    than raw transcript. Knowledge notes are atomic Obsidian files in
-    `Knowledge/learnings/` and `Knowledge/decisions/` with wikilinks back to
-    the source session note.
+22. **Per-project knowledge as manual files:** Knowledge is inherently
+    project-specific, not global. Each project gets a simple `knowledge.md`
+    file (seeded by `GenerateContext()`) with sections for Decisions,
+    Patterns, and Learnings. No automated extraction machinery — humans
+    (or AI via `/distill`) write entries manually. The previous global
+    `Knowledge/` system with automated LLM extraction was removed as
+    architecturally flawed (global when knowledge is project-specific)
+    and never produced useful notes.
 
 23. **Prose dialogue extraction as orthogonal layer:** `prose.Extract()` extracts
     *dialogue* from *text blocks* while narrative extracts *activities* from

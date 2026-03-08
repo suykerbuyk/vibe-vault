@@ -14,8 +14,5 @@
 
 # Personal vault content — keep locally, never push
 Projects/*/sessions/
-Knowledge/decisions/20*.md
-Knowledge/learnings/20*.md
-Knowledge/patterns/20*.md
 Projects/*.md
 !Projects/README.md
