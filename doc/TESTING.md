@@ -2,7 +2,7 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**652 unit tests** across 26 test packages + **1 integration test** (22 subtests). All passing.
+**786 unit tests** across 26 test packages + **1 integration test** (22 subtests). All passing.
 
 Run unit tests: `make test` (or `go test -short ./...`)
 Run integration: `make integration` (or `go test -run TestIntegration -timeout 60s ./test/`)
@@ -11,13 +11,14 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 
 | File | Tests | Coverage |
 |------|-------|----------|
+| `session/capture_test.go` | 7 | `CaptureFromParsed_Basic`, `CaptureFromParsed_ZedSource`, `CaptureFromParsed_TrivialSkip`, `CaptureFromParsed_Dedup`, `CaptureFromParsed_ZedFallbackSummary`, `CaptureFromParsed_WithNarrativeAndDialogue`, `CaptureFromParsed_Idempotent` |
 | `session/detect_test.go` | 8 | `DetectProject` (5 variants: baseline, git remote SSH/HTTPS, no remote, not git repo), `detectDomain`, `TitleFromFirstMessage`, `repoNameFromURL` |
 | `transcript/parser_test.go` | 7 | `Parse` (full round-trip), `FirstUserMessage`, `FirstUserMessage_SkipsResume`, `ContentBlocks_StringContent`, `TextContent`, `ParseParentUUID_ContinuedSession`, `ParseParentUUID_NoContinuation` |
 | `scaffold/scaffold_test.go` | 5 | `CreatesVault`, `RefusesExistingObsidian`, `RefusesExistingVibeVault`, `VaultNameReplacement`, `ExecutablePermissions` |
 | `config/config_test.go` | 16 | `DefaultConfig`, `Load_NoConfig`, `Load_ValidConfig`, `Load_FrictionConfig`, `Load_FrictionConfigAbsent`, `Load_ExpandsHome`, `Load_XDGPriority`, `Load_InvalidTOML`, `Overlay_TagsOverride`, `Overlay_PartialOverride`, `Overlay_MissingFile`, `Overlay_FullyCommented`, `WithProjectOverlay`, `SessionTag`, `SessionTags`, `ProjectsDir_StateDir` |
 | `config/write_test.go` | 6 | `WriteDefault_CreatesConfig`, `WriteDefault_UpdatesExistingVaultPath`, `WriteDefault_UnchangedExisting`, `WriteDefault_PreservesAllSections`, `WriteDefault_MissingVaultPathKey`, `CompressHome` |
 | `enrichment/enrichment_test.go` | 11 | `Truncate`, `BuildMessages`, `ParseResponse`, `ParseResponse_EmptyChoices`, `ParseResponse_BadJSON`, `ValidateTag`, `Generate_Disabled`, `Generate_NoAPIKey`, `Generate_MockServer`, `Generate_Timeout`, `Generate_ServerError` |
-| `help/help_test.go` | 50 | Terminal output regression (all 15 subcommands incl. inject, export), FormatUsage, registry completeness (15 subcommands), roff structure (subcommands + hook + context subcommands), escapeRoff, ManName (incl. spaces), hook + context subcommand terminal output |
+| `help/help_test.go` | 62 | Terminal output regression (all 18 subcommands incl. zed), FormatUsage, registry completeness (18 subcommands), roff structure (subcommands + hook + context + zed + templates subcommands), escapeRoff, ManName (incl. spaces), hook + context subcommand terminal output |
 | `context/context_test.go` | 27 | Init (CreatesVaultFiles, CreatesRepoFiles, ClaudeSubdirSymlinks, WorkflowMD, IdempotentSkip, ForceOverwrite, ProjectOverride, VaultNotFound, ClaudeMDContent, GitignoreUpdated, GitignoreIdempotent, ProjectDetection, AgentctxSymlink, ClaudeMDSymlink, ClaudeSubdirsRelativeSymlinks, GitignoreAgentctx, VersionFile), Migrate (CopiesResume, CopiesHistory, CopiesTasks, CopiesLocalCommands, SkipsAlreadySymlinkedCommands, SkipsMissing, SkipsExistingVaultFiles, ForceOverwrite, UpdatesRepoFiles, PreservesOriginals) |
 | `context/schema_test.go` | 10 | ReadVersion (Missing, Roundtrip, Invalid), WriteVersion (Creates, Overwrites), MigrationsFrom (Zero, One, Two, Three, Latest) |
 | `context/sync_test.go` | 14 | Sync (LegacyProject, AlreadyCurrent, PartialMigration, DryRun, AllMode, PropagatesSharedCommands, ExistingCommandNotOverwritten, Idempotent), Migrate0to1, Migrate1to2 (CreatesSymlink, RewritesCLAUDEMD, RelativeCommands, VaultOnlySkipsRepo), DiscoverProjects, PropagateSharedCommands |
@@ -25,6 +26,7 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 | `inject/inject_test.go` | 13 | `BuildEmpty`, `BuildSummary`, `BuildSessions`, `BuildSessionsFewEntries`, `BuildOpenThreads`, `BuildDecisions`, `BuildFriction`, `FormatMarkdown`, `FormatJSON`, `RenderTokenBudget`, `RenderSectionsFilter`, `EstimateTokens`, `OpenThreadsResolution`, `SignificantWords` |
 | `hook/handler_test.go` | 13 | `HandleInput_SessionEnd`, `HandleInput_SessionEnd_MissingTranscript`, `HandleInput_EventOverride`, `HandleInput_ClearReason` (now processed), `HandleInput_StopCreatesCheckpoint`, `HandleInput_StopThenSessionEnd`, `HandleInput_StopNoTranscript`, `HandleInput_StopMissingFile`, `HandleInput_UnknownEvent`, `HandleInput_EmptyEvent`, `HandleInput_SessionEnd_RefreshesContext`, `HandleInput_SessionEnd_NoFrictionAlert`, `InputJSON` |
 | `hook/setup_test.go` | 12 | `Install_NoFile`, `Install_EmptyFile`, `Install_ExistingSettingsNoHooks`, `Install_PreservesExistingHooks`, `Install_Idempotent`, `Install_PartialHooks`, `Install_CreatesBackup`, `Install_MalformedJSON`, `Uninstall_RemovesHooks`, `Uninstall_PreservesOtherHooks`, `Uninstall_NotInstalled`, `Uninstall_CleansEmptyHooksMap` |
+| `index/index_source_test.go` | 3 | `SourceName` (empty defaults to claude-code, zed source, custom source) |
 | `index/index_test.go` | 32 | `IndexBackwardsCompat`, `IndexEnrichedRoundTrip`, `IndexTranscriptPathRoundTrip`, `IndexCheckpointRoundTrip`, `IndexToolCountsRoundTrip`, `IndexTokensRoundTrip`, `IndexCommitsRoundTrip`, `IndexFrictionRoundTrip`, `Rebuild` (incl. token backfill assertions), `RebuildSkipsMalformed`, `RebuildSkipsNonSessionFiles`, `RelatedSharedFiles`, `RelatedThreadResolution`, `RelatedSameBranch`, `RelatedSameBranchMainExcluded`, `RelatedSameTag`, `RelatedMinScoreFilter`, `RelatedPreviousExclusion`, `RelatedMaxResults`, `SignificantWords`, `ProjectContextTimeline`, `ProjectContextDecisionDedup`, `ProjectContextThreadResolution`, `ProjectContextKeyFiles`, `Projects`, `IndexSaveLoad`, `ProjectContextFrictionAlert`, `ProjectContextFrictionAlertBelowThreshold`, `ProjectContextFrictionAlertDisabled`, `IndexParentUUIDRoundTrip`, `IndexParentUUIDOmitEmpty`, `ProjectContextContinuedSession` |
 | `index/generate_test.go` | 4 | `GenerateContext_WritesHistoryMd`, `GenerateContext_WritesKnowledgeMd` (per-project knowledge.md seeding), `GenerateContext_NoSessions`, `GenerateContext_MultipleProjects` |
 | `narrative/segment_test.go` | 5 | `NoCompaction`, `SingleBoundary`, `MultipleBoundaries`, `BoundaryExcluded`, `EmptyInput` |
@@ -59,7 +61,7 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 | `zed/prose_test.go` | 12 | `ExtractDialogue_NilThread`, `ExtractDialogue_EmptyMessages`, `ExtractDialogue_BasicConversation`, `ExtractDialogue_ThinkingExcluded`, `ExtractDialogue_ToolMarkers`, `ExtractDialogue_MentionsAsAtPath`, `ExtractDialogue_FillerFilter`, `ExtractDialogue_LongUserTextCapped`, `ExtractDialogue_BashMarkers` (4 subtests), `ExtractDialogue_ErrorMarker` |
 | `archive/archive_test.go` | 3 | `ArchiveRoundTrip`, `IsArchived`, `ArchivePath` |
 | `check/check_test.go` | 27 | `CheckVaultPath` (pass/fail), `CheckObsidian` (pass/warn), `CheckProjects` (pass/warn), `CheckStateDir` (pass/warn), `CheckIndex` (pass/warn/fail), `CheckDomains` (all exist/some missing/empty skipped), `CheckEnrichment` (disabled/enabled+key/enabled+no key), `checkHookFile` (pass/warn/fail), `Report.HasFailures` (true/false), `Run` integration, `Status.String`, `CheckAgentctxSchema` (current/outdated/no-agentctx) |
-| `templates/templates_test.go` | 8 | `New` (entry count=13), `DefaultContent`, `DefaultContentReturnsCopy`, `Has`, `Compare` (default/customized/missing), `Reset` (create/reset), `ResetAll` (13 actions), `ResetUnknown` |
+| `templates/templates_test.go` | 8 | `New` (entry count=14), `DefaultContent`, `DefaultContentReturnsCopy`, `Has`, `Compare` (default/customized/missing), `Reset` (create/reset), `ResetAll` (14 actions), `ResetUnknown` |
 
 ## Integration Test
 

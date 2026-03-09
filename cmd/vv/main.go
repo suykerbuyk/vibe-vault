@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"context"
 	"os/signal"
@@ -32,6 +33,7 @@ import (
 	"github.com/johns/vibe-vault/internal/stats"
 	"github.com/johns/vibe-vault/internal/templates"
 	"github.com/johns/vibe-vault/internal/trends"
+	"github.com/johns/vibe-vault/internal/zed"
 )
 
 func main() {
@@ -82,6 +84,9 @@ func main() {
 
 	case "export":
 		runExport()
+
+	case "zed":
+		runZed()
 
 	case "mcp":
 		runMcp()
@@ -651,6 +656,200 @@ func runTemplates() {
 
 	fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdTemplates))
 	os.Exit(1)
+}
+
+func runZed() {
+	args := os.Args[2:]
+
+	if len(args) > 0 {
+		switch args[0] {
+		case "backfill":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdZedBackfill))
+				return
+			}
+			runZedBackfill(args[1:])
+			return
+		case "list":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdZedList))
+				return
+			}
+			runZedList(args[1:])
+			return
+		}
+	}
+
+	if wantsHelp(args) {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdZed))
+		return
+	}
+
+	fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdZed))
+	os.Exit(1)
+}
+
+func runZedBackfill(args []string) {
+	cfg := mustLoadConfig()
+
+	dbPath := flagValue(args, "--db")
+	if dbPath == "" {
+		dbPath = zed.DefaultDBPath()
+	}
+	if dbPath == "" {
+		fatal("cannot determine Zed threads database path")
+	}
+
+	projectFilter := flagValue(args, "--project")
+	force := hasFlag(args, "--force")
+
+	var since time.Time
+	if s := flagValue(args, "--since"); s != "" {
+		var err error
+		since, err = time.Parse("2006-01-02", s)
+		if err != nil {
+			fatal("--since must be YYYY-MM-DD format: %v", err)
+		}
+	}
+
+	// Parse all threads from DB
+	fmt.Printf("Reading Zed threads from %s\n", dbPath)
+	threads, err := zed.ParseDB(dbPath, zed.ParseOpts{Since: since})
+	if err != nil {
+		fatal("parse zed db: %v", err)
+	}
+	fmt.Printf("Found %d threads\n", len(threads))
+
+	// Load index once for batch mode
+	stateDir := cfg.StateDir()
+	if mkdirErr := os.MkdirAll(stateDir, 0o755); mkdirErr != nil {
+		log.Printf("warning: could not create state dir: %v", mkdirErr)
+	}
+	indexLockPath := filepath.Join(stateDir, "session-index.json")
+	fl, lockErr := index.Lock(indexLockPath)
+	if lockErr != nil {
+		log.Printf("warning: could not acquire index lock: %v", lockErr)
+	}
+	defer func() {
+		if fl != nil {
+			_ = fl.Unlock()
+		}
+	}()
+
+	idx, err := index.Load(cfg.StateDir())
+	if err != nil {
+		fatal("load index: %v", err)
+	}
+
+	var processed, skipped, errors int
+
+	for _, thread := range threads {
+		info := zed.DetectProject(&thread, cfg)
+
+		// Filter by project
+		if projectFilter != "" && info.Project != projectFilter {
+			skipped++
+			continue
+		}
+
+		// Convert thread to transcript
+		t, err := zed.Convert(&thread)
+		if err != nil {
+			log.Printf("error converting thread %s: %v", thread.ID, err)
+			errors++
+			continue
+		}
+		if t == nil {
+			skipped++
+			continue
+		}
+
+		// Extract narrative and dialogue
+		narr := zed.ExtractNarrative(&thread)
+		dialogue := zed.ExtractDialogue(&thread)
+
+		opts := session.CaptureOpts{
+			TranscriptPath: fmt.Sprintf("zed:%s#%s", dbPath, thread.ID),
+			Source:         "zed",
+			Force:          force,
+			SkipEnrichment: true,
+			Index:          idx,
+		}
+
+		result, err := session.CaptureFromParsed(t, info, narr, dialogue, opts, cfg)
+		if err != nil {
+			log.Printf("error processing thread %s: %v", thread.ID, err)
+			errors++
+			continue
+		}
+
+		if result.Skipped {
+			skipped++
+			continue
+		}
+
+		processed++
+		fmt.Printf("  %s → %s\n", result.Project, result.NotePath)
+	}
+
+	// Save index once after all processing
+	if err := idx.Save(); err != nil {
+		log.Printf("warning: could not save index: %v", err)
+	}
+
+	fmt.Printf("\nprocessed: %d, skipped: %d, errors: %d\n", processed, skipped, errors)
+}
+
+func runZedList(args []string) {
+	dbPath := flagValue(args, "--db")
+	if dbPath == "" {
+		dbPath = zed.DefaultDBPath()
+	}
+	if dbPath == "" {
+		fatal("cannot determine Zed threads database path")
+	}
+
+	var since time.Time
+	if s := flagValue(args, "--since"); s != "" {
+		var err error
+		since, err = time.Parse("2006-01-02", s)
+		if err != nil {
+			fatal("--since must be YYYY-MM-DD format: %v", err)
+		}
+	}
+
+	limit := 0
+	if l := flagValue(args, "--limit"); l != "" {
+		n, err := strconv.Atoi(l)
+		if err != nil || n < 1 {
+			fatal("--limit must be a positive integer")
+		}
+		limit = n
+	}
+
+	threads, err := zed.ParseDB(dbPath, zed.ParseOpts{Since: since, Limit: limit})
+	if err != nil {
+		fatal("parse zed db: %v", err)
+	}
+
+	if len(threads) == 0 {
+		fmt.Println("No threads found.")
+		return
+	}
+
+	fmt.Printf("%-36s  %-19s  %-6s  %s\n", "ID", "Updated", "Msgs", "Title/Summary")
+	fmt.Printf("%-36s  %-19s  %-6s  %s\n", strings.Repeat("-", 36), strings.Repeat("-", 19), strings.Repeat("-", 6), strings.Repeat("-", 40))
+	for _, t := range threads {
+		title := t.Title
+		if title == "" {
+			title = t.Summary
+		}
+		if len(title) > 60 {
+			title = title[:57] + "..."
+		}
+		updated := t.UpdatedAt.Format("2006-01-02 15:04:05")
+		fmt.Printf("%-36s  %-19s  %-6d  %s\n", t.ID, updated, len(t.Messages), title)
+	}
 }
 
 func runMcp() {

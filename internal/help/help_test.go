@@ -283,6 +283,18 @@ var expectedTerminal = map[string]string{
 		"  vv export --project myproject          Export one project as JSON\n" +
 		"  vv export --format csv > sessions.csv  Export to file\n",
 
+	"zed": "vv zed \u2014 import Zed agent panel threads\n" +
+		"\n" +
+		"Usage: vv zed <subcommand>\n" +
+		"\n" +
+		"Import Zed agent panel threads from the local threads.db SQLite\n" +
+		"database into the vault. Threads are parsed, converted, and processed\n" +
+		"through the same capture pipeline as Claude Code sessions.\n" +
+		"\n" +
+		"Subcommands:\n" +
+		"  vv zed backfill   Import threads from Zed threads database\n" +
+		"  vv zed list       List threads in the database\n",
+
 	"mcp": "vv mcp \u2014 start MCP server for AI agent integration\n" +
 		"\n" +
 		"Usage: vv mcp\n" +
@@ -361,6 +373,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv trends [--project X]      Show metric trends over time\n" +
 		"  vv inject [--project X]      Output session-start context payload\n" +
 		"  vv export [--format X]       Export session data (JSON or CSV)\n" +
+		"  vv zed <subcommand>          Import Zed agent panel threads into vault\n" +
 		"  vv mcp                       Start MCP server (JSON-RPC over stdio)\n" +
 		"  vv templates [list | ...]    Inspect, compare, and reset vault templates\n" +
 		"  vv version                   Print version\n" +
@@ -381,7 +394,7 @@ func TestFormatUsage(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "context", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "mcp", "templates", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "zed", "mcp", "templates", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))
@@ -447,6 +460,7 @@ func TestFormatRoffStructure(t *testing.T) {
 
 	allCmds := append(Subcommands, HookSubcommands...)
 	allCmds = append(allCmds, ContextSubcommands...)
+	allCmds = append(allCmds, ZedSubcommands...)
 	allCmds = append(allCmds, TemplatesSubcommands...)
 	// Test each subcommand has required sections
 	for _, cmd := range allCmds {

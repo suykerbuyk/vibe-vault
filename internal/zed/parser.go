@@ -8,11 +8,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver
 )
+
+// DefaultDBPath returns the default Zed threads database path.
+func DefaultDBPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "zed", "threads", "threads.db")
+}
 
 // ParseOpts controls thread filtering.
 type ParseOpts struct {

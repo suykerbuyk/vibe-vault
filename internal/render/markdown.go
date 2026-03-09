@@ -15,6 +15,14 @@ import (
 	"github.com/johns/vibe-vault/internal/transcript"
 )
 
+// SourceFallbackSummary returns the generic session fallback for a given source.
+func SourceFallbackSummary(source string) string {
+	if source == "zed" {
+		return "Zed agent session"
+	}
+	return "Claude Code session"
+}
+
 // RelatedNote holds a related session link and the reason for the relation.
 type RelatedNote struct {
 	Name   string // wikilink target, e.g. "2026-02-25-01"
@@ -68,6 +76,7 @@ type NoteData struct {
 	ToolEffectiveness   string   // rendered tool effectiveness section (empty = skip)
 	ParentSession       string   // parent entry UUID (non-empty = /continue session)
 	SessionTags         []string // pre-built tag list (e.g. ["vv-session", "implementation"])
+	Source              string   // source identifier ("zed", etc.; empty = claude-code)
 }
 
 // SessionNote renders a full Obsidian markdown note from NoteData.
@@ -85,6 +94,9 @@ func SessionNote(d NoteData) string {
 	fmt.Fprintf(&b, "domain: %s\n", d.Domain)
 	if d.Model != "" {
 		fmt.Fprintf(&b, "model: %s\n", d.Model)
+	}
+	if d.Source != "" {
+		fmt.Fprintf(&b, "source: %s\n", d.Source)
 	}
 	fmt.Fprintf(&b, "session_id: \"%s\"\n", d.SessionID)
 	fmt.Fprintf(&b, "iteration: %d\n", d.Iteration)
@@ -310,7 +322,7 @@ func NoteDataFromTranscript(t *transcript.Transcript, project, domain, branch, s
 	title := titleFromFirstMessage(firstMsg)
 	summary := title
 	if summary == "Session" {
-		summary = "Claude Code session"
+		summary = "Claude Code session" // may be overridden by SourceFallbackSummary
 	}
 
 	// Total input tokens = direct + cache reads + cache writes

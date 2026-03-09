@@ -637,6 +637,79 @@ Requires either --file or --all to specify scope.`,
 	SeeAlso: []string{"vv(1)", "vv-templates(1)", "vv-templates-diff(1)"},
 }
 
+var CmdZed = Command{
+	Name:     "zed",
+	Synopsis: "import Zed agent panel threads",
+	Brief:    "Import Zed agent panel threads into vault",
+	Usage:    "vv zed <subcommand>",
+	Description: `Import Zed agent panel threads from the local threads.db SQLite
+database into the vault. Threads are parsed, converted, and processed
+through the same capture pipeline as Claude Code sessions.
+
+Subcommands:
+  vv zed backfill   Import threads from Zed threads database
+  vv zed list       List threads in the database`,
+	SeeAlso: []string{"vv(1)", "vv-backfill(1)"},
+}
+
+var CmdZedBackfill = Command{
+	Name:     "zed backfill",
+	Synopsis: "import threads from Zed threads database",
+	Brief:    "Import threads from Zed threads database",
+	Usage:    "vv zed backfill [--db PATH] [--project NAME] [--since DATE] [--force]",
+	Flags: []Flag{
+		{Name: "--db <path>", Desc: "Path to threads.db (default: ~/.local/share/zed/threads/threads.db)"},
+		{Name: "--project <name>", Desc: "Only import threads for this project"},
+		{Name: "--since <date>", Desc: "Only import threads updated after this date (YYYY-MM-DD)"},
+		{Name: "--force", Desc: "Re-import already-processed threads"},
+	},
+	Description: `Reads Zed agent panel threads from the SQLite database, converts them
+to the vibe-vault transcript format, and processes each through the
+capture pipeline. Session notes are written to the vault with
+source: zed in the frontmatter.
+
+Thread-to-session mapping:
+  - Session ID: "zed:<thread-uuid>"
+  - Project: detected from worktree path in thread snapshot
+  - Model: from thread model metadata
+  - Narrative/dialogue: extracted from Zed message format
+
+Batch optimized: loads index once, processes all threads, saves once.`,
+	Examples: []string{
+		"vv zed backfill                                    Import from default DB",
+		"vv zed backfill --db ~/custom/threads.db           Use custom DB path",
+		"vv zed backfill --project myproj --since 2026-03-01  Filter by project and date",
+		"vv zed backfill --force                            Re-import all threads",
+	},
+	SeeAlso: []string{"vv(1)", "vv-zed(1)", "vv-backfill(1)"},
+}
+
+var CmdZedList = Command{
+	Name:     "zed list",
+	Synopsis: "list threads in the Zed database",
+	Brief:    "List threads in the Zed database",
+	Usage:    "vv zed list [--db PATH] [--since DATE] [--limit N]",
+	Flags: []Flag{
+		{Name: "--db <path>", Desc: "Path to threads.db (default: ~/.local/share/zed/threads/threads.db)"},
+		{Name: "--since <date>", Desc: "Only show threads updated after this date (YYYY-MM-DD)"},
+		{Name: "--limit <n>", Desc: "Maximum number of threads to show"},
+	},
+	Description: `Lists threads from the Zed agent panel database in tabular format.
+Shows thread ID, last updated time, message count, and title/summary.`,
+	Examples: []string{
+		"vv zed list                    List all threads",
+		"vv zed list --limit 10         Show 10 most recent",
+		"vv zed list --since 2026-03-01 Show threads from March onward",
+	},
+	SeeAlso: []string{"vv(1)", "vv-zed(1)"},
+}
+
+// ZedSubcommands is the ordered list of zed sub-subcommands.
+var ZedSubcommands = []Command{
+	CmdZedBackfill,
+	CmdZedList,
+}
+
 // TemplatesSubcommands is the ordered list of templates sub-subcommands.
 var TemplatesSubcommands = []Command{
 	CmdTemplatesList,
@@ -674,6 +747,7 @@ var Subcommands = []Command{
 	CmdTrends,
 	CmdInject,
 	CmdExport,
+	CmdZed,
 	CmdMcp,
 	CmdTemplates,
 	CmdVersion,

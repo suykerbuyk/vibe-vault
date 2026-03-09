@@ -31,10 +31,12 @@ type CaptureOpts struct {
 	TranscriptPath string
 	CWD            string
 	SessionID      string
+	Source         string       // source identifier (e.g. "zed"); empty = "claude-code"
 	Force          bool         // skip dedup, overwrite existing note
 	Checkpoint     bool         // provisional capture (Stop hook)
 	SkipEnrichment bool         // skip LLM enrichment
 	Provider       llm.Provider // LLM provider (nil = heuristic only)
+	Index          *index.Index // shared index for batch operations (nil = load/save per call)
 }
 
 // CaptureResult holds the output of a capture operation.
@@ -51,6 +53,7 @@ type CaptureResult struct {
 }
 
 // Capture processes a transcript and writes a session note.
+// This is the Claude Code entry point — it parses, detects, extracts, then delegates to CaptureFromParsed.
 func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	transcriptPath := opts.TranscriptPath
 	cwd := opts.CWD
@@ -60,16 +63,6 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	t, err := transcript.ParseFile(transcriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("parse transcript: %w", err)
-	}
-
-	// Skip trivial sessions (< 2 user messages)
-	if t.Stats.UserMessages < 2 && t.Stats.AssistantMessages < 2 {
-		return &CaptureResult{Skipped: true, Reason: "trivial session (< 2 messages)"}, nil
-	}
-
-	// Checkpoint-specific trivial filter: skip if no substantive work yet
-	if opts.Checkpoint && t.Stats.ToolUses == 0 && t.Stats.AssistantMessages < 3 {
-		return &CaptureResult{Skipped: true, Reason: "checkpoint: no substantive work yet"}, nil
 	}
 
 	// Use transcript CWD if hook didn't provide one
@@ -83,30 +76,72 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	// Detect session metadata
 	info := Detect(cwd, t.Stats.GitBranch, t.Stats.Model, sessionID, cfg)
 
+	// Narrative extraction (heuristic enrichment from tool calls)
+	narr := narrative.Extract(t, cwd)
+
+	// Prose dialogue extraction
+	dialogue := prose.Extract(t, cwd)
+
+	opts.CWD = cwd
+	opts.SessionID = sessionID
+
+	return CaptureFromParsed(t, info, narr, dialogue, opts, cfg)
+}
+
+// CaptureFromParsed is the shared pipeline for all sources (Claude Code, Zed, etc.).
+// It filters, deduplicates, enriches, renders, and writes a session note.
+func CaptureFromParsed(t *transcript.Transcript, info Info,
+	narr *narrative.Narrative, dialogue *prose.Dialogue,
+	opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
+
+	sessionID := info.SessionID
+	if sessionID == "" {
+		sessionID = opts.SessionID
+	}
+	transcriptPath := opts.TranscriptPath
+
+	// Skip trivial sessions (< 2 user messages)
+	if t.Stats.UserMessages < 2 && t.Stats.AssistantMessages < 2 {
+		return &CaptureResult{Skipped: true, Reason: "trivial session (< 2 messages)"}, nil
+	}
+
+	// Checkpoint-specific trivial filter: skip if no substantive work yet
+	if opts.Checkpoint && t.Stats.ToolUses == 0 && t.Stats.AssistantMessages < 3 {
+		return &CaptureResult{Skipped: true, Reason: "checkpoint: no substantive work yet"}, nil
+	}
+
 	// Apply per-project config overlay (project-local settings override global)
 	cfg = cfg.WithProjectOverlay(info.Project)
 
-	// Acquire index lock to prevent concurrent corruption
-	stateDir := cfg.StateDir()
-	if mkdirErr := os.MkdirAll(stateDir, 0o755); mkdirErr != nil {
-		log.Printf("warning: could not create state dir: %v", mkdirErr)
-	}
-	indexLockPath := filepath.Join(stateDir, "session-index.json")
-	fl, lockErr := index.Lock(indexLockPath)
-	if lockErr != nil {
-		log.Printf("warning: could not acquire index lock: %v", lockErr)
-	}
-	defer func() {
-		if fl != nil {
-			_ = fl.Unlock()
+	// Index management: use shared index if provided, otherwise load/lock per call
+	var idx *index.Index
+	var fl *index.FileLock
+	if opts.Index != nil {
+		idx = opts.Index
+	} else {
+		// Acquire index lock to prevent concurrent corruption
+		stateDir := cfg.StateDir()
+		if mkdirErr := os.MkdirAll(stateDir, 0o755); mkdirErr != nil {
+			log.Printf("warning: could not create state dir: %v", mkdirErr)
 		}
-	}()
+		indexLockPath := filepath.Join(stateDir, "session-index.json")
+		var lockErr error
+		fl, lockErr = index.Lock(indexLockPath)
+		if lockErr != nil {
+			log.Printf("warning: could not acquire index lock: %v", lockErr)
+		}
+		defer func() {
+			if fl != nil {
+				_ = fl.Unlock()
+			}
+		}()
 
-	// Load session index
-	idx, err := index.Load(cfg.StateDir())
-	if err != nil {
-		log.Printf("warning: could not load index: %v", err)
-		idx = &index.Index{Entries: make(map[string]index.SessionEntry)}
+		var err error
+		idx, err = index.Load(cfg.StateDir())
+		if err != nil {
+			log.Printf("warning: could not load index: %v", err)
+			idx = &index.Index{Entries: make(map[string]index.SessionEntry)}
+		}
 	}
 
 	// Dedup: check existing entry
@@ -148,14 +183,19 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 
 	// Build note data
 	noteData := render.NoteDataFromTranscript(t, info.Project, info.Domain, info.Branch, sessionID, iteration, previousNote)
+	noteData.Source = opts.Source
+
+	// Fix source-aware fallback summary (e.g. "Zed agent session" instead of "Claude Code session")
+	if opts.Source != "" && noteData.Summary == "Claude Code session" {
+		noteData.Summary = render.SourceFallbackSummary(opts.Source)
+	}
 
 	// Session continuity: propagate ParentUUID if this is a /continue session
 	if t.Stats.ParentUUID != "" {
 		noteData.ParentSession = t.Stats.ParentUUID
 	}
 
-	// Narrative extraction (heuristic enrichment from tool calls)
-	narr := narrative.Extract(t, cwd)
+	// Apply narrative data
 	if narr != nil {
 		if narr.Title != "" && narr.Title != "Session" {
 			noteData.Title = narr.Title
@@ -177,8 +217,7 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 	// Reasoning highlights from thinking blocks (Phase 4 Task 15)
 	noteData.ReasoningHighlights = narrative.ExtractReasoningHighlights(t)
 
-	// Prose dialogue extraction
-	dialogue := prose.Extract(t, cwd)
+	// Apply prose dialogue
 	if dialogue != nil {
 		noteData.ProseDialogue = prose.Render(dialogue)
 	}
@@ -364,6 +403,7 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		Branch:         info.Branch,
 		TranscriptPath: transcriptPath,
 		Checkpoint:     opts.Checkpoint,
+		Source:         opts.Source,
 		ToolCounts:     t.Stats.ToolCounts,
 		ToolUses:       t.Stats.ToolUses,
 		TokensIn:       noteData.InputTokens,
@@ -375,8 +415,11 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		ParentUUID:       t.Stats.ParentUUID,
 	})
 
-	if err := idx.Save(); err != nil {
-		log.Printf("warning: could not save index: %v", err)
+	// Save index only if we own it (not shared batch mode)
+	if opts.Index == nil {
+		if err := idx.Save(); err != nil {
+			log.Printf("warning: could not save index: %v", err)
+		}
 	}
 
 	return &CaptureResult{

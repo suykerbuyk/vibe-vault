@@ -42,6 +42,16 @@ type SessionEntry struct {
 	FrictionScore  int            `json:"friction_score,omitempty"`
 	EstimatedCostUSD float64        `json:"estimated_cost_usd,omitempty"`
 	ParentUUID       string         `json:"parent_uuid,omitempty"` // external entry UUID (continuation)
+	Source           string         `json:"source,omitempty"`      // "zed", etc.; empty = "claude-code"
+}
+
+// SourceName returns the human-readable source name.
+// Returns Source if set, otherwise "claude-code" for backward compatibility.
+func (e SessionEntry) SourceName() string {
+	if e.Source != "" {
+		return e.Source
+	}
+	return "claude-code"
 }
 
 // Index manages the session-index.json file.
