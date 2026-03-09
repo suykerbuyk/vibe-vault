@@ -58,6 +58,31 @@ detect.go    │   │   │   │
             generate.go       GenerateContext() → history.md
 ```
 
+### Zed Thread Parsing Flow (Phase 1 — library only, no CLI yet)
+
+```
+~/.local/share/zed/threads/threads.db
+        │
+        ▼
+   ┌───────────┐
+   │ zed/parser │    ParseDB() — SQLite read-only + zstd decompress
+   └─────┬─────┘    + Rust-style enum JSON unmarshal
+         │
+         ▼
+   Thread structs (ZedMessage with User/Agent envelopes,
+                   ZedContent with Text/Thinking/ToolUse/Mention blocks,
+                   tool_results on Agent messages)
+         │
+    ┌────┼────┬──────────┐
+    ▼    ▼    ▼          ▼
+convert  detect  narrative  prose
+    │    │    │          │
+    ▼    ▼    ▼          ▼
+Transcript  Info  Narrative  Dialogue
+    │
+    └──── (Phase 2: feeds into CaptureFromParsed → render → index)
+```
+
 ### Index Rebuild Flow (`vv index`)
 
 ```
@@ -180,6 +205,12 @@ Claude Code / AI agent
 | `index` | `generate.go` | `GenerateContext()` — shared function writing per-project `history.md` + seeding per-project `knowledge.md`; `GenerateResult` type with metrics; used by `runIndex()`, `runReprocess()`, and `handleSessionEnd()` |
 | `noteparse` | `noteparse.go` | Line-based frontmatter parser + body section extraction (decisions, threads, files, commits) |
 | `render` | `markdown.go` | Obsidian note rendering: frontmatter (incl. commits, friction_score, corrections), Session Dialogue / What Happened (conditional), Commits, Friction Signals, Work Performed, tool usage table, wikilinks, related sessions |
+| `zed` | `types.go` | Zed agent panel JSON schema types with custom unmarshaling for Rust-style enum format (Thread, ZedMessage, ZedContent, MentionURI, ZedToolResult, TokenUsage, ZedModel, ProjectSnapshot, WorktreeSnapshot) |
+| `zed` | `parser.go` | `ParseDB()` — SQLite reader via `modernc.org/sqlite` (read-only), zstd decompression, Rust-style enum message parsing; `ParseThread()` — single thread decompression + unmarshal |
+| `zed` | `convert.go` | `Convert()` — Thread → `transcript.Transcript` with 28-entry tool name normalization, per-request token aggregation, mention→text conversion |
+| `zed` | `detect.go` | `DetectProject()` — builds `session.Info` from thread metadata without git subprocess (worktree path basename, snapshot branch, config-based domain) |
+| `zed` | `narrative.go` | `ExtractNarrative()` — single-segment Narrative from Zed tools, commit extraction from terminal results, tag inference |
+| `zed` | `prose.go` | `ExtractDialogue()` — Dialogue from Zed messages, mention inlining, filler filter, error markers from tool_results |
 | `sanitize` | `redact.go` | Regex-based XML tag stripping for Claude Code wrapper tags |
 
 ## Template System

@@ -216,3 +216,29 @@ Key architectural and design decisions in vibe-vault, with rationale.
     per-project enrichment models, custom tags, friction thresholds, etc.
     without duplicating the entire config. Schema migration 2→3 generates the
     template for existing projects.
+
+31. **Zed thread parsing with custom JSON unmarshaling:** Zed serializes agent
+    panel threads using Rust's `serde` enum format: messages are `{"User": {...}}`
+    or `{"Agent": {...}}` envelopes (not `{role: "user"}`), content blocks are
+    `{"Text": "..."}` or `{"ToolUse": {...}}` discriminated unions (not
+    `{type: "text"}`), and tool results live on the Agent message in a
+    `tool_results` map (not as separate conversation entries). The `internal/zed`
+    package implements custom `json.RawMessage`-based unmarshaling that first
+    decodes the envelope discriminator, then dispatches to type-specific parsers.
+    This isolates all Zed schema complexity in the type layer — downstream code
+    works with normalized `ZedMessage` structs with `Role`, `Content`, and
+    `ToolResults` fields.
+
+32. **Zed project detection without git subprocess:** Unlike Claude Code sessions
+    where `session.Detect()` runs `git remote get-url origin`, Zed threads
+    include an `initial_project_snapshot` with the worktree path and git branch
+    already captured. `zed.DetectProject()` builds `session.Info` directly from
+    this metadata, avoiding subprocess calls that would fail on stale or moved
+    repository paths from historical threads.
+
+33. **Zed tool name normalization at conversion time:** Zed uses different tool
+    names than Claude Code (e.g., `terminal`/`bash` vs `Bash`, `read_file` vs
+    `Read`, `find_path` vs `Glob`). A 28-entry normalization map in `convert.go`
+    translates at parse time so downstream narrative/prose extraction can use
+    the same canonical names as Claude Code sessions. This avoids conditional
+    logic throughout the pipeline.
