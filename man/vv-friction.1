@@ -1,8 +1,8 @@
-.TH VV-FRICTION 1 "2026-03-08" "vv 0.7.2" "Vibe-Vault Manual"
+.TH VV-FRICTION 1 "2026-03-09" "vv 0.7.2-3-g512c402" "Vibe-Vault Manual"
 .SH NAME
 vv-friction \- show friction analysis and correction patterns
 .SH SYNOPSIS
-.B vv friction [\-\-project <name>]
+.B vv friction [\-\-project <name>] [\-\-source <name>]
 .SH DESCRIPTION
 Analyzes friction signals from the session index: correction density,
 token efficiency, file retry patterns, error cycles, and recurring
@@ -16,6 +16,9 @@ friction data if none is available.
 .TP
 .B \-\-project <name>
 Show friction for a specific project only
+.TP
+.B \-\-source <name>
+Filter by source (zed, claude\-code, or all)
 .SH EXAMPLES
 .nf
 vv friction                       Show global friction analysis

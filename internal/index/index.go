@@ -43,6 +43,15 @@ type SessionEntry struct {
 	EstimatedCostUSD float64        `json:"estimated_cost_usd,omitempty"`
 	ParentUUID       string         `json:"parent_uuid,omitempty"` // external entry UUID (continuation)
 	Source           string         `json:"source,omitempty"`      // "zed", etc.; empty = "claude-code"
+	Context          *ContextAvailable `json:"context,omitempty"`  // what context was available at capture time
+}
+
+// ContextAvailable records what project context existed when a session was captured.
+// Used for measuring whether context availability correlates with session outcomes.
+type ContextAvailable struct {
+	HasHistory      bool `json:"has_history"`               // history.md existed for the project
+	HasKnowledge    bool `json:"has_knowledge"`             // knowledge.md existed and was non-empty
+	HistorySessions int  `json:"history_sessions,omitempty"` // number of sessions in the index for this project at capture time
 }
 
 // SourceName returns the human-readable source name.
@@ -153,4 +162,15 @@ func (idx *Index) PreviousSession(project string, before time.Time) *SessionEntr
 	})
 
 	return &candidates[0]
+}
+
+// ProjectSessionCount returns the number of sessions for a given project.
+func (idx *Index) ProjectSessionCount(project string) int {
+	count := 0
+	for _, e := range idx.Entries {
+		if e.Project == project {
+			count++
+		}
+	}
+	return count
 }

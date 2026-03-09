@@ -1376,3 +1376,104 @@ func countOccurrences(s, substr string) int {
 	}
 	return count
 }
+
+func TestContextAvailableRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	idx := &Index{Entries: map[string]SessionEntry{
+		"with-ctx": {
+			SessionID: "with-ctx",
+			Project:   "proj",
+			Date:      "2026-03-09",
+			Iteration: 1,
+			Title:     "Session with context",
+			CreatedAt: time.Date(2026, 3, 9, 10, 0, 0, 0, time.UTC),
+			Context: &ContextAvailable{
+				HasHistory:      true,
+				HasKnowledge:    true,
+				HistorySessions: 5,
+			},
+		},
+		"no-ctx": {
+			SessionID: "no-ctx",
+			Project:   "proj",
+			Date:      "2026-03-09",
+			Iteration: 2,
+			Title:     "Session without context",
+			CreatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC),
+		},
+	}}
+
+	idx.path = filepath.Join(dir, "session-index.json")
+	if err := idx.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Entry with context should round-trip
+	e := loaded.Entries["with-ctx"]
+	if e.Context == nil {
+		t.Fatal("Context should not be nil after round-trip")
+	}
+	if !e.Context.HasHistory {
+		t.Error("HasHistory should be true")
+	}
+	if !e.Context.HasKnowledge {
+		t.Error("HasKnowledge should be true")
+	}
+	if e.Context.HistorySessions != 5 {
+		t.Errorf("HistorySessions = %d, want 5", e.Context.HistorySessions)
+	}
+
+	// Entry without context should have nil
+	e2 := loaded.Entries["no-ctx"]
+	if e2.Context != nil {
+		t.Errorf("Context should be nil for entry without context, got %+v", e2.Context)
+	}
+}
+
+func TestContextAvailableBackwardsCompat(t *testing.T) {
+	// Old entries without the context field should load fine
+	oldJSON := `{
+		"old-sess": {
+			"session_id": "old-sess",
+			"project": "proj",
+			"date": "2026-02-01",
+			"iteration": 1,
+			"title": "Old session",
+			"created_at": "2026-02-01T10:00:00Z"
+		}
+	}`
+
+	var entries map[string]SessionEntry
+	if err := json.Unmarshal([]byte(oldJSON), &entries); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	e := entries["old-sess"]
+	if e.Context != nil {
+		t.Errorf("Context should be nil for old entries, got %+v", e.Context)
+	}
+}
+
+func TestProjectSessionCount(t *testing.T) {
+	idx := &Index{Entries: map[string]SessionEntry{
+		"a": {Project: "proj1"},
+		"b": {Project: "proj1"},
+		"c": {Project: "proj2"},
+		"d": {Project: "proj1"},
+	}}
+
+	if got := idx.ProjectSessionCount("proj1"); got != 3 {
+		t.Errorf("ProjectSessionCount(proj1) = %d, want 3", got)
+	}
+	if got := idx.ProjectSessionCount("proj2"); got != 1 {
+		t.Errorf("ProjectSessionCount(proj2) = %d, want 1", got)
+	}
+	if got := idx.ProjectSessionCount("nonexistent"); got != 0 {
+		t.Errorf("ProjectSessionCount(nonexistent) = %d, want 0", got)
+	}
+}

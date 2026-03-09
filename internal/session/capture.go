@@ -382,6 +382,9 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 		return nil, fmt.Errorf("write note: %w", err)
 	}
 
+	// Probe context availability for effectiveness measurement
+	ctxAvail := probeContextAvailable(cfg.VaultPath, info.Project, idx)
+
 	// Update index
 	idx.Add(index.SessionEntry{
 		SessionID:      sessionID,
@@ -413,6 +416,7 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 		FrictionScore:  frictionScore(frictionResult),
 		EstimatedCostUSD: noteData.EstimatedCostUSD,
 		ParentUUID:       t.Stats.ParentUUID,
+		Context:          ctxAvail,
 	})
 
 	// Save index only if we own it (not shared batch mode)
@@ -506,4 +510,37 @@ func filenameNoExt(path string) string {
 		return base[:len(base)-len(ext)]
 	}
 	return base
+}
+
+// probeContextAvailable checks what project context existed at capture time.
+// Returns nil if nothing is available (keeps JSON clean for projects with no context).
+func probeContextAvailable(vaultPath, project string, idx *index.Index) *index.ContextAvailable {
+	projDir := filepath.Join(vaultPath, "Projects", project)
+
+	hasHistory := fileExists(filepath.Join(projDir, "history.md"))
+	hasKnowledge := fileNonEmpty(filepath.Join(projDir, "knowledge.md"))
+	historySessions := idx.ProjectSessionCount(project)
+
+	if !hasHistory && !hasKnowledge && historySessions == 0 {
+		return nil
+	}
+
+	return &index.ContextAvailable{
+		HasHistory:      hasHistory,
+		HasKnowledge:    hasKnowledge,
+		HistorySessions: historySessions,
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func fileNonEmpty(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.Size() > 0
 }

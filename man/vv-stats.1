@@ -1,8 +1,8 @@
-.TH VV-STATS 1 "2026-03-08" "vv 0.7.2" "Vibe-Vault Manual"
+.TH VV-STATS 1 "2026-03-09" "vv 0.7.2-3-g512c402" "Vibe-Vault Manual"
 .SH NAME
 vv-stats \- show session analytics and metrics
 .SH SYNOPSIS
-.B vv stats [\-\-project <name>]
+.B vv stats [\-\-project <name>] [\-\-source <name>]
 .SH DESCRIPTION
 Computes aggregate metrics from the session index and displays them
 in aligned terminal output. Shows overview totals, per\-project and
@@ -16,6 +16,9 @@ counts from note frontmatter).
 .TP
 .B \-\-project <name>
 Show stats for a specific project only
+.TP
+.B \-\-source <name>
+Filter by source (zed, claude\-code, or all)
 .SH EXAMPLES
 .nf
 vv stats                       Show global stats

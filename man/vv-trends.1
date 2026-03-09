@@ -1,8 +1,8 @@
-.TH VV-TRENDS 1 "2026-03-08" "vv 0.7.2" "Vibe-Vault Manual"
+.TH VV-TRENDS 1 "2026-03-09" "vv 0.7.2-3-g512c402" "Vibe-Vault Manual"
 .SH NAME
 vv-trends \- show metric trends over time
 .SH SYNOPSIS
-.B vv trends [\-\-project <name>] [\-\-weeks <n>]
+.B vv trends [\-\-project <name>] [\-\-weeks <n>] [\-\-source <name>]
 .SH DESCRIPTION
 Analyzes metric trends from the session index over time using weekly
 buckets with 4\-week rolling averages. Shows direction (improving,
@@ -24,6 +24,9 @@ Show trends for a specific project only
 .TP
 .B \-\-weeks <n>
 Number of weeks to display (default: 12)
+.TP
+.B \-\-source <name>
+Filter by source (zed, claude\-code, or all)
 .SH EXAMPLES
 .nf
 vv trends                       Show global trends (last 12 weeks)

@@ -399,3 +399,128 @@ func TestCaptureFromParsed_Idempotent(t *testing.T) {
 		t.Errorf("forced capture path = %q, want same path %q", result3.NotePath, result1.NotePath)
 	}
 }
+
+func TestCaptureFromParsed_ContextAvailable_NoContext(t *testing.T) {
+	cfg := testConfig(t)
+	os.MkdirAll(filepath.Join(cfg.VaultPath, "Projects", "newproj", "sessions"), 0o755)
+
+	tr := &transcript.Transcript{
+		Stats: transcript.Stats{
+			SessionID:         "ctx-none",
+			UserMessages:      3,
+			AssistantMessages: 3,
+			StartTime:         time.Date(2026, 3, 9, 10, 0, 0, 0, time.UTC),
+		},
+	}
+
+	info := Info{Project: "newproj", Domain: "personal", SessionID: "ctx-none"}
+	idx := &index.Index{Entries: make(map[string]index.SessionEntry)}
+	opts := CaptureOpts{Index: idx}
+
+	result, err := CaptureFromParsed(tr, info, nil, nil, opts, cfg)
+	if err != nil {
+		t.Fatalf("CaptureFromParsed error: %v", err)
+	}
+	if result.Skipped {
+		t.Fatalf("expected non-skipped, got: %s", result.Reason)
+	}
+
+	entry := idx.Entries["ctx-none"]
+	if entry.Context != nil {
+		t.Errorf("Context should be nil for first session with no history/knowledge, got %+v", entry.Context)
+	}
+}
+
+func TestCaptureFromParsed_ContextAvailable_WithHistory(t *testing.T) {
+	cfg := testConfig(t)
+	projDir := filepath.Join(cfg.VaultPath, "Projects", "matureproj")
+	os.MkdirAll(filepath.Join(projDir, "sessions"), 0o755)
+
+	// Create history.md and non-empty knowledge.md
+	os.WriteFile(filepath.Join(projDir, "history.md"), []byte("# History\nsome content"), 0o644)
+	os.WriteFile(filepath.Join(projDir, "knowledge.md"), []byte("# Knowledge\ndecisions here"), 0o644)
+
+	tr := &transcript.Transcript{
+		Stats: transcript.Stats{
+			SessionID:         "ctx-full",
+			UserMessages:      3,
+			AssistantMessages: 3,
+			StartTime:         time.Date(2026, 3, 9, 10, 0, 0, 0, time.UTC),
+		},
+	}
+
+	// Pre-populate index with existing sessions for this project
+	idx := &index.Index{Entries: map[string]index.SessionEntry{
+		"prev-1": {Project: "matureproj", Date: "2026-03-08"},
+		"prev-2": {Project: "matureproj", Date: "2026-03-07"},
+		"other":  {Project: "otherproj", Date: "2026-03-08"},
+	}}
+
+	info := Info{Project: "matureproj", Domain: "personal", SessionID: "ctx-full"}
+	opts := CaptureOpts{Index: idx}
+
+	result, err := CaptureFromParsed(tr, info, nil, nil, opts, cfg)
+	if err != nil {
+		t.Fatalf("CaptureFromParsed error: %v", err)
+	}
+	if result.Skipped {
+		t.Fatalf("expected non-skipped, got: %s", result.Reason)
+	}
+
+	entry := idx.Entries["ctx-full"]
+	if entry.Context == nil {
+		t.Fatal("Context should not be nil when history and knowledge exist")
+	}
+	if !entry.Context.HasHistory {
+		t.Error("HasHistory should be true")
+	}
+	if !entry.Context.HasKnowledge {
+		t.Error("HasKnowledge should be true")
+	}
+	// 2 existing sessions (probe runs before idx.Add)
+	if entry.Context.HistorySessions != 2 {
+		t.Errorf("HistorySessions = %d, want 2", entry.Context.HistorySessions)
+	}
+}
+
+func TestCaptureFromParsed_ContextAvailable_EmptyKnowledge(t *testing.T) {
+	cfg := testConfig(t)
+	projDir := filepath.Join(cfg.VaultPath, "Projects", "halfproj")
+	os.MkdirAll(filepath.Join(projDir, "sessions"), 0o755)
+
+	// history.md exists but knowledge.md is empty
+	os.WriteFile(filepath.Join(projDir, "history.md"), []byte("# History"), 0o644)
+	os.WriteFile(filepath.Join(projDir, "knowledge.md"), []byte(""), 0o644)
+
+	tr := &transcript.Transcript{
+		Stats: transcript.Stats{
+			SessionID:         "ctx-half",
+			UserMessages:      3,
+			AssistantMessages: 3,
+			StartTime:         time.Date(2026, 3, 9, 10, 0, 0, 0, time.UTC),
+		},
+	}
+
+	idx := &index.Index{Entries: make(map[string]index.SessionEntry)}
+	info := Info{Project: "halfproj", Domain: "personal", SessionID: "ctx-half"}
+	opts := CaptureOpts{Index: idx}
+
+	result, err := CaptureFromParsed(tr, info, nil, nil, opts, cfg)
+	if err != nil {
+		t.Fatalf("CaptureFromParsed error: %v", err)
+	}
+	if result.Skipped {
+		t.Fatalf("expected non-skipped, got: %s", result.Reason)
+	}
+
+	entry := idx.Entries["ctx-half"]
+	if entry.Context == nil {
+		t.Fatal("Context should not be nil when history exists")
+	}
+	if !entry.Context.HasHistory {
+		t.Error("HasHistory should be true")
+	}
+	if entry.Context.HasKnowledge {
+		t.Error("HasKnowledge should be false for empty knowledge.md")
+	}
+}

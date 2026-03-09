@@ -1,0 +1,16 @@
+.TH VV-ZED 1 "2026-03-09" "vv 0.7.2-3-g512c402" "Vibe-Vault Manual"
+.SH NAME
+vv-zed \- import Zed agent panel threads
+.SH SYNOPSIS
+.B vv zed <subcommand>
+.SH DESCRIPTION
+Import Zed agent panel threads from the local threads.db SQLite
+database into the vault. Threads are parsed, converted, and processed
+through the same capture pipeline as Claude Code sessions.
+.PP
+Subcommands:
+  vv zed backfill   Import threads from Zed threads database
+  vv zed list       List threads in the database
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-backfill (1)
