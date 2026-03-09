@@ -28,6 +28,7 @@ type Summary struct {
 	AvgCostUSD         float64
 
 	Projects []ProjectStats
+	Sources  []SourceStats
 	Models   []ModelStats
 	Tags     []TagStats
 	TopFiles []FileStats
@@ -65,6 +66,15 @@ type FileStats struct {
 	Sessions int
 }
 
+// SourceStats holds per-source aggregate metrics.
+type SourceStats struct {
+	Name     string
+	Sessions int
+	TokensIn int
+	Duration int // minutes
+	CostUSD  float64
+}
+
 // MonthStats holds per-month aggregate metrics.
 type MonthStats struct {
 	Month    string // YYYY-MM
@@ -79,6 +89,7 @@ func Compute(entries map[string]index.SessionEntry, project string) Summary {
 	var s Summary
 
 	projectMap := make(map[string]*ProjectStats)
+	sourceMap := make(map[string]*SourceStats)
 	modelMap := make(map[string]*ModelStats)
 	tagMap := make(map[string]int)
 	fileMap := make(map[string]int)
@@ -107,6 +118,18 @@ func Compute(entries map[string]index.SessionEntry, project string) Summary {
 		ps.TokensIn += e.TokensIn
 		ps.Duration += e.Duration
 		ps.CostUSD += e.EstimatedCostUSD
+
+		// Source breakdown
+		srcName := e.SourceName()
+		ss, ok := sourceMap[srcName]
+		if !ok {
+			ss = &SourceStats{Name: srcName}
+			sourceMap[srcName] = ss
+		}
+		ss.Sessions++
+		ss.TokensIn += e.TokensIn
+		ss.Duration += e.Duration
+		ss.CostUSD += e.EstimatedCostUSD
 
 		// Model breakdown
 		model := e.Model
@@ -178,6 +201,17 @@ func Compute(entries map[string]index.SessionEntry, project string) Summary {
 			return s.Projects[i].Sessions > s.Projects[j].Sessions
 		}
 		return strings.ToLower(s.Projects[i].Name) < strings.ToLower(s.Projects[j].Name)
+	})
+
+	// Sort sources by sessions desc
+	for _, ss := range sourceMap {
+		s.Sources = append(s.Sources, *ss)
+	}
+	sort.Slice(s.Sources, func(i, j int) bool {
+		if s.Sources[i].Sessions != s.Sources[j].Sessions {
+			return s.Sources[i].Sessions > s.Sources[j].Sessions
+		}
+		return strings.ToLower(s.Sources[i].Name) < strings.ToLower(s.Sources[j].Name)
 	})
 
 	// Sort models by sessions desc

@@ -4,3 +4,5 @@
 /commit.msg
 /.claude/
 /agentctx
+/agentctx/commands
+

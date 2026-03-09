@@ -147,10 +147,11 @@ var expectedTerminal = map[string]string{
 
 	"stats": "vv stats \u2014 show session analytics and metrics\n" +
 		"\n" +
-		"Usage: vv stats [--project <name>]\n" +
+		"Usage: vv stats [--project <name>] [--source <name>]\n" +
 		"\n" +
 		"Flags:\n" +
 		"  --project <name>   Show stats for a specific project only\n" +
+		"  --source <name>    Filter by source (zed, claude-code, or all)\n" +
 		"\n" +
 		"Computes aggregate metrics from the session index and displays them\n" +
 		"in aligned terminal output. Shows overview totals, per-project and\n" +
@@ -167,10 +168,11 @@ var expectedTerminal = map[string]string{
 
 	"friction": "vv friction \u2014 show friction analysis and correction patterns\n" +
 		"\n" +
-		"Usage: vv friction [--project <name>]\n" +
+		"Usage: vv friction [--project <name>] [--source <name>]\n" +
 		"\n" +
 		"Flags:\n" +
 		"  --project <name>   Show friction for a specific project only\n" +
+		"  --source <name>    Filter by source (zed, claude-code, or all)\n" +
 		"\n" +
 		"Analyzes friction signals from the session index: correction density,\n" +
 		"token efficiency, file retry patterns, error cycles, and recurring\n" +
@@ -187,11 +189,12 @@ var expectedTerminal = map[string]string{
 
 	"trends": "vv trends \u2014 show metric trends over time\n" +
 		"\n" +
-		"Usage: vv trends [--project <name>] [--weeks <n>]\n" +
+		"Usage: vv trends [--project <name>] [--weeks <n>] [--source <name>]\n" +
 		"\n" +
 		"Flags:\n" +
 		"  --project <name>   Show trends for a specific project only\n" +
 		"  --weeks <n>        Number of weeks to display (default: 12)\n" +
+		"  --source <name>    Filter by source (zed, claude-code, or all)\n" +
 		"\n" +
 		"Analyzes metric trends from the session index over time using weekly\n" +
 		"buckets with 4-week rolling averages. Shows direction (improving,\n" +

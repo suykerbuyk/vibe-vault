@@ -122,6 +122,30 @@ func ParseThread(id, summary, updatedAt, worktreeBranch, parentID string, data [
 	return &t, nil
 }
 
+// QueryThread opens a Zed threads database and returns a single parsed thread by ID.
+func QueryThread(dbPath, threadID string) (*Thread, error) {
+	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+	if err != nil {
+		return nil, fmt.Errorf("open db: %w", err)
+	}
+	defer db.Close()
+
+	var id, summary, updatedAt, branch, parentID string
+	var data []byte
+	err = db.QueryRow(
+		`SELECT id, COALESCE(summary, ''), COALESCE(updated_at, ''), COALESCE(worktree_branch, ''), COALESCE(parent_id, ''), data FROM threads WHERE id = ?`,
+		threadID,
+	).Scan(&id, &summary, &updatedAt, &branch, &parentID, &data)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("thread %q not found", threadID)
+		}
+		return nil, fmt.Errorf("query thread: %w", err)
+	}
+
+	return ParseThread(id, summary, updatedAt, branch, parentID, data)
+}
+
 // decompressZstd decompresses zstd-compressed data.
 func decompressZstd(data []byte) ([]byte, error) {
 	r, err := zstd.NewReader(nil)

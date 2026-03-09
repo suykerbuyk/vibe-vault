@@ -372,13 +372,15 @@ func runStats() {
 
 	cfg := mustLoadConfig()
 	project := flagValue(os.Args[2:], "--project")
+	source := flagValue(os.Args[2:], "--source")
 
 	idx, err := index.Load(cfg.StateDir())
 	if err != nil {
 		fatal("load index: %v", err)
 	}
 
-	summary := stats.Compute(idx.Entries, project)
+	entries := index.FilterBySource(idx.Entries, source)
+	summary := stats.Compute(entries, project)
 	fmt.Print(stats.Format(summary, project))
 }
 
@@ -390,14 +392,16 @@ func runFriction() {
 
 	cfg := mustLoadConfig()
 	project := flagValue(os.Args[2:], "--project")
+	source := flagValue(os.Args[2:], "--source")
 
 	idx, err := index.Load(cfg.StateDir())
 	if err != nil {
 		fatal("load index: %v", err)
 	}
 
-	projects := friction.ComputeProjectFriction(idx.Entries, project)
-	fmt.Print(friction.Format(projects, len(idx.Entries), project))
+	entries := index.FilterBySource(idx.Entries, source)
+	projects := friction.ComputeProjectFriction(entries, project)
+	fmt.Print(friction.Format(projects, len(entries), project))
 }
 
 func runTrends() {
@@ -408,6 +412,7 @@ func runTrends() {
 
 	cfg := mustLoadConfig()
 	project := flagValue(os.Args[2:], "--project")
+	source := flagValue(os.Args[2:], "--source")
 
 	weeks := 12
 	if w := flagValue(os.Args[2:], "--weeks"); w != "" {
@@ -423,7 +428,8 @@ func runTrends() {
 		fatal("load index: %v", err)
 	}
 
-	result := trends.Compute(idx.Entries, project, weeks)
+	entries := index.FilterBySource(idx.Entries, source)
+	result := trends.Compute(entries, project, weeks)
 	result.AlertThreshold = cfg.Friction.AlertThreshold
 	fmt.Print(trends.Format(result))
 }
@@ -1086,6 +1092,24 @@ func runReprocess() {
 			continue
 		}
 
+		// Zed entries: re-capture from threads.db
+		if entry.Source == "zed" || strings.HasPrefix(entry.TranscriptPath, "zed:") {
+			result, err := reprocessZedEntry(entry, cfg)
+			if err != nil {
+				log.Printf("error reprocessing zed entry %s: %v", entry.SessionID, err)
+				errors++
+				continue
+			}
+			if result.Skipped {
+				skipped++
+				continue
+			}
+			processed++
+			affectedProjects[result.Project] = true
+			fmt.Printf("  %s → %s\n", result.Project, result.NotePath)
+			continue
+		}
+
 		// Locate transcript (try in order)
 		transcriptPath := ""
 		var cleanup func()
@@ -1165,6 +1189,49 @@ func runReprocess() {
 	}
 
 	fmt.Printf("\nreprocessed: %d, skipped: %d, errors: %d\n", processed, skipped, errors)
+}
+
+// parseZedTranscriptPath splits "zed:/path/to/db#thread-id" into db path and thread ID.
+func parseZedTranscriptPath(tp string) (dbPath, threadID string, ok bool) {
+	tp = strings.TrimPrefix(tp, "zed:")
+	idx := strings.LastIndex(tp, "#")
+	if idx < 0 || idx == len(tp)-1 {
+		return "", "", false
+	}
+	return tp[:idx], tp[idx+1:], true
+}
+
+func reprocessZedEntry(entry index.SessionEntry, cfg config.Config) (*session.CaptureResult, error) {
+	dbPath, threadID, ok := parseZedTranscriptPath(entry.TranscriptPath)
+	if !ok {
+		return nil, fmt.Errorf("invalid zed transcript path: %s", entry.TranscriptPath)
+	}
+
+	thread, err := zed.QueryThread(dbPath, threadID)
+	if err != nil {
+		return nil, fmt.Errorf("query thread: %w", err)
+	}
+
+	info := zed.DetectProject(thread, cfg)
+	t, err := zed.Convert(thread)
+	if err != nil {
+		return nil, fmt.Errorf("convert thread: %w", err)
+	}
+	if t == nil {
+		return &session.CaptureResult{Skipped: true, Reason: "empty thread"}, nil
+	}
+
+	narr := zed.ExtractNarrative(thread)
+	dialogue := zed.ExtractDialogue(thread)
+
+	opts := session.CaptureOpts{
+		TranscriptPath: entry.TranscriptPath,
+		Source:         "zed",
+		Force:          true,
+		SkipEnrichment: true,
+	}
+
+	return session.CaptureFromParsed(t, info, narr, dialogue, opts, cfg)
 }
 
 func humanBytes(b int64) string {

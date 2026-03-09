@@ -67,6 +67,19 @@ func Format(s Summary, project string) string {
 		}
 	}
 
+	// Sources (only when multiple sources exist and not project-filtered)
+	if project == "" && len(s.Sources) > 1 {
+		b.WriteString("\nSources\n")
+		for _, src := range s.Sources {
+			line := fmt.Sprintf("  %-24s %3d sessions   %6s in   %s",
+				src.Name, src.Sessions, formatTokens(src.TokensIn), formatDuration(src.Duration))
+			if src.CostUSD > 0 {
+				line += fmt.Sprintf("   $%.2f", src.CostUSD)
+			}
+			b.WriteString(line + "\n")
+		}
+	}
+
 	// Models
 	if len(s.Models) > 0 {
 		b.WriteString("\nModels\n")

@@ -55,6 +55,7 @@ type SessionItem struct {
 	Title   string `json:"title"`
 	Tag     string `json:"tag,omitempty"`
 	Summary string `json:"summary,omitempty"`
+	Source  string `json:"source,omitempty"`
 }
 
 // FrictionSummary is a one-line friction overview.
@@ -89,12 +90,16 @@ func Build(entries map[string]index.SessionEntry, trendResult trends.Result, opt
 		cap = len(projectEntries)
 	}
 	for _, e := range projectEntries[:cap] {
-		r.Sessions = append(r.Sessions, SessionItem{
+		item := SessionItem{
 			Date:    e.Date,
 			Title:   e.Title,
 			Tag:     e.Tag,
 			Summary: e.Summary,
-		})
+		}
+		if src := e.SourceName(); src != "claude-code" {
+			item.Source = src
+		}
+		r.Sessions = append(r.Sessions, item)
 	}
 
 	// Open threads from recent sessions, resolved filtered out
@@ -130,6 +135,9 @@ func FormatMarkdown(r Result, sections []string) string {
 		b.WriteString("\n## Recent Sessions\n\n")
 		for _, s := range r.Sessions {
 			line := fmt.Sprintf("- **%s** %s", s.Date, s.Title)
+			if s.Source != "" {
+				line += fmt.Sprintf(" [%s]", s.Source)
+			}
 			if s.Tag != "" {
 				line += fmt.Sprintf(" #%s", s.Tag)
 			}

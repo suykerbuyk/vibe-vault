@@ -120,6 +120,21 @@ func (idx *Index) NextIteration(project, date string) int {
 	return max + 1
 }
 
+// FilterBySource returns entries matching the given source name.
+// Empty or "all" returns entries unchanged.
+func FilterBySource(entries map[string]SessionEntry, source string) map[string]SessionEntry {
+	if source == "" || source == "all" {
+		return entries
+	}
+	filtered := make(map[string]SessionEntry)
+	for id, e := range entries {
+		if e.SourceName() == source {
+			filtered[id] = e
+		}
+	}
+	return filtered
+}
+
 // PreviousSession returns the most recent session for a project before the given time.
 func (idx *Index) PreviousSession(project string, before time.Time) *SessionEntry {
 	var candidates []SessionEntry

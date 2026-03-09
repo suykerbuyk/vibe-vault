@@ -226,10 +226,11 @@ var CmdStats = Command{
 	Name:       "stats",
 	Synopsis:   "show session analytics and metrics",
 	Brief:      "Show session analytics and metrics",
-	Usage:      "vv stats [--project <name>]",
+	Usage:      "vv stats [--project <name>] [--source <name>]",
 	TableUsage: "vv stats [--project X]",
 	Flags: []Flag{
 		{Name: "--project <name>", Desc: "Show stats for a specific project only"},
+		{Name: "--source <name>", Desc: "Filter by source (zed, claude-code, or all)"},
 	},
 	Description: `Computes aggregate metrics from the session index and displays them
 in aligned terminal output. Shows overview totals, per-project and
@@ -250,10 +251,11 @@ var CmdFriction = Command{
 	Name:       "friction",
 	Synopsis:   "show friction analysis and correction patterns",
 	Brief:      "Show friction analysis and correction patterns",
-	Usage:      "vv friction [--project <name>]",
+	Usage:      "vv friction [--project <name>] [--source <name>]",
 	TableUsage: "vv friction [--project X]",
 	Flags: []Flag{
 		{Name: "--project <name>", Desc: "Show friction for a specific project only"},
+		{Name: "--source <name>", Desc: "Filter by source (zed, claude-code, or all)"},
 	},
 	Description: `Analyzes friction signals from the session index: correction density,
 token efficiency, file retry patterns, error cycles, and recurring
@@ -274,11 +276,12 @@ var CmdTrends = Command{
 	Name:       "trends",
 	Synopsis:   "show metric trends over time",
 	Brief:      "Show metric trends over time",
-	Usage:      "vv trends [--project <name>] [--weeks <n>]",
+	Usage:      "vv trends [--project <name>] [--weeks <n>] [--source <name>]",
 	TableUsage: "vv trends [--project X]",
 	Flags: []Flag{
 		{Name: "--project <name>", Desc: "Show trends for a specific project only"},
 		{Name: "--weeks <n>", Desc: "Number of weeks to display (default: 12)"},
+		{Name: "--source <name>", Desc: "Filter by source (zed, claude-code, or all)"},
 	},
 	Description: `Analyzes metric trends from the session index over time using weekly
 buckets with 4-week rolling averages. Shows direction (improving,
