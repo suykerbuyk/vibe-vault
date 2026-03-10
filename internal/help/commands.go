@@ -371,31 +371,74 @@ Output is sorted by date, then session ID.`,
 }
 
 var CmdMcp = Command{
-	Name:     "mcp",
-	Synopsis: "start MCP server for AI agent integration",
-	Brief:    "Start MCP server (JSON-RPC over stdio)",
-	Usage:    "vv mcp",
+	Name:       "mcp",
+	Synopsis:   "start MCP server for AI agent integration",
+	Brief:      "Start MCP server (JSON-RPC over stdio)",
+	TableUsage: "vv mcp [install | ...]",
+	Usage:      "vv mcp\n    vv mcp install\n    vv mcp uninstall",
 	Description: `Starts a Model Context Protocol (MCP) server that exposes vibe-vault
 tools over JSON-RPC 2.0 on stdin/stdout. This allows AI agents like
-Claude Code to query project context on demand.
+Claude Code to query project context programmatically.
+
+Subcommands:
+  install     Register the MCP server in Claude Code settings
+  uninstall   Remove the MCP server from Claude Code settings
 
 Available tools:
+  get_friction_trends   Friction and efficiency trend data over time
+  get_knowledge         Project knowledge.md content
   get_project_context   Condensed project context (sessions, threads,
                         decisions, friction trends)
+  get_session_detail    Full markdown of a specific session note
   list_projects         All projects with session counts and date ranges
+  search_sessions       Search/filter sessions by query, project, files,
+                        date range, friction score
 
-Configure in Claude Code's settings:
-  {
-    "mcpServers": {
-      "vibe-vault": {
-        "command": "vv",
-        "args": ["mcp"]
-      }
-    }
-  }
+Setup:
+  vv mcp install        # adds vibe-vault to ~/.claude/settings.json
+  (restart Claude Code)
+
+Verify — after restarting Claude Code, ask it to "list vibe-vault
+projects" or "get project context for <project>". The agent will
+call the MCP tools automatically.
 
 The server logs tool calls to stderr for observability.`,
-	SeeAlso: []string{"vv(1)", "vv-inject(1)"},
+	SeeAlso: []string{"vv(1)", "vv-inject(1)", "vv-mcp-install(1)", "vv-mcp-uninstall(1)"},
+}
+
+var CmdMcpInstall = Command{
+	Name:     "mcp install",
+	Synopsis: "register MCP server in Claude Code settings",
+	Brief:    "Add vibe-vault MCP server to settings.json",
+	Usage:    "vv mcp install",
+	Description: `Adds a "vibe-vault" entry to the mcpServers section of
+~/.claude/settings.json so that Claude Code can call vv MCP tools.
+
+Creates the settings file and parent directory if they don't exist.
+Preserves all existing settings and MCP servers. A backup is saved to
+settings.json.vv.bak before any modification.
+
+This command is idempotent: running it when the MCP server is already
+configured prints an informational message and exits successfully.
+
+Restart Claude Code after running this command.`,
+	SeeAlso: []string{"vv-mcp(1)", "vv-mcp-uninstall(1)"},
+}
+
+var CmdMcpUninstall = Command{
+	Name:     "mcp uninstall",
+	Synopsis: "remove MCP server from Claude Code settings",
+	Brief:    "Remove vibe-vault MCP server from settings.json",
+	Usage:    "vv mcp uninstall",
+	Description: `Removes the "vibe-vault" entry from the mcpServers section of
+~/.claude/settings.json.
+
+Preserves all other settings and MCP servers. A backup is saved to
+settings.json.vv.bak before any modification.
+
+This command is idempotent: running it when the MCP server is not
+configured prints an informational message and exits successfully.`,
+	SeeAlso: []string{"vv-mcp(1)", "vv-mcp-install(1)"},
 }
 
 var CmdVersion = Command{
@@ -449,10 +492,17 @@ var CmdContext = Command{
 in the Obsidian vault rather than as untracked repo-local files. This
 makes context portable, searchable, and visible to Obsidian.
 
+Typical workflow:
+  1. vv context init     First-time setup for a new project
+  2. vv context sync     Run after updating vv to get new features
+
+Use "migrate" only if you have an older project with local RESUME.md
+or HISTORY.md files that predate vault-resident context.
+
 Subcommands:
-  vv context init      Scaffold vault-resident context for current project
-  vv context migrate   Copy existing local files to vault
-  vv context sync      Migrate schema and propagate shared commands`,
+  vv context init      First-time setup: create context files + repo symlinks
+  vv context migrate   One-time: move legacy local files into vault
+  vv context sync      Ongoing: apply schema upgrades + add new commands`,
 	SeeAlso: []string{"vv(1)", "vv-context-init(1)", "vv-context-migrate(1)", "vv-context-sync(1)"},
 }
 
@@ -465,51 +515,57 @@ var CmdContextInit = Command{
 		{Name: "--project <name>", Desc: "Override auto-detected project name"},
 		{Name: "--force", Desc: "Overwrite existing files"},
 	},
-	Description: `Creates vault-resident context files for the current project:
+	Description: `First-time setup for a project. Run this once from your repo root.
 
-Vault-side (in Projects/{project}/):
-  resume.md        AI working context skeleton
-  iterations.md    Iteration narratives skeleton
-  tasks/           Task directory with done/ subdirectory
+Creates vault-side context files:
+  resume.md        AI working context (current state, open threads)
+  iterations.md    Iteration history (append-only archive)
+  workflow.md      AI behavioral rules and workflow standards
+  tasks/           Task tracking directory
+  commands/        Slash commands (restart, wrap, license, makefile)
 
-Repo-side (in current directory):
-  CLAUDE.md              Vault pointer (workflow rules in vault-side workflow.md)
-  .claude/commands/restart.md  Session resume command
-  .claude/commands/wrap.md     Session wrap command
+Creates repo-side files:
+  CLAUDE.md            Symlink into vault (loaded by AI agents)
+  .claude/commands/    Symlink to vault commands (slash commands)
+  .vibe-vault.toml     Project identity file (committed to repo)
 
-Also ensures .gitignore has entries for CLAUDE.md and commit.msg.
+The .vibe-vault.toml is created with all values commented out. While
+commented, vv uses heuristics (git remote, directory name) to detect
+the project. Uncomment values to override detection — useful when
+the git remote name doesn't match your project name.
 
-Existing files are skipped unless --force is specified. Project name
-is auto-detected from git remote or directory name.`,
+Project name is auto-detected from .vibe-vault.toml, git remote, or
+directory name. Existing files are skipped unless --force is specified.`,
 	Examples: []string{
 		"vv context init                       Scaffold for auto-detected project",
 		"vv context init --project myproject   Scaffold for a specific project",
 		"vv context init --force               Overwrite existing files",
 	},
-	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-context-migrate(1)"},
+	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-context-sync(1)"},
 }
 
 var CmdContextMigrate = Command{
 	Name:     "context migrate",
-	Synopsis: "copy existing local context files to vault",
-	Brief:    "Copy local context files to vault",
+	Synopsis: "one-time import of legacy local context files to vault",
+	Brief:    "One-time import of legacy local files to vault",
 	Usage:    "vv context migrate [--project <name>] [--force]",
 	Flags: []Flag{
 		{Name: "--project <name>", Desc: "Override auto-detected project name"},
 		{Name: "--force", Desc: "Overwrite existing vault files"},
 	},
-	Description: `Copies existing repo-local context files to the vault:
+	Description: `One-time operation for projects that have local context files from
+before vault-resident context was introduced. Most users should use
+"vv context init" instead.
 
-  RESUME.md  → Projects/{project}/resume.md
-  HISTORY.md → Projects/{project}/iterations.md
-  tasks/     → Projects/{project}/tasks/ (recursive)
+Copies local files into the vault:
+  RESUME.md  → Projects/{project}/agentctx/resume.md
+  HISTORY.md → Projects/{project}/agentctx/iterations.md
+  tasks/     → Projects/{project}/agentctx/tasks/ (recursive)
 
-Then force-updates repo-side files (CLAUDE.md, .claude/commands/) to
-point at the vault. Local originals are NOT deleted — remove them
-manually after verifying the migration.
+Then sets up repo-side symlinks (same as init). Local originals are
+preserved — remove them manually after verifying the migration.
 
-Files that don't exist locally are skipped. Vault files that already
-exist are skipped unless --force is specified.`,
+After migrating, use "vv context sync" for future updates.`,
 	Examples: []string{
 		"vv context migrate                       Migrate auto-detected project",
 		"vv context migrate --project myproject   Migrate a specific project",
@@ -520,8 +576,8 @@ exist are skipped unless --force is specified.`,
 
 var CmdContextSync = Command{
 	Name:     "context sync",
-	Synopsis: "migrate schema and propagate shared commands",
-	Brief:    "Migrate schema and propagate shared commands",
+	Synopsis: "update project context after upgrading vv",
+	Brief:    "Update context after upgrading vv",
 	Usage:    "vv context sync [--project <name>] [--all] [--dry-run] [--force]",
 	Flags: []Flag{
 		{Name: "--project <name>", Desc: "Override auto-detected project name"},
@@ -529,18 +585,20 @@ var CmdContextSync = Command{
 		{Name: "--dry-run", Desc: "Report changes without modifying any files"},
 		{Name: "--force", Desc: "Force overwrite existing files during migration"},
 	},
-	Description: `Runs schema migrations and propagates shared commands for one or all
-projects.
+	Description: `Run this from your repo root after upgrading vv to pick up new features.
 
-Schema migrations upgrade the agentctx directory structure to the latest
-version. For example, migrating from v0 to v2 adds a .version file,
-creates an agentctx symlink at the repo root, rewrites CLAUDE.md to
-use relative paths, and replaces .claude/commands with a relative
-symlink.
+What sync does:
+  1. Schema migrations — upgrades the agentctx directory structure
+     (e.g., adding symlinks, new directories) to the latest version
+  2. New commands — copies any new slash commands from vault templates
+     into the project's agentctx/commands/
 
-Shared command propagation copies new .md files from
-Templates/agentctx/commands/ to each project's agentctx/commands/.
-Existing project commands are never overwritten.
+What sync does NOT do:
+  - It will not overwrite existing commands you may have customized.
+    To update a specific command to the latest default, use:
+      vv templates reset --file commands/restart.md --force
+    Or to see what changed:
+      vv templates diff --file commands/restart.md
 
 In --all mode, only vault-side operations are performed (no repo-side
 symlinks). Run from each repo root without --all for repo-side updates.`,
@@ -550,7 +608,7 @@ symlinks). Run from each repo root without --all for repo-side updates.`,
 		"vv context sync --all                 Sync all projects (vault-only)",
 		"vv context sync --project myproject   Sync a specific project",
 	},
-	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-context-init(1)"},
+	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-templates(1)"},
 }
 
 var CmdTemplates = Command{
@@ -732,6 +790,12 @@ var ContextSubcommands = []Command{
 	CmdContextInit,
 	CmdContextMigrate,
 	CmdContextSync,
+}
+
+// McpSubcommands is the ordered list of mcp sub-subcommands.
+var McpSubcommands = []Command{
+	CmdMcpInstall,
+	CmdMcpUninstall,
 }
 
 // Subcommands is the ordered list of all subcommands.

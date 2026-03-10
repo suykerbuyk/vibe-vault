@@ -250,6 +250,27 @@ func checkHookFile(path string) Result {
 	return Result{Name: "hook", Status: Fail, Detail: "vv hook not found in " + config.CompressHome(path)}
 }
 
+// CheckMCP checks whether the vibe-vault MCP server is configured in ~/.claude/settings.json.
+func CheckMCP() Result {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return Result{Name: "mcp", Status: Warn, Detail: "cannot determine home directory"}
+	}
+	path := filepath.Join(home, ".claude", "settings.json")
+	return checkMCPFile(path)
+}
+
+func checkMCPFile(path string) Result {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Result{Name: "mcp", Status: Warn, Detail: config.CompressHome(path) + " not found"}
+	}
+	if strings.Contains(string(data), `"vibe-vault"`) && strings.Contains(string(data), "mcpServers") {
+		return Result{Name: "mcp", Status: Pass, Detail: "vibe-vault MCP server found in " + config.CompressHome(path)}
+	}
+	return Result{Name: "mcp", Status: Warn, Detail: "not configured — run `vv mcp install`"}
+}
+
 // CheckAgentctxSchema checks the agentctx schema version for a project.
 // Returns nil if no agentctx directory exists.
 func CheckAgentctxSchema(vaultPath, project string, latestVersion int) *Result {
@@ -309,6 +330,7 @@ func Run(cfg config.Config) Report {
 	results = append(results, CheckDomains(cfg.Domains)...)
 	results = append(results, CheckEnrichment(cfg.Enrichment))
 	results = append(results, CheckHook())
+	results = append(results, CheckMCP())
 
 	return Report{Results: results}
 }

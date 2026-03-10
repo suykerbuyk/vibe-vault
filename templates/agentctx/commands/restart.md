@@ -11,8 +11,11 @@ references in referenced order to restore full project context:
 4. Run `vv inject` via Bash to load live vault context (recent sessions,
    open threads, decisions, friction trends, knowledge). Include the
    full output verbatim in your context — do not summarize it.
-5. `doc/*.md` — stable reference (architecture, design, testing) — read on demand when needed
-6. When a task is completed, move it to `tasks/done/` and append a summary to `iterations.md`.
+5. If MCP tools are available (vibe-vault server configured), call
+   `get_project_context` for this project. This provides structured JSON
+   context (sessions, threads, decisions, friction) that supplements inject.
+6. `doc/*.md` — stable reference (architecture, design, testing) — read on demand when needed
+7. When a task is completed, move it to `tasks/done/` and append a summary to `iterations.md`.
 
 After reading, briefly confirm what you loaded and note the current state:
 test count, open tasks, recent session activity from inject, and what was

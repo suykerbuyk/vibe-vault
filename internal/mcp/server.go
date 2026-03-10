@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sort"
 )
 
 // Tool pairs a definition with its handler.
@@ -117,6 +118,9 @@ func (s *Server) handleToolsList(req Request) Response {
 	for _, t := range s.tools {
 		defs = append(defs, t.Definition)
 	}
+	sort.Slice(defs, func(i, j int) bool {
+		return defs[i].Name < defs[j].Name
+	})
 	return Response{JSONRPC: "2.0", ID: req.ID, Result: ToolsListResult{Tools: defs}}
 }
 

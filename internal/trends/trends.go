@@ -27,29 +27,29 @@ type WeekBucket struct {
 
 // TrendPoint is a single data point in a metric time series.
 type TrendPoint struct {
-	WeekLabel  string  // "Jan 06", "Feb 17", etc.
-	Value      float64 // per-week average
-	RollingAvg float64 // 4-week rolling average (0 if < 4 weeks of data)
-	Anomaly    bool    // >1.5 stddev from rolling avg
+	WeekLabel  string  `json:"week_label"`  // "Jan 06", "Feb 17", etc.
+	Value      float64 `json:"value"`       // per-week average
+	RollingAvg float64 `json:"rolling_avg"` // 4-week rolling average (0 if < 4 weeks of data)
+	Anomaly    bool    `json:"anomaly"`     // >1.5 stddev from rolling avg
 }
 
 // MetricTrend holds the full time series for one metric.
 type MetricTrend struct {
-	Name      string
-	Points    []TrendPoint // most recent first
-	OverallAvg float64
-	Direction  string // "improving", "worsening", "stable"
-	DeltaPct   float64 // percent change (negative = improving for friction/corrections)
+	Name       string       `json:"name"`
+	Points     []TrendPoint `json:"points"`      // most recent first
+	OverallAvg float64      `json:"overall_avg"`
+	Direction  string       `json:"direction"`   // "improving", "worsening", "stable"
+	DeltaPct   float64      `json:"delta_pct"`   // percent change (negative = improving for friction/corrections)
 }
 
 // Result holds the complete trends analysis.
 type Result struct {
-	TotalSessions  int
-	TotalWeeks     int
-	DisplayWeeks   int
-	Project        string
-	Metrics        []MetricTrend
-	AlertThreshold int // friction alert threshold (0 = disabled)
+	TotalSessions  int           `json:"total_sessions"`
+	TotalWeeks     int           `json:"total_weeks"`
+	DisplayWeeks   int           `json:"display_weeks"`
+	Project        string        `json:"project"`
+	Metrics        []MetricTrend `json:"metrics"`
+	AlertThreshold int           `json:"alert_threshold"` // friction alert threshold (0 = disabled)
 }
 
 // Compute builds trend analysis from index entries.

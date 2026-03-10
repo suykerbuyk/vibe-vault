@@ -1,21 +1,23 @@
-.TH VV-CONTEXT-SYNC 1 "2026-03-09" "vv 0.7.2-4-g600be84" "Vibe-Vault Manual"
+.TH VV-CONTEXT-SYNC 1 "2026-03-09" "vv 0.7.3" "Vibe-Vault Manual"
 .SH NAME
-vv-context-sync \- migrate schema and propagate shared commands
+vv-context-sync \- update project context after upgrading vv
 .SH SYNOPSIS
 .B vv context sync [\-\-project <name>] [\-\-all] [\-\-dry\-run] [\-\-force]
 .SH DESCRIPTION
-Runs schema migrations and propagates shared commands for one or all
-projects.
+Run this from your repo root after upgrading vv to pick up new features.
 .PP
-Schema migrations upgrade the agentctx directory structure to the latest
-version. For example, migrating from v0 to v2 adds a .version file,
-creates an agentctx symlink at the repo root, rewrites CLAUDE.md to
-use relative paths, and replaces .claude/commands with a relative
-symlink.
+What sync does:
+  1. Schema migrations — upgrades the agentctx directory structure
+     (e.g., adding symlinks, new directories) to the latest version
+  2. New commands — copies any new slash commands from vault templates
+     into the project's agentctx/commands/
 .PP
-Shared command propagation copies new .md files from
-Templates/agentctx/commands/ to each project's agentctx/commands/.
-Existing project commands are never overwritten.
+What sync does NOT do:
+  \- It will not overwrite existing commands you may have customized.
+    To update a specific command to the latest default, use:
+      vv templates reset \-\-file commands/restart.md \-\-force
+    Or to see what changed:
+      vv templates diff \-\-file commands/restart.md
 .PP
 In \-\-all mode, only vault\-side operations are performed (no repo\-side
 symlinks). Run from each repo root without \-\-all for repo\-side updates.
@@ -42,4 +44,4 @@ vv context sync \-\-project myproject   Sync a specific project
 .SH SEE ALSO
 .BR vv (1),
 .BR vv\-context (1),
-.BR vv\-context\-init (1)
+.BR vv\-templates (1)

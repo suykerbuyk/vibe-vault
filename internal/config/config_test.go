@@ -259,6 +259,25 @@ alert_threshold = 80
 	}
 }
 
+func TestOverlay_MCPConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	os.WriteFile(cfgPath, []byte(`[mcp]
+default_max_tokens = 8000
+`), 0o644)
+
+	base := DefaultConfig()
+	result := base.Overlay(cfgPath)
+
+	if result.MCP.DefaultMaxTokens != 8000 {
+		t.Errorf("MCP.DefaultMaxTokens = %d, want 8000", result.MCP.DefaultMaxTokens)
+	}
+	// Base should be unchanged
+	if base.MCP.DefaultMaxTokens != 4000 {
+		t.Error("base MCP config was mutated")
+	}
+}
+
 func TestOverlay_MissingFile(t *testing.T) {
 	base := DefaultConfig()
 	result := base.Overlay("/nonexistent/config.toml")

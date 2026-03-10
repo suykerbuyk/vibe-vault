@@ -223,10 +223,17 @@ var expectedTerminal = map[string]string{
 		"in the Obsidian vault rather than as untracked repo-local files. This\n" +
 		"makes context portable, searchable, and visible to Obsidian.\n" +
 		"\n" +
+		"Typical workflow:\n" +
+		"  1. vv context init     First-time setup for a new project\n" +
+		"  2. vv context sync     Run after updating vv to get new features\n" +
+		"\n" +
+		"Use \"migrate\" only if you have an older project with local RESUME.md\n" +
+		"or HISTORY.md files that predate vault-resident context.\n" +
+		"\n" +
 		"Subcommands:\n" +
-		"  vv context init      Scaffold vault-resident context for current project\n" +
-		"  vv context migrate   Copy existing local files to vault\n" +
-		"  vv context sync      Migrate schema and propagate shared commands\n",
+		"  vv context init      First-time setup: create context files + repo symlinks\n" +
+		"  vv context migrate   One-time: move legacy local files into vault\n" +
+		"  vv context sync      Ongoing: apply schema upgrades + add new commands\n",
 
 	"inject": "vv inject \u2014 output session-start context payload\n" +
 		"\n" +
@@ -301,25 +308,34 @@ var expectedTerminal = map[string]string{
 	"mcp": "vv mcp \u2014 start MCP server for AI agent integration\n" +
 		"\n" +
 		"Usage: vv mcp\n" +
+		"    vv mcp install\n" +
+		"    vv mcp uninstall\n" +
 		"\n" +
 		"Starts a Model Context Protocol (MCP) server that exposes vibe-vault\n" +
 		"tools over JSON-RPC 2.0 on stdin/stdout. This allows AI agents like\n" +
-		"Claude Code to query project context on demand.\n" +
+		"Claude Code to query project context programmatically.\n" +
+		"\n" +
+		"Subcommands:\n" +
+		"  install     Register the MCP server in Claude Code settings\n" +
+		"  uninstall   Remove the MCP server from Claude Code settings\n" +
 		"\n" +
 		"Available tools:\n" +
+		"  get_friction_trends   Friction and efficiency trend data over time\n" +
+		"  get_knowledge         Project knowledge.md content\n" +
 		"  get_project_context   Condensed project context (sessions, threads,\n" +
 		"                        decisions, friction trends)\n" +
+		"  get_session_detail    Full markdown of a specific session note\n" +
 		"  list_projects         All projects with session counts and date ranges\n" +
+		"  search_sessions       Search/filter sessions by query, project, files,\n" +
+		"                        date range, friction score\n" +
 		"\n" +
-		"Configure in Claude Code's settings:\n" +
-		"  {\n" +
-		"    \"mcpServers\": {\n" +
-		"      \"vibe-vault\": {\n" +
-		"        \"command\": \"vv\",\n" +
-		"        \"args\": [\"mcp\"]\n" +
-		"      }\n" +
-		"    }\n" +
-		"  }\n" +
+		"Setup:\n" +
+		"  vv mcp install        # adds vibe-vault to ~/.claude/settings.json\n" +
+		"  (restart Claude Code)\n" +
+		"\n" +
+		"Verify \u2014 after restarting Claude Code, ask it to \"list vibe-vault\n" +
+		"projects\" or \"get project context for <project>\". The agent will\n" +
+		"call the MCP tools automatically.\n" +
 		"\n" +
 		"The server logs tool calls to stderr for observability.\n",
 
@@ -377,7 +393,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv inject [--project X]      Output session-start context payload\n" +
 		"  vv export [--format X]       Export session data (JSON or CSV)\n" +
 		"  vv zed <subcommand>          Import Zed agent panel threads into vault\n" +
-		"  vv mcp                       Start MCP server (JSON-RPC over stdio)\n" +
+		"  vv mcp [install | ...]       Start MCP server (JSON-RPC over stdio)\n" +
 		"  vv templates [list | ...]    Inspect, compare, and reset vault templates\n" +
 		"  vv version                   Print version\n" +
 		"  vv help                      Show this help\n" +
@@ -544,6 +560,27 @@ func quote(s string) string {
 
 func TestFormatTerminal_HookSubcommands(t *testing.T) {
 	for _, cmd := range HookSubcommands {
+		t.Run(cmd.Name, func(t *testing.T) {
+			out := FormatTerminal(cmd)
+			// Verify header format
+			prefix := fmt.Sprintf("vv %s \u2014 %s\n", cmd.Name, cmd.Synopsis)
+			if !strings.HasPrefix(out, prefix) {
+				t.Errorf("FormatTerminal(%q) header mismatch.\nwant prefix: %q\ngot:         %q", cmd.Name, prefix, out[:min(len(out), len(prefix)+20)])
+			}
+			// Verify usage line present
+			if !strings.Contains(out, "Usage: "+cmd.Usage) {
+				t.Errorf("FormatTerminal(%q) missing usage line", cmd.Name)
+			}
+			// Verify description present
+			if cmd.Description != "" && !strings.Contains(out, cmd.Description) {
+				t.Errorf("FormatTerminal(%q) missing description", cmd.Name)
+			}
+		})
+	}
+}
+
+func TestFormatTerminal_McpSubcommands(t *testing.T) {
+	for _, cmd := range McpSubcommands {
 		t.Run(cmd.Name, func(t *testing.T) {
 			out := FormatTerminal(cmd)
 			// Verify header format

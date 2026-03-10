@@ -1,6 +1,7 @@
 package session
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -186,5 +187,59 @@ func TestDetectProject_NotGitRepo(t *testing.T) {
 	got := DetectProject(projectDir)
 	if got != "plain-dir" {
 		t.Errorf("detectProject in non-git dir = %q, want %q", got, "plain-dir")
+	}
+}
+
+func TestDetectProject_IdentityOverridesDir(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "generic-dirname")
+	os.MkdirAll(projectDir, 0o755)
+	os.WriteFile(filepath.Join(projectDir, ".vibe-vault.toml"), []byte(`
+[project]
+name = "my-real-project"
+`), 0o644)
+
+	got := DetectProject(projectDir)
+	if got != "my-real-project" {
+		t.Errorf("DetectProject with identity = %q, want %q", got, "my-real-project")
+	}
+}
+
+func TestDetect_IdentityDomainOverride(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "myproj")
+	os.MkdirAll(projectDir, 0o755)
+	os.WriteFile(filepath.Join(projectDir, ".vibe-vault.toml"), []byte(`
+[project]
+name = "myproj"
+domain = "developer-tools"
+`), 0o644)
+
+	cfg := config.Config{
+		Domains: config.DomainsConfig{
+			Work:       "/home/user/work",
+			Personal:   "/home/user/personal",
+			Opensource: "/home/user/opensource",
+		},
+	}
+
+	info := Detect(projectDir, "main", "claude", "s1", cfg)
+	if info.Project != "myproj" {
+		t.Errorf("Project = %q, want myproj", info.Project)
+	}
+	if info.Domain != "developer-tools" {
+		t.Errorf("Domain = %q, want developer-tools", info.Domain)
+	}
+}
+
+func TestDetect_MissingIdentityFallsThrough(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "fallback-dir")
+	os.MkdirAll(projectDir, 0o755)
+	// No .vibe-vault.toml
+
+	got := DetectProject(projectDir)
+	if got != "fallback-dir" {
+		t.Errorf("DetectProject = %q, want fallback-dir", got)
 	}
 }

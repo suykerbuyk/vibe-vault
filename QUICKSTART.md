@@ -77,35 +77,20 @@ idempotent — running it again when hooks are already configured is a no-op.
 
 To remove the hooks later: `vv hook uninstall`
 
-### Manual alternative
+### Enable the MCP server
 
-If you prefer to edit `~/.claude/settings.json` yourself, add (or merge
-into) the `hooks` object:
+Register the vibe-vault MCP server so Claude Code can query project context:
 
-```json
-{
-  "hooks": {
-    "SessionEnd": [
-      {
-        "matcher": "",
-        "hooks": [{"type": "command", "command": "vv hook"}]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [{"type": "command", "command": "vv hook"}]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "",
-        "hooks": [{"type": "command", "command": "vv hook"}]
-      }
-    ]
-  }
-}
+```bash
+vv mcp install
 ```
+
+This adds a `vibe-vault` entry to the `mcpServers` section of
+`~/.claude/settings.json`. Restart Claude Code after running this command.
+The MCP server exposes 6 tools that let the agent search sessions, read
+project knowledge, and access friction trends on demand.
+
+To remove the MCP server later: `vv mcp uninstall`
 
 ### Verify the setup
 
@@ -114,18 +99,19 @@ vv check
 ```
 
 This validates your config, vault structure, Obsidian setup, domain paths,
-and hook integration. Every line should show `PASS` or `WARN` — any `FAIL`
-means something needs fixing. Example output:
+hook integration, and MCP server registration. Every line should show `PASS`
+or `WARN` — any `FAIL` means something needs fixing. Example output:
 
 ```
-  PASS  config           ~/.config/vibe-vault/config.toml
-  PASS  vault            ~/obsidian/my-sessions
-  WARN  obsidian         .obsidian/ not found (open vault in Obsidian first)
-  PASS  projects         Projects/ (0 notes)
-  PASS  state            .vibe-vault/ found
-  WARN  index            session-index.json not found
-  PASS  enrichment       disabled
-  PASS  hook             vv hook found in ~/.claude/settings.json
+  pass  config           ~/.config/vibe-vault/config.toml
+  pass  vault            ~/obsidian/my-sessions
+  warn  obsidian         .obsidian/ not found (open vault in Obsidian first)
+  pass  projects         Projects/ (0 notes)
+  pass  state            .vibe-vault/ found
+  warn  index            session-index.json not found
+  pass  enrichment       disabled
+  pass  hook             vv hook found in ~/.claude/settings.json
+  pass  mcp              vibe-vault MCP server found in ~/.claude/settings.json
 ```
 
 At this point, **every new Claude Code session will automatically create a
@@ -198,10 +184,13 @@ vibe-vault detects projects automatically — there's no per-project
 registration step. When a session runs, `vv` determines the project name
 from the working directory:
 
-1. **Git remote** (preferred) — extracts the repo name from
+1. **`.vibe-vault.toml`** (highest priority) — if present in the repo root,
+   the `project.name` value is used. Created as a commented-out template by
+   `vv context init`. Uncomment and set values to override automatic detection.
+2. **Git remote** (preferred) — extracts the repo name from
    `git remote get-url origin`. This is stable across worktrees, directory
    renames, and machines.
-2. **Directory basename** (fallback) — uses the name of the working
+3. **Directory basename** (fallback) — uses the name of the working
    directory when git isn't available.
 
 ### New projects
@@ -384,6 +373,8 @@ vv reprocess --project myproject   # one project only
 | Create vault with git | `vv init ~/obsidian/my-sessions --git` |
 | Install hooks | `vv hook install` |
 | Remove hooks | `vv hook uninstall` |
+| Enable MCP server | `vv mcp install` |
+| Remove MCP server | `vv mcp uninstall` |
 | Verify setup | `vv check` |
 | Backfill history | `vv backfill` |
 | Archive transcripts | `vv archive` |

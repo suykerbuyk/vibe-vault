@@ -67,8 +67,9 @@ func EnsureVaultTemplates(vaultPath string) []FileAction {
 		action := safeWrite(path, content, false)
 		if action != "SKIP" {
 			actions = append(actions, FileAction{
-				Path:   filepath.Join("Templates", "agentctx", relPath),
-				Action: action,
+				Path:     filepath.Join("Templates", "agentctx", relPath),
+				Action:   action,
+				Location: "vault",
 			})
 		}
 	}

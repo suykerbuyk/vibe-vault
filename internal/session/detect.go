@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/identity"
 	"github.com/johns/vibe-vault/internal/sanitize"
 )
 
@@ -34,6 +35,16 @@ func Detect(cwd, gitBranch, model, sessionID string, cfg config.Config) Info {
 		CWD:       cwd,
 	}
 
+	// Try identity file first (highest priority)
+	if id, _ := identity.Load(cwd); id != nil {
+		info.Project = id.Project.Name
+		info.Domain = detectDomain(cwd, cfg)
+		if id.Project.Domain != "" {
+			info.Domain = id.Project.Domain
+		}
+		return info
+	}
+
 	info.Project = DetectProject(cwd)
 	info.Domain = detectDomain(cwd, cfg)
 
@@ -41,15 +52,19 @@ func Detect(cwd, gitBranch, model, sessionID string, cfg config.Config) Info {
 }
 
 // DetectProject extracts the project name from the working directory.
-// Prefers the git remote origin name (stable across worktrees and renames),
-// falling back to the directory basename.
+// Priority: identity file > git remote origin > directory basename.
 func DetectProject(cwd string) string {
 	if cwd == "" {
 		return "_unknown"
 	}
 	cwd = filepath.Clean(cwd)
 
-	// Try git remote first (stable across worktrees and renames)
+	// Try identity file first
+	if id, _ := identity.Load(cwd); id != nil {
+		return id.Project.Name
+	}
+
+	// Try git remote (stable across worktrees and renames)
 	if name := gitRemoteProject(cwd); name != "" {
 		return name
 	}

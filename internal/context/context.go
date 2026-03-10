@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/identity"
 	"github.com/johns/vibe-vault/internal/session"
 )
 
@@ -26,8 +27,9 @@ type Opts struct {
 
 // FileAction describes what happened to a file.
 type FileAction struct {
-	Path   string // relative or display path
-	Action string // "CREATE", "SKIP", "MIGRATE", "UPDATE"
+	Path     string // relative or display path
+	Action   string // "CREATE", "SKIP", "MIGRATE", "UPDATE"
+	Location string // "vault", "repo", or "" (for migrations/meta actions)
 }
 
 // InitResult holds the outcome of Init.
@@ -109,8 +111,9 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 		path := filepath.Join(agentctx, rel)
 		action := safeWrite(path, content, opts.Force)
 		result.Actions = append(result.Actions, FileAction{
-			Path:   filepath.Join("Projects", project, "agentctx", rel),
-			Action: action,
+			Path:     filepath.Join("Projects", project, "agentctx", rel),
+			Action:   action,
+			Location: "vault",
 		})
 	}
 
@@ -118,8 +121,9 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 	projCfgPath := filepath.Join(agentctx, "config.toml")
 	cfgAction := safeWrite(projCfgPath, config.ProjectConfigTemplate(), opts.Force)
 	result.Actions = append(result.Actions, FileAction{
-		Path:   filepath.Join("Projects", project, "agentctx", "config.toml"),
-		Action: cfgAction,
+		Path:     filepath.Join("Projects", project, "agentctx", "config.toml"),
+		Action:   cfgAction,
+		Location: "vault",
 	})
 
 	// Write .version file
@@ -128,26 +132,27 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 		return nil, fmt.Errorf("write .version: %w", err)
 	}
 	result.Actions = append(result.Actions, FileAction{
-		Path:   filepath.Join("Projects", project, "agentctx", ".version"),
-		Action: "CREATE",
+		Path:     filepath.Join("Projects", project, "agentctx", ".version"),
+		Action:   "CREATE",
+		Location: "vault",
 	})
 
 	// Repo-side agentctx symlink → vault agentctx path
 	agentctxLink := filepath.Join(cwd, "agentctx")
 	aLinkAction := safeSymlink(agentctxLink, agentctx, opts.Force)
-	result.Actions = append(result.Actions, FileAction{Path: "agentctx", Action: aLinkAction})
+	result.Actions = append(result.Actions, FileAction{Path: "agentctx", Action: aLinkAction, Location: "repo"})
 
 	// Repo-side CLAUDE.md → symlink through agentctx
 	claudeMDLink := filepath.Join(cwd, "CLAUDE.md")
 	claudeMDAction := safeSymlink(claudeMDLink, filepath.Join("agentctx", "CLAUDE.md"), opts.Force)
-	result.Actions = append(result.Actions, FileAction{Path: "CLAUDE.md", Action: claudeMDAction})
+	result.Actions = append(result.Actions, FileAction{Path: "CLAUDE.md", Action: claudeMDAction, Location: "repo"})
 
 	// Repo-side commit.msg → symlink through agentctx
 	commitMsgVault := filepath.Join(agentctx, "commit.msg")
 	safeWrite(commitMsgVault, "", false) // ensure vault-side file exists
 	commitMsgLink := filepath.Join(cwd, "commit.msg")
 	cmAction := safeSymlink(commitMsgLink, filepath.Join("agentctx", "commit.msg"), opts.Force)
-	result.Actions = append(result.Actions, FileAction{Path: "commit.msg", Action: cmAction})
+	result.Actions = append(result.Actions, FileAction{Path: "commit.msg", Action: cmAction, Location: "repo"})
 
 	// Repo-side .claude/ directory with symlinks through agentctx
 	dotClaude := filepath.Join(cwd, ".claude")
@@ -159,8 +164,9 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 		target := filepath.Join("..", "agentctx", sub)
 		action := safeSymlink(link, target, opts.Force)
 		result.Actions = append(result.Actions, FileAction{
-			Path:   ".claude/" + sub,
-			Action: action,
+			Path:     ".claude/" + sub,
+			Action:   action,
+			Location: "repo",
 		})
 	}
 
@@ -171,9 +177,14 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 			return nil, err
 		}
 		if giAction != "" {
-			result.Actions = append(result.Actions, FileAction{Path: ".gitignore", Action: giAction})
+			result.Actions = append(result.Actions, FileAction{Path: ".gitignore", Action: giAction, Location: "repo"})
 		}
 	}
+
+	// Repo-side .vibe-vault.toml identity file (commented-out template)
+	idPath := filepath.Join(cwd, identity.FileName())
+	idAction := safeWrite(idPath, identity.Template(project), opts.Force)
+	result.Actions = append(result.Actions, FileAction{Path: identity.FileName(), Action: idAction, Location: "repo"})
 
 	return result, nil
 }
@@ -295,8 +306,9 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 	workflowPath := filepath.Join(agentctx, "workflow.md")
 	safeWrite(workflowPath, workflowContent, true)
 	result.Actions = append(result.Actions, FileAction{
-		Path:   filepath.Join("Projects", project, "agentctx", "workflow.md"),
-		Action: "UPDATE",
+		Path:     filepath.Join("Projects", project, "agentctx", "workflow.md"),
+		Action:   "UPDATE",
+		Location: "vault",
 	})
 
 	// Write agentctx/CLAUDE.md
@@ -304,8 +316,9 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 	claudePath := filepath.Join(agentctx, "CLAUDE.md")
 	safeWrite(claudePath, claudeContent, true)
 	result.Actions = append(result.Actions, FileAction{
-		Path:   filepath.Join("Projects", project, "agentctx", "CLAUDE.md"),
-		Action: "UPDATE",
+		Path:     filepath.Join("Projects", project, "agentctx", "CLAUDE.md"),
+		Action:   "UPDATE",
+		Location: "vault",
 	})
 
 	// Force-update vault-side commands (only if not already present from local copy)
@@ -321,8 +334,9 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 		action := safeWrite(path, content, false)
 		if action != "SKIP" {
 			result.Actions = append(result.Actions, FileAction{
-				Path:   filepath.Join("Projects", project, "agentctx", cmd),
-				Action: action,
+				Path:     filepath.Join("Projects", project, "agentctx", cmd),
+				Action:   action,
+				Location: "vault",
 			})
 		}
 	}
@@ -336,7 +350,7 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 	// Repo-side agentctx symlink
 	agentctxLink := filepath.Join(cwd, "agentctx")
 	safeSymlink(agentctxLink, agentctx, true)
-	result.Actions = append(result.Actions, FileAction{Path: "agentctx", Action: "UPDATE"})
+	result.Actions = append(result.Actions, FileAction{Path: "agentctx", Action: "UPDATE", Location: "repo"})
 
 	// Repo-side CLAUDE.md → symlink through agentctx
 	claudeMDLink := filepath.Join(cwd, "CLAUDE.md")
@@ -345,7 +359,7 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 		os.Remove(claudeMDLink)
 	}
 	safeSymlink(claudeMDLink, filepath.Join("agentctx", "CLAUDE.md"), true)
-	result.Actions = append(result.Actions, FileAction{Path: "CLAUDE.md", Action: "UPDATE"})
+	result.Actions = append(result.Actions, FileAction{Path: "CLAUDE.md", Action: "UPDATE", Location: "repo"})
 
 	// Force-update repo-side .claude/ symlinks through agentctx
 	dotClaude := filepath.Join(cwd, ".claude")
@@ -357,8 +371,9 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 		target := filepath.Join("..", "agentctx", sub)
 		safeSymlink(link, target, true)
 		result.Actions = append(result.Actions, FileAction{
-			Path:   ".claude/" + sub,
-			Action: "UPDATE",
+			Path:     ".claude/" + sub,
+			Action:   "UPDATE",
+			Location: "repo",
 		})
 	}
 
@@ -367,7 +382,7 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 	safeWrite(commitMsgVault, "", false) // ensure vault-side file exists
 	commitMsgLink := filepath.Join(cwd, "commit.msg")
 	safeSymlink(commitMsgLink, filepath.Join("agentctx", "commit.msg"), true)
-	result.Actions = append(result.Actions, FileAction{Path: "commit.msg", Action: "UPDATE"})
+	result.Actions = append(result.Actions, FileAction{Path: "commit.msg", Action: "UPDATE", Location: "repo"})
 
 	// .gitignore
 	for _, entry := range []string{"/CLAUDE.md", "/commit.msg", "/agentctx"} {
@@ -376,9 +391,14 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 			return nil, err
 		}
 		if giAction != "" {
-			result.Actions = append(result.Actions, FileAction{Path: ".gitignore", Action: giAction})
+			result.Actions = append(result.Actions, FileAction{Path: ".gitignore", Action: giAction, Location: "repo"})
 		}
 	}
+
+	// Repo-side .vibe-vault.toml identity file (commented-out template)
+	idPath := filepath.Join(cwd, identity.FileName())
+	idAction := safeWrite(idPath, identity.Template(project), opts.Force)
+	result.Actions = append(result.Actions, FileAction{Path: identity.FileName(), Action: idAction, Location: "repo"})
 
 	return result, nil
 }

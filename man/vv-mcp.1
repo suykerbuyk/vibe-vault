@@ -1,29 +1,40 @@
-.TH VV-MCP 1 "2026-03-09" "vv 0.7.2-4-g600be84" "Vibe-Vault Manual"
+.TH VV-MCP 1 "2026-03-09" "vv 0.7.3" "Vibe-Vault Manual"
 .SH NAME
 vv-mcp \- start MCP server for AI agent integration
 .SH SYNOPSIS
 .B vv mcp
+    vv mcp install
+    vv mcp uninstall
 .SH DESCRIPTION
 Starts a Model Context Protocol (MCP) server that exposes vibe\-vault
 tools over JSON\-RPC 2.0 on stdin/stdout. This allows AI agents like
-Claude Code to query project context on demand.
+Claude Code to query project context programmatically.
+.PP
+Subcommands:
+  install     Register the MCP server in Claude Code settings
+  uninstall   Remove the MCP server from Claude Code settings
 .PP
 Available tools:
+  get_friction_trends   Friction and efficiency trend data over time
+  get_knowledge         Project knowledge.md content
   get_project_context   Condensed project context (sessions, threads,
                         decisions, friction trends)
+  get_session_detail    Full markdown of a specific session note
   list_projects         All projects with session counts and date ranges
+  search_sessions       Search/filter sessions by query, project, files,
+                        date range, friction score
 .PP
-Configure in Claude Code's settings:
-  {
-    "mcpServers": {
-      "vibe\-vault": {
-        "command": "vv",
-        "args": ["mcp"]
-      }
-    }
-  }
+Setup:
+  vv mcp install        # adds vibe\-vault to ~/.claude/settings.json
+  (restart Claude Code)
+.PP
+Verify — after restarting Claude Code, ask it to "list vibe\-vault
+projects" or "get project context for <project>". The agent will
+call the MCP tools automatically.
 .PP
 The server logs tool calls to stderr for observability.
 .SH SEE ALSO
 .BR vv (1),
-.BR vv\-inject (1)
+.BR vv\-inject (1),
+.BR vv\-mcp\-install (1),
+.BR vv\-mcp\-uninstall (1)

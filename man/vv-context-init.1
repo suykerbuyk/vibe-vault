@@ -1,25 +1,30 @@
-.TH VV-CONTEXT-INIT 1 "2026-03-09" "vv 0.7.2-4-g600be84" "Vibe-Vault Manual"
+.TH VV-CONTEXT-INIT 1 "2026-03-09" "vv 0.7.3" "Vibe-Vault Manual"
 .SH NAME
 vv-context-init \- scaffold vault\-resident context for a project
 .SH SYNOPSIS
 .B vv context init [\-\-project <name>] [\-\-force]
 .SH DESCRIPTION
-Creates vault\-resident context files for the current project:
+First\-time setup for a project. Run this once from your repo root.
 .PP
-Vault\-side (in Projects/{project}/):
-  resume.md        AI working context skeleton
-  iterations.md    Iteration narratives skeleton
-  tasks/           Task directory with done/ subdirectory
+Creates vault\-side context files:
+  resume.md        AI working context (current state, open threads)
+  iterations.md    Iteration history (append\-only archive)
+  workflow.md      AI behavioral rules and workflow standards
+  tasks/           Task tracking directory
+  commands/        Slash commands (restart, wrap, license, makefile)
 .PP
-Repo\-side (in current directory):
-  CLAUDE.md              Vault pointer (workflow rules in vault\-side workflow.md)
-  .claude/commands/restart.md  Session resume command
-  .claude/commands/wrap.md     Session wrap command
+Creates repo\-side files:
+  CLAUDE.md            Symlink into vault (loaded by AI agents)
+  .claude/commands/    Symlink to vault commands (slash commands)
+  .vibe\-vault.toml     Project identity file (committed to repo)
 .PP
-Also ensures .gitignore has entries for CLAUDE.md and commit.msg.
+The .vibe\-vault.toml is created with all values commented out. While
+commented, vv uses heuristics (git remote, directory name) to detect
+the project. Uncomment values to override detection — useful when
+the git remote name doesn't match your project name.
 .PP
-Existing files are skipped unless \-\-force is specified. Project name
-is auto\-detected from git remote or directory name.
+Project name is auto\-detected from .vibe\-vault.toml, git remote, or
+directory name. Existing files are skipped unless \-\-force is specified.
 .SH OPTIONS
 .TP
 .B \-\-project <name>
@@ -36,4 +41,4 @@ vv context init \-\-force               Overwrite existing files
 .SH SEE ALSO
 .BR vv (1),
 .BR vv\-context (1),
-.BR vv\-context\-migrate (1)
+.BR vv\-context\-sync (1)

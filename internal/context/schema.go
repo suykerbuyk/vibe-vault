@@ -102,7 +102,7 @@ func migrate0to1(ctx MigrationContext) ([]FileAction, error) {
 	if err := WriteVersion(ctx.AgentctxPath, vf); err != nil {
 		return nil, err
 	}
-	return []FileAction{{Path: ".version", Action: "CREATE"}}, nil
+	return []FileAction{{Path: ".version", Action: "CREATE", Location: "vault"}}, nil
 }
 
 // migrate1to2 is implemented in sync.go (adds agentctx symlink, relative paths).

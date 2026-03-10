@@ -99,8 +99,9 @@ func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*P
 
 		if opts.DryRun {
 			psr.Actions = append(psr.Actions, FileAction{
-				Path:   fmt.Sprintf("migration %d→%d", m.From, m.To),
-				Action: "DRY-RUN",
+				Path:     fmt.Sprintf("migration %d→%d", m.From, m.To),
+				Action:   "DRY-RUN",
+				Location: "",
 			})
 			psr.ToVersion = m.To
 			continue
@@ -192,8 +193,9 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun bool) []File
 
 		if dryRun {
 			actions = append(actions, FileAction{
-				Path:   "commands/" + e.Name(),
-				Action: "DRY-RUN",
+				Path:     "commands/" + e.Name(),
+				Action:   "DRY-RUN",
+				Location: "vault",
 			})
 			continue
 		}
@@ -210,8 +212,9 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun bool) []File
 			continue
 		}
 		actions = append(actions, FileAction{
-			Path:   "commands/" + e.Name(),
-			Action: "CREATE",
+			Path:     "commands/" + e.Name(),
+			Action:   "CREATE",
+			Location: "vault",
 		})
 	}
 	return actions
@@ -227,7 +230,7 @@ func migrate3to4(ctx MigrationContext) ([]FileAction, error) {
 	claudeContent := readEmbedded("CLAUDE.md")
 	claudeVault := filepath.Join(ctx.AgentctxPath, "CLAUDE.md")
 	action := safeWrite(claudeVault, claudeContent, false)
-	actions = append(actions, FileAction{Path: "agentctx/CLAUDE.md", Action: action})
+	actions = append(actions, FileAction{Path: "agentctx/CLAUDE.md", Action: action, Location: "vault"})
 
 	// Ensure vault-side directories for all .claude/ subdirs
 	for _, sub := range claudeSubdirs {
@@ -245,7 +248,7 @@ func migrate3to4(ctx MigrationContext) ([]FileAction, error) {
 		os.Remove(claudeMDPath)
 	}
 	linkAction := safeSymlink(claudeMDPath, filepath.Join("agentctx", "CLAUDE.md"), true)
-	actions = append(actions, FileAction{Path: "CLAUDE.md", Action: linkAction})
+	actions = append(actions, FileAction{Path: "CLAUDE.md", Action: linkAction, Location: "repo"})
 
 	// Create .claude/ subdirectory symlinks through agentctx
 	dotClaude := filepath.Join(ctx.RepoPath, ".claude")
@@ -254,7 +257,7 @@ func migrate3to4(ctx MigrationContext) ([]FileAction, error) {
 		link := filepath.Join(dotClaude, sub)
 		target := filepath.Join("..", "agentctx", sub)
 		subAction := safeSymlink(link, target, true)
-		actions = append(actions, FileAction{Path: ".claude/" + sub, Action: subAction})
+		actions = append(actions, FileAction{Path: ".claude/" + sub, Action: subAction, Location: "repo"})
 	}
 
 	return actions, nil
@@ -266,7 +269,7 @@ func migrate2to3(ctx MigrationContext) ([]FileAction, error) {
 
 	cfgPath := filepath.Join(ctx.AgentctxPath, "config.toml")
 	action := safeWrite(cfgPath, config.ProjectConfigTemplate(), false)
-	actions = append(actions, FileAction{Path: "config.toml", Action: action})
+	actions = append(actions, FileAction{Path: "config.toml", Action: action, Location: "vault"})
 
 	return actions, nil
 }
@@ -289,13 +292,13 @@ func migrate1to2(ctx MigrationContext) ([]FileAction, error) {
 	// 1. Create agentctx symlink at repo root
 	agentctxLink := filepath.Join(ctx.RepoPath, "agentctx")
 	linkAction := safeSymlink(agentctxLink, ctx.AgentctxPath, ctx.Force)
-	actions = append(actions, FileAction{Path: "agentctx", Action: linkAction})
+	actions = append(actions, FileAction{Path: "agentctx", Action: linkAction, Location: "repo"})
 
 	// 2. Rewrite CLAUDE.md to relative paths
 	claudeMDPath := filepath.Join(ctx.RepoPath, "CLAUDE.md")
 	claudeContent := readEmbedded("CLAUDE.md")
 	safeWrite(claudeMDPath, claudeContent, true)
-	actions = append(actions, FileAction{Path: "CLAUDE.md", Action: "UPDATE"})
+	actions = append(actions, FileAction{Path: "CLAUDE.md", Action: "UPDATE", Location: "repo"})
 
 	// 3. Replace .claude/ subdirectories with relative symlinks through agentctx
 	dotClaude := filepath.Join(ctx.RepoPath, ".claude")
@@ -304,7 +307,7 @@ func migrate1to2(ctx MigrationContext) ([]FileAction, error) {
 		link := filepath.Join(dotClaude, sub)
 		target := filepath.Join("..", "agentctx", sub)
 		safeSymlink(link, target, true)
-		actions = append(actions, FileAction{Path: ".claude/" + sub, Action: "UPDATE"})
+		actions = append(actions, FileAction{Path: ".claude/" + sub, Action: "UPDATE", Location: "repo"})
 	}
 
 	// 4. Add agentctx to .gitignore
@@ -313,7 +316,7 @@ func migrate1to2(ctx MigrationContext) ([]FileAction, error) {
 		return actions, err
 	}
 	if giAction != "" {
-		actions = append(actions, FileAction{Path: ".gitignore", Action: giAction})
+		actions = append(actions, FileAction{Path: ".gitignore", Action: giAction, Location: "repo"})
 	}
 
 	return actions, nil

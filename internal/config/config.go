@@ -26,6 +26,12 @@ type Config struct {
 	Friction   FrictionConfig   `toml:"friction"`
 	Pricing    PricingConfig    `toml:"pricing"`
 	History    HistoryConfig    `toml:"history"`
+	MCP        MCPConfig        `toml:"mcp"`
+}
+
+// MCPConfig controls MCP server behavior.
+type MCPConfig struct {
+	DefaultMaxTokens int `toml:"default_max_tokens"`
 }
 
 // HistoryConfig controls history.md pruning and decay behavior.
@@ -111,6 +117,9 @@ func DefaultConfig() Config {
 			TimelineWindowDays:   30,
 			DecisionStaleDays:    90,
 			KeyFilesRecencyBoost: 3,
+		},
+		MCP: MCPConfig{
+			DefaultMaxTokens: 4000,
 		},
 	}
 }
@@ -245,6 +254,9 @@ func (c Config) Overlay(projectConfigPath string) Config {
 	}
 	if md.IsDefined("history", "key_files_recency_boost") {
 		c.History.KeyFilesRecencyBoost = overlay.History.KeyFilesRecencyBoost
+	}
+	if md.IsDefined("mcp", "default_max_tokens") {
+		c.MCP.DefaultMaxTokens = overlay.MCP.DefaultMaxTokens
 	}
 
 	return c

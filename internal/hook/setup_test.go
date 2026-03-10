@@ -377,3 +377,207 @@ func TestUninstall_CleansEmptyHooksMap(t *testing.T) {
 		t.Error("empty hooks map should be removed entirely")
 	}
 }
+
+// --- MCP install/uninstall tests ---
+
+func hasMCP(settings map[string]any) bool {
+	servers, ok := settings["mcpServers"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = servers[mcpServerName]
+	return ok
+}
+
+func TestInstallMCP_NoFile(t *testing.T) {
+	home := setupHome(t)
+
+	if err := InstallMCP(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := settingsPath(home)
+	settings := readJSON(t, path)
+	if !hasMCP(settings) {
+		t.Error("missing vibe-vault MCP server entry")
+	}
+}
+
+func TestInstallMCP_ExistingSettings(t *testing.T) {
+	home := setupHome(t)
+	path := settingsPath(home)
+	writeJSON(t, path, map[string]any{
+		"permissions": map[string]any{"allow": true},
+	})
+
+	if err := InstallMCP(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	if !hasMCP(settings) {
+		t.Error("missing vibe-vault MCP server entry")
+	}
+	if _, ok := settings["permissions"]; !ok {
+		t.Error("existing 'permissions' key was lost")
+	}
+}
+
+func TestInstallMCP_PreservesExistingServers(t *testing.T) {
+	home := setupHome(t)
+	path := settingsPath(home)
+	writeJSON(t, path, map[string]any{
+		"mcpServers": map[string]any{
+			"other-tool": map[string]any{
+				"command": "other",
+				"args":    []any{"serve"},
+			},
+		},
+	})
+
+	if err := InstallMCP(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	if !hasMCP(settings) {
+		t.Error("missing vibe-vault MCP server entry")
+	}
+	servers := settings["mcpServers"].(map[string]any)
+	if _, ok := servers["other-tool"]; !ok {
+		t.Error("existing MCP server was lost")
+	}
+}
+
+func TestInstallMCP_Idempotent(t *testing.T) {
+	home := setupHome(t)
+
+	if err := InstallMCP(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := settingsPath(home)
+	first, _ := os.ReadFile(path)
+
+	if err := InstallMCP(); err != nil {
+		t.Fatal(err)
+	}
+
+	second, _ := os.ReadFile(path)
+	if string(first) != string(second) {
+		t.Error("idempotent install modified the file")
+	}
+}
+
+func TestInstallMCP_CreatesBackup(t *testing.T) {
+	home := setupHome(t)
+	path := settingsPath(home)
+	writeJSON(t, path, map[string]any{"existing": "data"})
+
+	origContent, _ := os.ReadFile(path)
+
+	if err := InstallMCP(); err != nil {
+		t.Fatal(err)
+	}
+
+	backupContent, err := os.ReadFile(path + ".vv.bak")
+	if err != nil {
+		t.Fatal("backup file should exist")
+	}
+	if string(origContent) != string(backupContent) {
+		t.Error("backup content should match original file")
+	}
+}
+
+func TestUninstallMCP_Removes(t *testing.T) {
+	home := setupHome(t)
+
+	if err := InstallMCP(); err != nil {
+		t.Fatal(err)
+	}
+	if err := UninstallMCP(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := settingsPath(home)
+	settings := readJSON(t, path)
+	if hasMCP(settings) {
+		t.Error("vibe-vault MCP server should be removed")
+	}
+}
+
+func TestUninstallMCP_PreservesOtherServers(t *testing.T) {
+	home := setupHome(t)
+	path := settingsPath(home)
+	writeJSON(t, path, map[string]any{
+		"mcpServers": map[string]any{
+			"vibe-vault": map[string]any{
+				"command": "vv",
+				"args":    []any{"mcp"},
+			},
+			"other-tool": map[string]any{
+				"command": "other",
+			},
+		},
+	})
+
+	if err := UninstallMCP(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	servers := settings["mcpServers"].(map[string]any)
+	if _, ok := servers["vibe-vault"]; ok {
+		t.Error("vibe-vault should be removed")
+	}
+	if _, ok := servers["other-tool"]; !ok {
+		t.Error("other-tool should be preserved")
+	}
+}
+
+func TestUninstallMCP_CleansEmptyMap(t *testing.T) {
+	home := setupHome(t)
+
+	if err := InstallMCP(); err != nil {
+		t.Fatal(err)
+	}
+	if err := UninstallMCP(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := settingsPath(home)
+	settings := readJSON(t, path)
+	if _, ok := settings["mcpServers"]; ok {
+		t.Error("empty mcpServers map should be removed entirely")
+	}
+}
+
+func TestUninstallMCP_NotInstalled(t *testing.T) {
+	setupHome(t)
+
+	err := UninstallMCP()
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+func TestInstallMCP_WithHooks(t *testing.T) {
+	home := setupHome(t)
+
+	// Install hooks first, then MCP — both should coexist
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	if err := InstallMCP(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := settingsPath(home)
+	settings := readJSON(t, path)
+	if !hasMCP(settings) {
+		t.Error("missing vibe-vault MCP server entry")
+	}
+	if !hasEvent(settings, "SessionEnd") {
+		t.Error("hook should still be present")
+	}
+}

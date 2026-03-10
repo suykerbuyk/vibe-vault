@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/identity"
 	"github.com/johns/vibe-vault/internal/session"
 )
 
@@ -57,6 +58,16 @@ func DetectProject(thread *Thread, cfg config.Config) session.Info {
 		}
 	}
 
+	// Try identity file on resolved CWD
+	if info.CWD != "" {
+		if id, _ := identity.Load(info.CWD); id != nil {
+			if info.Project == "" {
+				info.Project = id.Project.Name
+			}
+			// Domain from identity set below (after detectDomain)
+		}
+	}
+
 	// Final fallback
 	if info.Project == "" {
 		info.Project = "zed"
@@ -64,6 +75,13 @@ func DetectProject(thread *Thread, cfg config.Config) session.Info {
 
 	// Domain detection via config paths
 	info.Domain = detectDomain(info.CWD, cfg)
+
+	// Identity domain overrides config-based domain detection
+	if info.CWD != "" {
+		if id, _ := identity.Load(info.CWD); id != nil && id.Project.Domain != "" {
+			info.Domain = id.Project.Domain
+		}
+	}
 
 	return info
 }

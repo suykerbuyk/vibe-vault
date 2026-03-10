@@ -1,21 +1,22 @@
-.TH VV-CONTEXT-MIGRATE 1 "2026-03-09" "vv 0.7.2-4-g600be84" "Vibe-Vault Manual"
+.TH VV-CONTEXT-MIGRATE 1 "2026-03-09" "vv 0.7.3" "Vibe-Vault Manual"
 .SH NAME
-vv-context-migrate \- copy existing local context files to vault
+vv-context-migrate \- one\-time import of legacy local context files to vault
 .SH SYNOPSIS
 .B vv context migrate [\-\-project <name>] [\-\-force]
 .SH DESCRIPTION
-Copies existing repo\-local context files to the vault:
+One\-time operation for projects that have local context files from
+before vault\-resident context was introduced. Most users should use
+"vv context init" instead.
 .PP
-  RESUME.md  → Projects/{project}/resume.md
-  HISTORY.md → Projects/{project}/iterations.md
-  tasks/     → Projects/{project}/tasks/ (recursive)
+Copies local files into the vault:
+  RESUME.md  → Projects/{project}/agentctx/resume.md
+  HISTORY.md → Projects/{project}/agentctx/iterations.md
+  tasks/     → Projects/{project}/agentctx/tasks/ (recursive)
 .PP
-Then force\-updates repo\-side files (CLAUDE.md, .claude/commands/) to
-point at the vault. Local originals are NOT deleted — remove them
-manually after verifying the migration.
+Then sets up repo\-side symlinks (same as init). Local originals are
+preserved — remove them manually after verifying the migration.
 .PP
-Files that don't exist locally are skipped. Vault files that already
-exist are skipped unless \-\-force is specified.
+After migrating, use "vv context sync" for future updates.
 .SH OPTIONS
 .TP
 .B \-\-project <name>

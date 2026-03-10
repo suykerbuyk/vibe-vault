@@ -151,6 +151,7 @@ func runInit() {
 	fmt.Printf("  1. Open %s in Obsidian\n", absTarget)
 	fmt.Println("  2. Install community plugins: Dataview, Templater")
 	fmt.Println("  3. Run: vv hook install")
+	fmt.Println("  4. Run: vv mcp install")
 
 	switch action {
 	case "created":
@@ -229,7 +230,7 @@ func runContext() {
 			}
 			fmt.Printf("Context initialized for project: %s\n\n", result.Project)
 			for _, a := range result.Actions {
-				fmt.Printf("  %-8s %s\n", a.Action, a.Path)
+				printAction(a)
 			}
 			return
 		case "migrate":
@@ -252,7 +253,7 @@ func runContext() {
 			}
 			fmt.Printf("Context migrated for project: %s\n\n", result.Project)
 			for _, a := range result.Actions {
-				fmt.Printf("  %-8s %s\n", a.Action, a.Path)
+				printAction(a)
 			}
 			fmt.Println("\nLocal originals preserved — remove manually after verifying.")
 			return
@@ -287,7 +288,7 @@ func runContext() {
 					fmt.Printf("%s:\n", psr.Project)
 				}
 				for _, a := range psr.Actions {
-					fmt.Printf("  %-8s %s\n", a.Action, a.Path)
+					printAction(a)
 				}
 				if psr.RepoSkipped {
 					fmt.Printf("  note: %s\n", psr.RepoNote)
@@ -859,15 +860,42 @@ func runZedList(args []string) {
 }
 
 func runMcp() {
-	if wantsHelp(os.Args[2:]) {
+	args := os.Args[2:]
+	if len(args) > 0 {
+		switch args[0] {
+		case "install":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdMcpInstall))
+				return
+			}
+			if err := hook.InstallMCP(); err != nil {
+				fatal("%v", err)
+			}
+			return
+		case "uninstall":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdMcpUninstall))
+				return
+			}
+			if err := hook.UninstallMCP(); err != nil {
+				fatal("%v", err)
+			}
+			return
+		}
+	}
+	if wantsHelp(args) {
 		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdMcp))
 		return
 	}
 	cfg := mustLoadConfig()
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 	srv := mcp.NewServer(mcp.ServerInfo{Name: "vibe-vault", Version: help.Version}, logger)
-	srv.RegisterTool(mcp.NewGetProjectContextTool(cfg.StateDir()))
-	srv.RegisterTool(mcp.NewListProjectsTool(cfg.StateDir()))
+	srv.RegisterTool(mcp.NewGetProjectContextTool(cfg))
+	srv.RegisterTool(mcp.NewListProjectsTool(cfg))
+	srv.RegisterTool(mcp.NewSearchSessionsTool(cfg))
+	srv.RegisterTool(mcp.NewGetKnowledgeTool(cfg))
+	srv.RegisterTool(mcp.NewGetSessionDetailTool(cfg))
+	srv.RegisterTool(mcp.NewGetFrictionTrendsTool(cfg))
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	if err := srv.Serve(ctx, os.Stdin, os.Stdout); err != nil {
@@ -1371,6 +1399,14 @@ func contextOpts(cfg config.Config) index.ContextOptions {
 		TimelineWindowDays:   cfg.History.TimelineWindowDays,
 		DecisionStaleDays:    cfg.History.DecisionStaleDays,
 		KeyFilesRecencyBoost: cfg.History.KeyFilesRecencyBoost,
+	}
+}
+
+func printAction(a vvcontext.FileAction) {
+	if a.Location != "" {
+		fmt.Printf("  %-8s [%s] %s\n", a.Action, a.Location, a.Path)
+	} else {
+		fmt.Printf("  %-8s %s\n", a.Action, a.Path)
 	}
 }
 

@@ -92,6 +92,110 @@ func Uninstall() error {
 	return nil
 }
 
+const mcpServerName = "vibe-vault"
+const mcpCommand = "vv"
+
+// InstallMCP adds the vibe-vault MCP server entry to ~/.claude/settings.json.
+// Idempotent: returns nil when already installed.
+func InstallMCP() error {
+	path, err := SettingsPath()
+	if err != nil {
+		return err
+	}
+
+	settings, err := readSettings(path)
+	if err != nil {
+		return err
+	}
+
+	if isMCPInstalled(settings) {
+		fmt.Fprintf(os.Stderr, "vibe-vault MCP server already configured in %s\n", config.CompressHome(path))
+		return nil
+	}
+
+	if err := backup(path); err != nil {
+		return err
+	}
+
+	addMCP(settings)
+
+	if err := writeSettings(path, settings); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "vibe-vault MCP server installed in %s\n", config.CompressHome(path))
+	fmt.Fprintf(os.Stderr, "Restart Claude Code to activate.\n")
+	return nil
+}
+
+// UninstallMCP removes the vibe-vault MCP server entry from ~/.claude/settings.json.
+// Idempotent: returns nil when not installed.
+func UninstallMCP() error {
+	path, err := SettingsPath()
+	if err != nil {
+		return err
+	}
+
+	settings, err := readSettings(path)
+	if err != nil {
+		return err
+	}
+
+	if !isMCPInstalled(settings) {
+		fmt.Fprintf(os.Stderr, "vibe-vault MCP server not found in %s\n", config.CompressHome(path))
+		return nil
+	}
+
+	if err := backup(path); err != nil {
+		return err
+	}
+
+	removeMCP(settings)
+
+	if err := writeSettings(path, settings); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "vibe-vault MCP server removed from %s\n", config.CompressHome(path))
+	return nil
+}
+
+// isMCPInstalled returns true when mcpServers contains a vibe-vault entry.
+func isMCPInstalled(settings map[string]any) bool {
+	servers, ok := settings["mcpServers"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = servers[mcpServerName]
+	return ok
+}
+
+// addMCP adds the vibe-vault MCP server entry.
+func addMCP(settings map[string]any) {
+	servers, ok := settings["mcpServers"].(map[string]any)
+	if !ok {
+		servers = make(map[string]any)
+		settings["mcpServers"] = servers
+	}
+	servers[mcpServerName] = map[string]any{
+		"command": mcpCommand,
+		"args":    []any{"mcp"},
+	}
+}
+
+// removeMCP removes the vibe-vault MCP server entry.
+// Cleans up the mcpServers map if empty.
+func removeMCP(settings map[string]any) {
+	servers, ok := settings["mcpServers"].(map[string]any)
+	if !ok {
+		return
+	}
+	delete(servers, mcpServerName)
+	if len(servers) == 0 {
+		delete(settings, "mcpServers")
+	}
+}
+
 // readSettings reads and parses the settings file.
 // Returns an empty map if the file doesn't exist or is empty.
 func readSettings(path string) (map[string]any, error) {

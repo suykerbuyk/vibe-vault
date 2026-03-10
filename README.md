@@ -161,37 +161,17 @@ To remove the hooks later: `vv hook uninstall`
 - **PreCompact** captures a checkpoint before context compaction, preserving
   full context that would otherwise be lost to summarization
 
-<details>
-<summary>Manual alternative</summary>
+### Enable the MCP Server
 
-Add this to `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "SessionEnd": [
-      {
-        "matcher": "",
-        "hooks": [{"type": "command", "command": "vv hook"}]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [{"type": "command", "command": "vv hook"}]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "",
-        "hooks": [{"type": "command", "command": "vv hook"}]
-      }
-    ]
-  }
-}
+```bash
+vv mcp install
 ```
 
-</details>
+This registers the vibe-vault MCP server in `~/.claude/settings.json` so
+Claude Code can query project context, search sessions, and access friction
+trends on demand. Restart Claude Code after running this command.
+
+To remove the MCP server later: `vv mcp uninstall`
 
 ### Verify Setup
 
@@ -259,7 +239,8 @@ redirects, undo requests, quality complaints) and computes a composite friction
 score (0-100) from correction density, token efficiency, file retry patterns,
 error cycles, and recurring open threads.
 
-**Project detection** extracts the repository name from `git remote get-url
+**Project detection** checks for a `.vibe-vault.toml` identity file first
+(highest priority), then extracts the repository name from `git remote get-url
 origin` (stable across worktrees, renames, and machines), falling back to
 `filepath.Base(cwd)` when git isn't available.
 
@@ -296,6 +277,8 @@ deterministic heuristics rather than embeddings.
 | `vv inject [--project X]` | Output session-start context payload |
 | `vv context [init \| migrate \| sync]` | Manage vault-resident AI context files |
 | `vv mcp` | Start MCP server for AI agent integration |
+| `vv mcp install` | Register MCP server in `~/.claude/settings.json` |
+| `vv mcp uninstall` | Remove MCP server from `~/.claude/settings.json` |
 | `vv templates [list \| diff \| show \| reset]` | Inspect, compare, and reset vault templates |
 | `vv version` | Print version |
 
@@ -358,24 +341,15 @@ vv context sync --dry-run             # preview changes without modifying files
 
 **MCP server for AI agent integration:**
 ```bash
-vv mcp    # starts JSON-RPC 2.0 server on stdin/stdout
+vv mcp install      # register in ~/.claude/settings.json (then restart Claude Code)
+vv mcp uninstall    # remove from settings
+vv mcp              # start server directly (used by Claude Code, not run manually)
 ```
 
-Configure in `~/.claude/.mcp.json`:
-```json
-{
-  "mcpServers": {
-    "vibe-vault": {
-      "command": "vv",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-This exposes two tools: `get_project_context` (condensed project context) and
-`list_projects` (all projects with session counts). Claude Code calls these on
-demand instead of requiring pre-loaded context.
+This exposes 6 tools: `get_project_context`, `list_projects`,
+`search_sessions`, `get_knowledge`, `get_session_detail`, and
+`get_friction_trends`. Claude Code calls these on demand instead of requiring
+pre-loaded context.
 
 **Inspect and reset vault templates:**
 ```bash
