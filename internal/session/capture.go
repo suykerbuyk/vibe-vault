@@ -156,14 +156,22 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 		date = time.Now().Format("2006-01-02")
 	}
 
-	// Reuse existing iteration when overwriting to avoid duplicate note files
+	// Reuse existing iteration when overwriting to avoid duplicate note files.
+	// Exception: when the project changed (e.g., reprocessing moves a session
+	// from "_unknown" to a detected project), assign a fresh iteration for the
+	// new project to avoid gaps and collisions.
 	var iteration int
 	if opts.Force || exists {
 		if exists {
-			iteration = existing.Iteration
+			if existing.Project != info.Project {
+				// Project changed — get fresh iteration for the new project
+				iteration = idx.NextIteration(info.Project, date)
+			} else {
+				iteration = existing.Iteration
+			}
 			// Clean up old note if path will change (e.g., project reassignment)
 			oldPath := filepath.Join(cfg.VaultPath, existing.NotePath)
-			newRelPath := render.NoteRelPath(info.Project, date, existing.Iteration)
+			newRelPath := render.NoteRelPath(info.Project, date, iteration)
 			newPath := filepath.Join(cfg.VaultPath, newRelPath)
 			if oldPath != newPath {
 				os.Remove(oldPath)

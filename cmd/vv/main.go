@@ -1065,15 +1065,23 @@ func runReprocess() {
 	cfg := mustLoadConfig()
 	archiveDir := filepath.Join(cfg.StateDir(), "archive")
 	projectFilter := flagValue(os.Args[2:], "--project")
+	sourceFilter := flagValue(os.Args[2:], "--source")
+	dryRun := hasFlag(os.Args[2:], "--dry-run")
 
 	// Create LLM provider for enrichment.
-	provider, providerErr := llm.NewProvider(cfg.Enrichment)
-	if providerErr != nil {
-		log.Printf("warning: LLM provider init failed: %v", providerErr)
+	var provider llm.Provider
+	if !dryRun {
+		var providerErr error
+		provider, providerErr = llm.NewProvider(cfg.Enrichment)
+		if providerErr != nil {
+			log.Printf("warning: LLM provider init failed: %v", providerErr)
+		}
 	}
 
-	// Report enrichment mode.
-	if providerName, model, reason := llm.Available(cfg.Enrichment); reason == "" {
+	// Report mode.
+	if dryRun {
+		fmt.Println("Dry run — no files will be written")
+	} else if providerName, model, reason := llm.Available(cfg.Enrichment); reason == "" {
 		fmt.Printf("Reprocessing with LLM enrichment (%s/%s)\n", providerName, model)
 	} else {
 		fmt.Println("Reprocessing with heuristic extraction only (no LLM configured)")
@@ -1091,9 +1099,37 @@ func runReprocess() {
 		if projectFilter != "" && entry.Project != projectFilter {
 			continue
 		}
+		// Source filter: "zed" matches Source=="zed" or zed: transcript prefix;
+		// "claude-code" matches empty Source field.
+		if sourceFilter != "" {
+			isZed := entry.Source == "zed" || strings.HasPrefix(entry.TranscriptPath, "zed:")
+			if sourceFilter == "zed" && !isZed {
+				continue
+			}
+			if sourceFilter != "zed" && isZed {
+				continue
+			}
+		}
 
 		// Zed entries: re-capture from threads.db
 		if entry.Source == "zed" || strings.HasPrefix(entry.TranscriptPath, "zed:") {
+			if dryRun {
+				result, err := dryRunZedEntry(entry, cfg)
+				if err != nil {
+					log.Printf("error (dry-run) zed entry %s: %v", entry.SessionID, err)
+					errors++
+					continue
+				}
+				if result.newProject != entry.Project {
+					fmt.Printf("  %s → %s (was %s)\n", entry.SessionID[:min(12, len(entry.SessionID))], result.newProject, entry.Project)
+					processed++
+					affectedProjects[result.newProject] = true
+				} else {
+					skipped++
+				}
+				continue
+			}
+
 			result, err := reprocessZedEntry(entry, cfg)
 			if err != nil {
 				log.Printf("error reprocessing zed entry %s: %v", entry.SessionID, err)
@@ -1107,6 +1143,11 @@ func runReprocess() {
 			processed++
 			affectedProjects[result.Project] = true
 			fmt.Printf("  %s → %s\n", result.Project, result.NotePath)
+			continue
+		}
+
+		if dryRun {
+			skipped++ // dry-run for Claude Code entries not implemented
 			continue
 		}
 
@@ -1177,7 +1218,7 @@ func runReprocess() {
 	}
 
 	// Regenerate context docs for affected projects
-	if len(affectedProjects) > 0 {
+	if !dryRun && len(affectedProjects) > 0 {
 		idx, _ = index.Load(cfg.StateDir())
 		if _, err := index.GenerateContext(idx, cfg.VaultPath, contextOpts(cfg)); err != nil {
 			log.Printf("warning: generate context: %v", err)
@@ -1188,7 +1229,32 @@ func runReprocess() {
 		}
 	}
 
-	fmt.Printf("\nreprocessed: %d, skipped: %d, errors: %d\n", processed, skipped, errors)
+	label := "reprocessed"
+	if dryRun {
+		label = "would reprocess"
+	}
+	fmt.Printf("\n%s: %d, skipped: %d, errors: %d\n", label, processed, skipped, errors)
+}
+
+// dryRunResult holds the detection result for a dry-run reprocess.
+type dryRunResult struct {
+	newProject string
+}
+
+// dryRunZedEntry runs detection on a Zed entry without writing anything.
+func dryRunZedEntry(entry index.SessionEntry, cfg config.Config) (*dryRunResult, error) {
+	dbPath, threadID, ok := parseZedTranscriptPath(entry.TranscriptPath)
+	if !ok {
+		return nil, fmt.Errorf("invalid zed transcript path: %s", entry.TranscriptPath)
+	}
+
+	thread, err := zed.QueryThread(dbPath, threadID)
+	if err != nil {
+		return nil, fmt.Errorf("query thread: %w", err)
+	}
+
+	info := zed.DetectProject(thread, cfg)
+	return &dryRunResult{newProject: info.Project}, nil
 }
 
 // parseZedTranscriptPath splits "zed:/path/to/db#thread-id" into db path and thread ID.
