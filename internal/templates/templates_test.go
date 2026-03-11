@@ -12,8 +12,8 @@ import (
 func TestNew(t *testing.T) {
 	reg := New()
 	entries := reg.List()
-	if len(entries) != 14 {
-		t.Errorf("expected 14 entries, got %d", len(entries))
+	if len(entries) != 15 {
+		t.Errorf("expected 15 entries, got %d", len(entries))
 		for _, e := range entries {
 			t.Logf("  %s", e.RelPath)
 		}
@@ -148,8 +148,8 @@ func TestResetAll(t *testing.T) {
 		t.Fatalf("reset all: %v", err)
 	}
 
-	if len(actions) != 14 {
-		t.Errorf("expected 14 actions, got %d", len(actions))
+	if len(actions) != 15 {
+		t.Errorf("expected 15 actions, got %d", len(actions))
 	}
 
 	// All should now be "default"

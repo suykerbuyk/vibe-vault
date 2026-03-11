@@ -223,8 +223,8 @@ vault structure (dashboards, `.obsidian/` config, scripts).
 
 **Agentctx templates** (`templates/agentctx/`) — used by `vv context init` to
 scaffold per-project AI context. Embedded via `//go:embed` in `templates/embed.go`.
-Contains 9 `.md` files: CLAUDE.md, workflow.md, resume.md, iterations.md,
-README.md, and commands/{restart,wrap,license,makefile}.md.
+Contains 11 `.md` files: CLAUDE.md, workflow.md, resume.md, iterations.md,
+README.md, and commands/{restart,wrap,license,makefile,review-plan,cancel-plan}.md.
 
 Template resolution (`resolveTemplate()` in `template.go`):
 1. Check vault `Templates/agentctx/{path}` — allows per-vault customization

@@ -1139,8 +1139,8 @@ func TestIntegration(t *testing.T) {
 		// Response 1: tools/list — should have tools array
 		toolsResult := responses[1]["result"].(map[string]interface{})
 		tools := toolsResult["tools"].([]interface{})
-		if len(tools) != 6 {
-			t.Errorf("tools/list: expected 6 tools, got %d", len(tools))
+		if len(tools) != 7 {
+			t.Errorf("tools/list: expected 7 tools, got %d", len(tools))
 		}
 		toolNames := make(map[string]bool)
 		for _, tool := range tools {

@@ -242,3 +242,35 @@ Key architectural and design decisions in vibe-vault, with rationale.
     translates at parse time so downstream narrative/prose extraction can use
     the same canonical names as Claude Code sessions. This avoids conditional
     logic throughout the pipeline.
+
+34. **Cross-project introspection via shared vault architecture:** The vault is
+    a unified knowledge graph — all projects' session notes, task files,
+    knowledge documents, and iteration histories coexist under
+    `Projects/{project}/`. An AI agent working in project A can read structured
+    history from project B by accessing the vault directly (session notes,
+    `tasks/cancelled/`, `knowledge.md`), through `vv inject` (which assembles
+    context for the current project from the shared index), or through MCP tools
+    (`list_projects`, `search_sessions`, `get_project_context`) which query
+    across all projects. This emerges naturally from the vault-centric
+    architecture rather than requiring explicit cross-project wiring. The agent
+    never needs to parse Claude Code's internal JSONL transcripts — everything
+    is pre-structured markdown in the vault.
+
+35. **Cancelled plan preservation as institutional memory:** Tasks investigated
+    and found not worth implementing are moved to `tasks/cancelled/` (not
+    deleted) with a cancellation rationale section, and a pointer is added to
+    `knowledge.md`. This serves two purposes: (1) prevents future AI sessions
+    from re-proposing the same work, and (2) preserves the analysis for
+    reference when conditions change. The `/cancel-plan` slash command
+    orchestrates this workflow — disambiguation, rationale drafting, file
+    updates, and cross-reference creation.
+
+36. **Context effectiveness as self-measuring infrastructure:** `vv effectiveness`
+    correlates context depth (number of prior sessions available via inject) with
+    session outcomes (friction score, corrections, duration). Sessions are grouped
+    into cohorts by context depth (none, early, building, mature) and compared
+    using Pearson correlation. `vv reprocess --backfill-context` retroactively
+    populates `ContextAvailable` data on historical sessions, creating a natural
+    before/after dataset. This makes the context pipeline self-measuring — the
+    tool can quantify whether its own context injection improves AI session
+    quality.

@@ -110,6 +110,7 @@ summary — just without the LLM-generated "What Happened", decisions, and threa
 - [Vault Structure](#vault-structure)
 - [LLM Enrichment](#llm-enrichment)
 - [Design Philosophy](#design-philosophy)
+- [Cross-Project Introspection](#cross-project-introspection)
 - [Roadmap — Context as Code](#roadmap--context-as-code)
 - [Development](#development)
 - [License](#license)
@@ -275,6 +276,8 @@ deterministic heuristics rather than embeddings.
 | `vv friction [--project X]` | Show friction analysis and correction patterns |
 | `vv trends [--project X]` | Show metric trends over time |
 | `vv inject [--project X]` | Output session-start context payload |
+| `vv export [--format X]` | Export session data (JSON or CSV) |
+| `vv effectiveness [--project X]` | Analyze context effectiveness on outcomes |
 | `vv context [init \| migrate \| sync]` | Manage vault-resident AI context files |
 | `vv mcp` | Start MCP server for AI agent integration |
 | `vv mcp install` | Register MCP server in `~/.claude/settings.json` |
@@ -346,10 +349,10 @@ vv mcp uninstall    # remove from settings
 vv mcp              # start server directly (used by Claude Code, not run manually)
 ```
 
-This exposes 6 tools: `get_project_context`, `list_projects`,
-`search_sessions`, `get_knowledge`, `get_session_detail`, and
-`get_friction_trends`. Claude Code calls these on demand instead of requiring
-pre-loaded context.
+This exposes 7 tools: `get_project_context`, `list_projects`,
+`search_sessions`, `get_knowledge`, `get_session_detail`,
+`get_friction_trends`, and `get_effectiveness`. Claude Code calls these on
+demand instead of requiring pre-loaded context.
 
 **Inspect and reset vault templates:**
 ```bash
@@ -541,6 +544,50 @@ Every layer degrades gracefully:
 - Index failures are logged as warnings (never blocks note creation)
 - Stdin timeout (2s) prevents the hook from blocking Claude Code
 
+## Cross-Project Introspection
+
+Most AI coding tools are siloed: the agent working on project A has no knowledge
+of what happened in project B. Lessons learned, patterns discovered, tasks
+investigated and rejected — all confined to a single repository's context.
+
+vibe-vault breaks this barrier. Because all projects share a single Obsidian
+vault, an AI agent working in *any* project can read structured session history,
+decisions, friction patterns, and task outcomes from *every other* project. This
+isn't theoretical — it works today through three mechanisms:
+
+**1. Unified vault as knowledge graph.** Session notes, task files, knowledge
+documents, and iteration histories from all projects live in one searchable
+vault. An agent in project A can read `Projects/B/sessions/2026-03-10-06.md`
+to understand what was built, what decisions were made, and what went wrong.
+
+**2. `vv inject` and MCP tools provide structured access.** The `vv inject`
+command and MCP tools (`list_projects`, `search_sessions`, `get_project_context`)
+query across all projects. An agent can ask "what friction patterns exist in
+project B?" or "what was the last session in project C about?" and get structured
+answers from the vault — no JSONL transcript parsing, no Claude Code internals.
+
+**3. Cancelled plans prevent re-litigation.** When a task is investigated and
+found not worth implementing, `/cancel-plan` records the rationale in the
+project's `knowledge.md` and preserves the full analysis in `tasks/cancelled/`.
+Future AI sessions — in the same project or a different one — can discover
+that the work was already evaluated and why it was rejected.
+
+### A Concrete Example
+
+While working on vibe-vault itself, an AI agent was asked about a recent session
+in the recmeet project (a completely separate C++ codebase). Without switching
+projects or loading any transcripts, the agent:
+
+- Read recmeet's session notes directly from the vault
+- Reviewed the task files and discovered a `tasks/cancelled/` directory
+- Understood the cancelled task's rationale and used it to inform a new
+  vibe-vault feature (`/cancel-plan`)
+
+The agent never touched Claude Code's internal storage. Everything came through
+the vault layer — structured markdown files that vibe-vault maintains
+automatically. This is cross-project institutional memory, accessible to any AI
+agent that can read files.
+
 ## Roadmap — Context as Code
 
 vibe-vault started as a session capture tool — a hook that turns transcripts into
@@ -554,9 +601,9 @@ not throwaway interactions; they're the primary record of how AI-assisted softwa
 gets built.
 
 vibe-vault is infrastructure for treating sessions as observable, structured,
-queryable artifacts. The roadmap is organized around three pillars:
+queryable artifacts. The roadmap is organized around four pillars:
 
-### Three Pillars
+### Four Pillars
 
 **1. Project Evolution Tracking** — Session notes are a chronological record of
 how a project was built: what was decided, what was attempted, what failed, what
@@ -578,6 +625,12 @@ this across sessions reveals friction points, model regressions, prompt gaps,
 and workflow bottlenecks. This is the "observability layer" Knox describes —
 built on data vv already captures.
 
+**4. Cross-Project Intelligence** — The shared vault creates a unified knowledge
+layer across all projects. AI agents can learn from decisions made in other
+codebases, avoid repeating investigated-and-rejected approaches, and transfer
+patterns between projects. This emerges naturally from the vault architecture
+rather than requiring explicit knowledge transfer mechanisms.
+
 ### Phase Summary
 
 | Phase | Focus | Status |
@@ -591,6 +644,7 @@ built on data vv already captures.
 | 7 | Behavioral analysis — correction detection, friction scoring, `vv friction` | Complete |
 | 8 | Analytics & trends — dashboards, metric trends, `vv trends` | Complete |
 | 9 | Portable AI memory — vault-resident context, per-project knowledge templates | Complete |
+| 10 | Cross-project intelligence — unified vault queries, cancelled plan preservation, effectiveness analysis | Complete |
 
 ### Context as Code Connections
 
@@ -599,9 +653,9 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 | Knox's Principle | vibe-vault Implementation |
 |------------------|--------------------------|
 | **Observability** — log every context chunk, surface "missing context" signals | Tool usage tracking, friction detection, correction patterns, `vv stats`, `vv friction` |
-| **Testing** — statistical grading across runs, regression detection | `vv trends` anomaly detection, weekly metric tracking, friction trend analysis |
+| **Testing** — statistical grading across runs, regression detection | `vv trends` anomaly detection, weekly metric tracking, `vv effectiveness` context impact analysis |
 | **Version control** — context is versioned, auditable, diffable | Session notes are markdown in git, indexed and cross-linked |
-| **Reuse** — context registries, versioned modules | Per-project `history.md`, semantic summaries, `agentctx/` portable context |
+| **Reuse** — context registries, versioned modules | Per-project `history.md`, semantic summaries, `agentctx/` portable context, cross-project knowledge transfer via shared vault |
 | **CI/CD** — automated context pipelines, auto-refresh | Backfill pipeline, reprocess on upgrade, index rebuild |
 
 ### What's Out of Scope
@@ -633,7 +687,7 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 ### Test Suite
 
-**594 tests** across 25 test packages + **1 integration test** with 22
+**755 tests** across 29 test packages + **1 integration test** with 22
 subtests. The integration test exercises the full pipeline:
 `init` → `process` → `index` → `stats` →
 `backfill` → `archive` → `checkpoint lifecycle` → `friction` →
