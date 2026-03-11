@@ -238,6 +238,12 @@ func runContext() {
 			for _, a := range result.Actions {
 				printAction(a)
 			}
+			fmt.Println()
+			fmt.Println("Next steps:")
+			fmt.Println("  1. Edit .vibe-vault.toml to set your project name, domain, and tags")
+			fmt.Println("  2. Commit .vibe-vault.toml to source control to ensure accurate")
+			fmt.Println("     project tracking across branches, developers, and platforms")
+			fmt.Println("  3. Run 'vv context sync' to propagate shared commands")
 			return
 		case "migrate":
 			if wantsHelp(args[1:]) {
