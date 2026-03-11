@@ -129,7 +129,10 @@ var expectedTerminal = map[string]string{
 		"Usage: vv reprocess [--project <name>]\n" +
 		"\n" +
 		"Flags:\n" +
-		"  --project <name>   Only reprocess sessions for this project\n" +
+		"  --project <name>     Only reprocess sessions for this project\n" +
+		"  --source <name>      Filter by source (zed, claude-code)\n" +
+		"  --dry-run            Show what would be reprocessed without writing\n" +
+		"  --backfill-context   Populate ContextAvailable on entries (no reprocessing)\n" +
 		"\n" +
 		"Re-runs the capture pipeline with Force mode for all (or filtered)\n" +
 		"sessions in the index. Locates transcripts via three-tier lookup:\n" +
@@ -293,6 +296,32 @@ var expectedTerminal = map[string]string{
 		"  vv export --project myproject          Export one project as JSON\n" +
 		"  vv export --format csv > sessions.csv  Export to file\n",
 
+	"effectiveness": "vv effectiveness \u2014 analyze whether context availability improves session outcomes\n" +
+		"\n" +
+		"Usage: vv effectiveness [--project <name>] [--format json]\n" +
+		"\n" +
+		"Flags:\n" +
+		"  --project <name>   Show effectiveness for a specific project only\n" +
+		"  --format <json>    Output as JSON instead of human-readable text\n" +
+		"\n" +
+		"Correlates context depth (number of prior sessions available) with\n" +
+		"session outcomes (friction, corrections, duration). Groups sessions\n" +
+		"into cohorts by context depth and computes Pearson correlation.\n" +
+		"\n" +
+		"Cohorts:\n" +
+		"  none (0)       No prior sessions available\n" +
+		"  early (1-10)   Building initial context\n" +
+		"  building (11-30)  Growing context base\n" +
+		"  mature (30+)   Rich context available\n" +
+		"\n" +
+		"Requires vv reprocess --backfill-context to have been run first to\n" +
+		"populate ContextAvailable data on historical sessions.\n" +
+		"\n" +
+		"Examples:\n" +
+		"  vv effectiveness                       Show all projects\n" +
+		"  vv effectiveness --project myproject   Show one project\n" +
+		"  vv effectiveness --format json         Output as JSON\n",
+
 	"zed": "vv zed \u2014 import Zed agent panel threads\n" +
 		"\n" +
 		"Usage: vv zed <subcommand>\n" +
@@ -378,25 +407,26 @@ func TestFormatUsage(t *testing.T) {
 	expected := fmt.Sprintf("vv v%s \u2014 vibe-vault session capture\n", Version) +
 		"\n" +
 		"Usage:\n" +
-		"  vv init [path] [--git]       Create a new vault (default: ./vibe-vault)\n" +
-		"  vv hook [install | ...]      Hook mode (reads stdin from Claude Code)\n" +
-		"  vv context [init | ...]      Manage vault-resident AI context\n" +
-		"  vv process <file.jsonl>      Process a single transcript file\n" +
-		"  vv index                     Rebuild session index from notes\n" +
-		"  vv backfill [path]           Discover and process historical transcripts\n" +
-		"  vv archive                   Compress transcripts into vault archive\n" +
-		"  vv reprocess [--project X]   Re-generate notes from transcripts\n" +
-		"  vv check                     Validate config, vault, and hook setup\n" +
-		"  vv stats [--project X]       Show session analytics and metrics\n" +
-		"  vv friction [--project X]    Show friction analysis and correction patterns\n" +
-		"  vv trends [--project X]      Show metric trends over time\n" +
-		"  vv inject [--project X]      Output session-start context payload\n" +
-		"  vv export [--format X]       Export session data (JSON or CSV)\n" +
-		"  vv zed <subcommand>          Import Zed agent panel threads into vault\n" +
-		"  vv mcp [install | ...]       Start MCP server (JSON-RPC over stdio)\n" +
-		"  vv templates [list | ...]    Inspect, compare, and reset vault templates\n" +
-		"  vv version                   Print version\n" +
-		"  vv help                      Show this help\n" +
+		"  vv init [path] [--git]           Create a new vault (default: ./vibe-vault)\n" +
+		"  vv hook [install | ...]          Hook mode (reads stdin from Claude Code)\n" +
+		"  vv context [init | ...]          Manage vault-resident AI context\n" +
+		"  vv process <file.jsonl>          Process a single transcript file\n" +
+		"  vv index                         Rebuild session index from notes\n" +
+		"  vv backfill [path]               Discover and process historical transcripts\n" +
+		"  vv archive                       Compress transcripts into vault archive\n" +
+		"  vv reprocess [--project X]       Re-generate notes from transcripts\n" +
+		"  vv check                         Validate config, vault, and hook setup\n" +
+		"  vv stats [--project X]           Show session analytics and metrics\n" +
+		"  vv friction [--project X]        Show friction analysis and correction patterns\n" +
+		"  vv trends [--project X]          Show metric trends over time\n" +
+		"  vv inject [--project X]          Output session-start context payload\n" +
+		"  vv export [--format X]           Export session data (JSON or CSV)\n" +
+		"  vv effectiveness [--project X]   Analyze context effectiveness on outcomes\n" +
+		"  vv zed <subcommand>              Import Zed agent panel threads into vault\n" +
+		"  vv mcp [install | ...]           Start MCP server (JSON-RPC over stdio)\n" +
+		"  vv templates [list | ...]        Inspect, compare, and reset vault templates\n" +
+		"  vv version                       Print version\n" +
+		"  vv help                          Show this help\n" +
 		"\n" +
 		"Hook integration (settings.json):\n" +
 		"  {\"type\": \"command\", \"command\": \"vv hook\"}\n" +
@@ -413,7 +443,7 @@ func TestFormatUsage(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "context", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "zed", "mcp", "templates", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "zed", "mcp", "templates", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))

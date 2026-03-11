@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/johns/vibe-vault/internal/config"
 	vvcontext "github.com/johns/vibe-vault/internal/context"
 	"github.com/johns/vibe-vault/internal/discover"
+	"github.com/johns/vibe-vault/internal/effectiveness"
 	"github.com/johns/vibe-vault/internal/friction"
 	"github.com/johns/vibe-vault/internal/help"
 	"github.com/johns/vibe-vault/internal/hook"
@@ -87,6 +89,9 @@ func main() {
 
 	case "zed":
 		runZed()
+
+	case "effectiveness":
+		runEffectiveness()
 
 	case "mcp":
 		runMcp()
@@ -504,6 +509,33 @@ func runInject() {
 	fmt.Print(output)
 }
 
+func runEffectiveness() {
+	if wantsHelp(os.Args[2:]) {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdEffectiveness))
+		return
+	}
+
+	cfg := mustLoadConfig()
+	project := flagValue(os.Args[2:], "--project")
+	format := flagValue(os.Args[2:], "--format")
+
+	idx, err := index.Load(cfg.StateDir())
+	if err != nil {
+		fatal("load index: %v", err)
+	}
+
+	result := effectiveness.Analyze(idx.Entries, project)
+	if format == "json" {
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			fatal("marshal: %v", err)
+		}
+		fmt.Println(string(data))
+	} else {
+		fmt.Print(effectiveness.Format(result))
+	}
+}
+
 func runExport() {
 	if wantsHelp(os.Args[2:]) {
 		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdExport))
@@ -896,6 +928,7 @@ func runMcp() {
 	srv.RegisterTool(mcp.NewGetKnowledgeTool(cfg))
 	srv.RegisterTool(mcp.NewGetSessionDetailTool(cfg))
 	srv.RegisterTool(mcp.NewGetFrictionTrendsTool(cfg))
+	srv.RegisterTool(mcp.NewGetEffectivenessTool(cfg))
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	if err := srv.Serve(ctx, os.Stdin, os.Stdout); err != nil {
@@ -1091,6 +1124,29 @@ func runReprocess() {
 	}
 
 	cfg := mustLoadConfig()
+
+	// --backfill-context: populate ContextAvailable on entries, then exit
+	if hasFlag(os.Args[2:], "--backfill-context") {
+		overwrite := hasFlag(os.Args[2:], "--force")
+		indexPath := filepath.Join(cfg.StateDir(), "session-index.json")
+		fl, lockErr := index.Lock(indexPath)
+		if lockErr != nil {
+			fatal("acquire index lock: %v", lockErr)
+		}
+		defer fl.Unlock()
+
+		idx, err := index.Load(cfg.StateDir())
+		if err != nil {
+			fatal("load index: %v", err)
+		}
+		result := idx.BackfillContext(overwrite)
+		if err := idx.Save(); err != nil {
+			fatal("save index: %v", err)
+		}
+		fmt.Printf("backfill-context: updated %d, skipped %d\n", result.Updated, result.Skipped)
+		return
+	}
+
 	archiveDir := filepath.Join(cfg.StateDir(), "archive")
 	projectFilter := flagValue(os.Args[2:], "--project")
 	sourceFilter := flagValue(os.Args[2:], "--source")

@@ -308,7 +308,7 @@ func openThreads(entries []index.SessionEntry, n int) []string {
 
 func frictionFromTrends(r trends.Result) *FrictionSummary {
 	for _, m := range r.Metrics {
-		if m.Name == "Friction" {
+		if m.Name == "friction" {
 			return &FrictionSummary{
 				Direction: m.Direction,
 				Average:   m.OverallAvg,

@@ -121,7 +121,7 @@ func TestBuildDecisions(t *testing.T) {
 func TestBuildFriction(t *testing.T) {
 	tr := trends.Result{
 		Metrics: []trends.MetricTrend{
-			{Name: "Friction", Direction: "improving", OverallAvg: 22.5},
+			{Name: "friction", Direction: "improving", OverallAvg: 22.5},
 		},
 	}
 	r := Build(nil, tr, Opts{Project: "p"})

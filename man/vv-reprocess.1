@@ -1,4 +1,4 @@
-.TH VV-REPROCESS 1 "2026-03-09" "vv 0.7.3" "Vibe-Vault Manual"
+.TH VV-REPROCESS 1 "2026-03-10" "vv 0.7.3-1-g76d7c2c" "Vibe-Vault Manual"
 .SH NAME
 vv-reprocess \- re\-generate notes from transcripts
 .SH SYNOPSIS
@@ -17,6 +17,15 @@ Regenerates history.md for each affected project.
 .TP
 .B \-\-project <name>
 Only reprocess sessions for this project
+.TP
+.B \-\-source <name>
+Filter by source (zed, claude\-code)
+.TP
+.B \-\-dry\-run
+Show what would be reprocessed without writing
+.TP
+.B \-\-backfill\-context
+Populate ContextAvailable on entries (no reprocessing)
 .SH EXAMPLES
 .nf
 vv reprocess                       Reprocess all sessions

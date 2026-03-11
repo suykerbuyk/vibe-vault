@@ -185,6 +185,9 @@ var CmdReprocess = Command{
 	TableUsage: "vv reprocess [--project X]",
 	Flags: []Flag{
 		{Name: "--project <name>", Desc: "Only reprocess sessions for this project"},
+		{Name: "--source <name>", Desc: "Filter by source (zed, claude-code)"},
+		{Name: "--dry-run", Desc: "Show what would be reprocessed without writing"},
+		{Name: "--backfill-context", Desc: "Populate ContextAvailable on entries (no reprocessing)"},
 	},
 	Description: `Re-runs the capture pipeline with Force mode for all (or filtered)
 sessions in the index. Locates transcripts via three-tier lookup:
@@ -368,6 +371,36 @@ Output is sorted by date, then session ID.`,
 		"vv export --format csv > sessions.csv  Export to file",
 	},
 	SeeAlso: []string{"vv(1)", "vv-stats(1)"},
+}
+
+var CmdEffectiveness = Command{
+	Name:       "effectiveness",
+	Synopsis:   "analyze whether context availability improves session outcomes",
+	Brief:      "Analyze context effectiveness on outcomes",
+	Usage:      "vv effectiveness [--project <name>] [--format json]",
+	TableUsage: "vv effectiveness [--project X]",
+	Flags: []Flag{
+		{Name: "--project <name>", Desc: "Show effectiveness for a specific project only"},
+		{Name: "--format <json>", Desc: "Output as JSON instead of human-readable text"},
+	},
+	Description: `Correlates context depth (number of prior sessions available) with
+session outcomes (friction, corrections, duration). Groups sessions
+into cohorts by context depth and computes Pearson correlation.
+
+Cohorts:
+  none (0)       No prior sessions available
+  early (1-10)   Building initial context
+  building (11-30)  Growing context base
+  mature (30+)   Rich context available
+
+Requires vv reprocess --backfill-context to have been run first to
+populate ContextAvailable data on historical sessions.`,
+	Examples: []string{
+		"vv effectiveness                       Show all projects",
+		"vv effectiveness --project myproject   Show one project",
+		"vv effectiveness --format json         Output as JSON",
+	},
+	SeeAlso: []string{"vv(1)", "vv-friction(1)", "vv-trends(1)", "vv-reprocess(1)"},
 }
 
 var CmdMcp = Command{
@@ -814,6 +847,7 @@ var Subcommands = []Command{
 	CmdTrends,
 	CmdInject,
 	CmdExport,
+	CmdEffectiveness,
 	CmdZed,
 	CmdMcp,
 	CmdTemplates,

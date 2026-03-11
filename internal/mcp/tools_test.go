@@ -546,6 +546,66 @@ func TestGetFrictionTrendsCustomWeeks(t *testing.T) {
 	}
 }
 
+// --- get_effectiveness tests ---
+
+func TestGetEffectivenessBasic(t *testing.T) {
+	cfg := writeTestIndex(t, map[string]index.SessionEntry{
+		"s1": {SessionID: "s1", Project: "p", Date: "2027-06-10", Iteration: 1, FrictionScore: 40, CreatedAt: time.Now(),
+			Context: &index.ContextAvailable{HistorySessions: 0}},
+		"s2": {SessionID: "s2", Project: "p", Date: "2027-06-12", Iteration: 1, FrictionScore: 30, CreatedAt: time.Now(),
+			Context: &index.ContextAvailable{HistorySessions: 5}},
+		"s3": {SessionID: "s3", Project: "p", Date: "2027-06-14", Iteration: 1, FrictionScore: 20, CreatedAt: time.Now()},
+	})
+
+	tool := NewGetEffectivenessTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"p"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v\nresult: %s", err, result)
+	}
+	projects, ok := parsed["projects"].([]interface{})
+	if !ok || len(projects) != 1 {
+		t.Fatalf("expected 1 project, got %v", parsed["projects"])
+	}
+	proj := projects[0].(map[string]interface{})
+	if proj["project"] != "p" {
+		t.Errorf("project = %v, want p", proj["project"])
+	}
+	if proj["total_sessions"].(float64) != 3 {
+		t.Errorf("total_sessions = %v, want 3", proj["total_sessions"])
+	}
+	if proj["with_context"].(float64) != 2 {
+		t.Errorf("with_context = %v, want 2", proj["with_context"])
+	}
+	cohorts, ok := proj["cohorts"].([]interface{})
+	if !ok || len(cohorts) == 0 {
+		t.Error("expected cohorts array with entries")
+	}
+}
+
+func TestGetEffectivenessEmpty(t *testing.T) {
+	cfg := writeTestIndex(t, map[string]index.SessionEntry{})
+
+	tool := NewGetEffectivenessTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	projects, _ := parsed["projects"].([]interface{})
+	if len(projects) != 0 {
+		t.Errorf("expected 0 projects, got %d", len(projects))
+	}
+}
+
 // --- validateProjectName tests ---
 
 func TestValidateProjectName(t *testing.T) {

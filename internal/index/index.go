@@ -174,3 +174,61 @@ func (idx *Index) ProjectSessionCount(project string) int {
 	}
 	return count
 }
+
+// BackfillContextResult holds counts from a BackfillContext operation.
+type BackfillContextResult struct {
+	Updated int
+	Skipped int
+}
+
+// BackfillContext populates ContextAvailable on entries that lack it,
+// using (Date, Iteration) ordering to compute HistorySessions.
+// HasHistory/HasKnowledge are set false (not derivable from index).
+// If overwrite is true, re-computes even entries that already have Context.
+func (idx *Index) BackfillContext(overwrite bool) BackfillContextResult {
+	// Collect all entries into a slice with their IDs
+	type idEntry struct {
+		id    string
+		entry SessionEntry
+	}
+	all := make([]idEntry, 0, len(idx.Entries))
+	for id, e := range idx.Entries {
+		all = append(all, idEntry{id: id, entry: e})
+	}
+
+	// Sort by (Project, Date, Iteration) ascending
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].entry.Project != all[j].entry.Project {
+			return all[i].entry.Project < all[j].entry.Project
+		}
+		if all[i].entry.Date != all[j].entry.Date {
+			return all[i].entry.Date < all[j].entry.Date
+		}
+		return all[i].entry.Iteration < all[j].entry.Iteration
+	})
+
+	var result BackfillContextResult
+	counts := make(map[string]int) // per-project running count
+
+	for _, ie := range all {
+		count := counts[ie.entry.Project]
+
+		if ie.entry.Context != nil && !overwrite {
+			// Already has context, skip but still increment
+			counts[ie.entry.Project] = count + 1
+			result.Skipped++
+			continue
+		}
+
+		ie.entry.Context = &ContextAvailable{
+			HasHistory:      false,
+			HasKnowledge:    false,
+			HistorySessions: count,
+		}
+		idx.Entries[ie.id] = ie.entry
+		counts[ie.entry.Project] = count + 1
+		result.Updated++
+	}
+
+	return result
+}

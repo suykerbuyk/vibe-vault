@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/effectiveness"
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/inject"
 	"github.com/johns/vibe-vault/internal/trends"
@@ -130,7 +131,7 @@ func NewListProjectsTool(cfg config.Config) Tool {
 			for _, pi := range projectMap {
 				tr := trends.Compute(idx.Entries, pi.Name, 4)
 				for _, m := range tr.Metrics {
-					if m.Name == "Friction" {
+					if m.Name == "friction" {
 						pi.FrictionDirection = m.Direction
 						break
 					}
@@ -486,6 +487,47 @@ func NewGetFrictionTrendsTool(cfg config.Config) Tool {
 			}
 
 			result := trends.Compute(idx.Entries, args.Project, args.Weeks)
+			data, err := json.MarshalIndent(result, "", "  ")
+			if err != nil {
+				return "", fmt.Errorf("marshal: %w", err)
+			}
+			return string(data) + "\n", nil
+		},
+	}
+}
+
+// NewGetEffectivenessTool creates the get_effectiveness tool.
+func NewGetEffectivenessTool(cfg config.Config) Tool {
+	return Tool{
+		Definition: ToolDef{
+			Name:        "get_effectiveness",
+			Description: "Analyze whether context availability correlates with better session outcomes (lower friction, fewer corrections). Requires vv reprocess --backfill-context to have been run first.",
+			InputSchema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"project": {
+						"type": "string",
+						"description": "Filter by project name. If omitted, analyzes all projects."
+					}
+				}
+			}`),
+		},
+		Handler: func(params json.RawMessage) (string, error) {
+			var args struct {
+				Project string `json:"project"`
+			}
+			if len(params) > 0 {
+				if err := json.Unmarshal(params, &args); err != nil {
+					return "", fmt.Errorf("invalid arguments: %w", err)
+				}
+			}
+
+			idx, err := index.Load(cfg.StateDir())
+			if err != nil {
+				return "", fmt.Errorf("load index: %w", err)
+			}
+
+			result := effectiveness.Analyze(idx.Entries, args.Project)
 			data, err := json.MarshalIndent(result, "", "  ")
 			if err != nil {
 				return "", fmt.Errorf("marshal: %w", err)

@@ -2,7 +2,7 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**742 tests** across 28 test packages + **1 integration test** (22 subtests). All passing.
+**755 tests** across 29 test packages + **1 integration test** (22 subtests). All passing.
 
 Run unit tests: `make test` (or `go test -short ./...`)
 Run integration: `make integration` (or `go test -run TestIntegration -timeout 60s ./test/`)
@@ -59,6 +59,7 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 | `zed/detect_test.go` | 6 | `DetectProject_ValidSnapshot`, `DetectProject_NilSnapshot`, `DetectProject_BranchFallback`, `DetectProject_DomainDetection` (5 subtests), `DetectProject_EmptyWorktrees`, `DetectProject_SnapshotBranchPrecedence` |
 | `zed/narrative_test.go` | 13 | `ExtractNarrative_NilThread`, `ExtractNarrative_EmptyMessages`, `ExtractNarrative_SummaryFromDBColumn`, `ExtractNarrative_DetailedSummaryPreferred`, `ExtractNarrative_SummaryCapped`, `ExtractNarrative_ToolActivities`, `ExtractNarrative_CommitExtraction`, `ExtractNarrative_ErrorDetection`, `ExtractNarrative_GitCommitActivity`, `ExtractNarrative_TagInference` (3 subtests), `ExtractNarrative_FirstUserRequest`, `ExtractNarrative_WorkPerformed`, `ParseCommitOutput` (5 subtests) |
 | `zed/prose_test.go` | 12 | `ExtractDialogue_NilThread`, `ExtractDialogue_EmptyMessages`, `ExtractDialogue_BasicConversation`, `ExtractDialogue_ThinkingExcluded`, `ExtractDialogue_ToolMarkers`, `ExtractDialogue_MentionsAsAtPath`, `ExtractDialogue_FillerFilter`, `ExtractDialogue_LongUserTextCapped`, `ExtractDialogue_BashMarkers` (4 subtests), `ExtractDialogue_ErrorMarker` |
+| `effectiveness/effectiveness_test.go` | 14 | `Analyze_EmptyIndex`, `Analyze_NoContextData`, `Analyze_CohortAssignment`, `Analyze_NegativeCorrelation`, `Analyze_ProjectFilter`, `PearsonR` (4 subtests), `BackfillContext_PopulatesEmpty`, `BackfillContext_SkipsExisting`, `BackfillContext_MultiProject`, `BackfillContext_SortOrder`, `BackfillContext_HasHistoryFalse`, `Format` |
 | `archive/archive_test.go` | 3 | `ArchiveRoundTrip`, `IsArchived`, `ArchivePath` |
 | `check/check_test.go` | 27 | `CheckVaultPath` (pass/fail), `CheckObsidian` (pass/warn), `CheckProjects` (pass/warn), `CheckStateDir` (pass/warn), `CheckIndex` (pass/warn/fail), `CheckDomains` (all exist/some missing/empty skipped), `CheckEnrichment` (disabled/enabled+key/enabled+no key), `checkHookFile` (pass/warn/fail), `Report.HasFailures` (true/false), `Run` integration, `Status.String`, `CheckAgentctxSchema` (current/outdated/no-agentctx) |
 | `templates/templates_test.go` | 8 | `New` (entry count=14), `DefaultContent`, `DefaultContentReturnsCopy`, `Has`, `Compare` (default/customized/missing), `Reset` (create/reset), `ResetAll` (14 actions), `ResetUnknown` |

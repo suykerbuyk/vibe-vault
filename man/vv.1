@@ -1,4 +1,4 @@
-.TH VV 1 "2026-03-09" "vv 0.7.3" "Vibe-Vault Manual"
+.TH VV 1 "2026-03-10" "vv 0.7.3-1-g76d7c2c" "Vibe-Vault Manual"
 .SH NAME
 vv \- vibe\-vault session capture
 .SH SYNOPSIS
@@ -54,6 +54,9 @@ Output session\-start context payload
 .B "vv export [\-\-format X]"
 Export session data (JSON or CSV)
 .TP
+.B "vv effectiveness [\-\-project X]"
+Analyze context effectiveness on outcomes
+.TP
 .B "vv zed <subcommand>"
 Import Zed agent panel threads into vault
 .TP
@@ -82,6 +85,7 @@ Configuration file: ~/.config/vibe-vault/config.toml
 .BR vv\-trends (1),
 .BR vv\-inject (1),
 .BR vv\-export (1),
+.BR vv\-effectiveness (1),
 .BR vv\-zed (1),
 .BR vv\-mcp (1),
 .BR vv\-templates (1),
