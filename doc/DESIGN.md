@@ -250,8 +250,8 @@ Key architectural and design decisions in vibe-vault, with rationale.
     history from project B by accessing the vault directly (session notes,
     `tasks/cancelled/`, `knowledge.md`), through `vv inject` (which assembles
     context for the current project from the shared index), or through MCP tools
-    (`list_projects`, `search_sessions`, `get_project_context`) which query
-    across all projects. This emerges naturally from the vault-centric
+    (`vv_list_projects`, `vv_search_sessions`, `vv_get_project_context`) which
+    query across all projects. This emerges naturally from the vault-centric
     architecture rather than requiring explicit cross-project wiring. The agent
     never needs to parse Claude Code's internal JSONL transcripts — everything
     is pre-structured markdown in the vault.

@@ -160,6 +160,118 @@ func UninstallMCP() error {
 	return nil
 }
 
+// ZedSettingsPath returns the path to ~/.config/zed/settings.json.
+func ZedSettingsPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "zed", "settings.json"), nil
+}
+
+// InstallMCPZed adds the vibe-vault MCP server entry to Zed's settings.json.
+// Idempotent: returns nil when already installed.
+func InstallMCPZed() error {
+	path, err := ZedSettingsPath()
+	if err != nil {
+		return err
+	}
+
+	settings, err := readSettings(path)
+	if err != nil {
+		return err
+	}
+
+	if isMCPZedInstalled(settings) {
+		fmt.Fprintf(os.Stderr, "vibe-vault MCP server already configured in %s\n", config.CompressHome(path))
+		return nil
+	}
+
+	if err := backup(path); err != nil {
+		return err
+	}
+
+	addMCPZed(settings)
+
+	if err := writeSettings(path, settings); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "vibe-vault MCP server installed in %s\n", config.CompressHome(path))
+	fmt.Fprintf(os.Stderr, "Restart Zed to activate.\n")
+	return nil
+}
+
+// UninstallMCPZed removes the vibe-vault MCP server entry from Zed's settings.json.
+// Idempotent: returns nil when not installed.
+func UninstallMCPZed() error {
+	path, err := ZedSettingsPath()
+	if err != nil {
+		return err
+	}
+
+	settings, err := readSettings(path)
+	if err != nil {
+		return err
+	}
+
+	if !isMCPZedInstalled(settings) {
+		fmt.Fprintf(os.Stderr, "vibe-vault MCP server not found in %s\n", config.CompressHome(path))
+		return nil
+	}
+
+	if err := backup(path); err != nil {
+		return err
+	}
+
+	removeMCPZed(settings)
+
+	if err := writeSettings(path, settings); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "vibe-vault MCP server removed from %s\n", config.CompressHome(path))
+	return nil
+}
+
+// isMCPZedInstalled returns true when context_servers contains a vibe-vault entry.
+func isMCPZedInstalled(settings map[string]any) bool {
+	servers, ok := settings["context_servers"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = servers[mcpServerName]
+	return ok
+}
+
+// addMCPZed adds the vibe-vault entry to Zed's context_servers.
+func addMCPZed(settings map[string]any) {
+	servers, ok := settings["context_servers"].(map[string]any)
+	if !ok {
+		servers = make(map[string]any)
+		settings["context_servers"] = servers
+	}
+	servers[mcpServerName] = map[string]any{
+		"command": map[string]any{
+			"path": mcpCommand,
+			"args": []any{"mcp"},
+		},
+	}
+}
+
+// removeMCPZed removes the vibe-vault entry from Zed's context_servers.
+// Cleans up the context_servers map if empty.
+func removeMCPZed(settings map[string]any) {
+	servers, ok := settings["context_servers"].(map[string]any)
+	if !ok {
+		return
+	}
+	delete(servers, mcpServerName)
+	if len(servers) == 0 {
+		delete(settings, "context_servers")
+	}
+}
+
 // isMCPInstalled returns true when mcpServers contains a vibe-vault entry.
 func isMCPInstalled(settings map[string]any) bool {
 	servers, ok := settings["mcpServers"].(map[string]any)

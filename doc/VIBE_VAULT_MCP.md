@@ -3,19 +3,23 @@
 ## What It Is
 
 Vibe Vault includes an MCP (Model Context Protocol) server that exposes vault
-data to AI agents over JSON-RPC 2.0. When configured, Claude Code (or any
-MCP-compatible client) can query project history, decisions, friction trends,
-and open threads directly — without reading files or running CLI commands.
+data and session capture to AI agents over JSON-RPC 2.0. When configured,
+Claude Code, Zed, or any MCP-compatible client can query project history,
+search sessions, capture new sessions, access friction trends, and read
+project knowledge directly — without reading files or running CLI commands.
 
 ```
-Claude Code ←→ JSON-RPC 2.0 (stdio) ←→ vv mcp ←→ session-index.json
+Claude Code / Zed ←→ JSON-RPC 2.0 (stdio) ←→ vv mcp ←→ session-index.json
 ```
 
-## Current Tools
+All tool and prompt names are prefixed with `vv_` to avoid collisions when
+multiple MCP servers are registered in the same editor.
 
-The MCP server exposes two tools:
+## Tools
 
-### `get_project_context`
+The MCP server exposes 8 tools:
+
+### `vv_get_project_context`
 
 Returns condensed project context: recent sessions, open threads, decisions,
 and friction trends. This is the JSON equivalent of `vv inject`.
@@ -31,39 +35,110 @@ and friction trends. This is the JSON equivalent of `vv inject`.
 **Section priority** (truncation drops from the end): summary → sessions →
 threads → decisions → friction.
 
-**Example response:**
-
-```json
-{
-  "project": "vibe-vault",
-  "summary": "feat: implement Zed project detection",
-  "sessions": [
-    {"date": "2026-03-09", "title": "restart", "tag": "implementation", "summary": "..."}
-  ],
-  "threads": ["Context effectiveness Phase 2 deferred until 50+ sessions"],
-  "decisions": ["LCD algorithm for Zed project detection"],
-  "friction": {"direction": "improving", "average": 18.5}
-}
-```
-
-### `list_projects`
+### `vv_list_projects`
 
 Lists all vault projects with session counts, date ranges, and friction
 direction. No parameters.
 
-**Example response:**
+### `vv_search_sessions`
 
-```json
-[
-  {
-    "name": "vibe-vault",
-    "session_count": 68,
-    "first_session": "2026-01-15",
-    "last_session": "2026-03-10",
-    "friction_direction": "improving"
-  }
-]
-```
+Search and filter sessions by query, project, files, date range, or friction
+score.
+
+**Parameters:**
+
+| Parameter      | Type    | Default | Description |
+|---------------|---------|---------|-------------|
+| `query`       | string  | —       | Full-text search across titles, summaries, decisions |
+| `project`     | string  | all     | Project name filter |
+| `files`       | string[]| —       | Filter by files changed |
+| `after`       | string  | —       | Date range start (YYYY-MM-DD) |
+| `before`      | string  | —       | Date range end (YYYY-MM-DD) |
+| `min_friction`| integer | —       | Minimum friction score |
+| `limit`       | integer | 10      | Maximum results |
+
+### `vv_get_knowledge`
+
+Returns the content of a project's `knowledge.md` file — curated conventions,
+patterns, and learnings.
+
+**Parameters:**
+
+| Parameter | Type   | Default | Description |
+|-----------|--------|---------|-------------|
+| `project` | string | required | Project name |
+
+### `vv_get_session_detail`
+
+Returns the full markdown content of a specific session note.
+
+**Parameters:**
+
+| Parameter   | Type    | Default  | Description |
+|------------|---------|----------|-------------|
+| `project`  | string  | required | Project name |
+| `date`     | string  | required | Session date (YYYY-MM-DD) |
+| `iteration`| integer | 1        | Same-day iteration number |
+
+### `vv_get_friction_trends`
+
+Returns weekly friction scores, anomalies, and per-metric breakdowns.
+
+**Parameters:**
+
+| Parameter | Type    | Default | Description |
+|-----------|---------|---------|-------------|
+| `project` | string  | all     | Project name filter |
+| `weeks`   | integer | 8       | Number of weeks to return |
+
+### `vv_get_effectiveness`
+
+Context effectiveness analysis — correlates context depth with session outcomes.
+
+**Parameters:**
+
+| Parameter | Type   | Default | Description |
+|-----------|--------|---------|-------------|
+| `project` | string | all     | Project name filter |
+
+### `vv_capture_session`
+
+Record a session note from an agent conversation. Designed for push-based
+session capture from Zed or other MCP clients.
+
+**Parameters:**
+
+| Parameter       | Type     | Default | Description |
+|----------------|----------|---------|-------------|
+| `summary`      | string   | required | What was accomplished |
+| `title`        | string   | auto     | Note title (defaults to first sentence of summary) |
+| `tag`          | string   | auto     | Activity tag: implementation, debugging, refactor, etc. |
+| `model`        | string   | —        | Model that performed the work |
+| `decisions`    | string[] | —        | Key decisions made |
+| `files_changed`| string[] | —        | Files that were modified |
+| `open_threads` | string[] | —        | Unresolved work items |
+
+The handler detects the project from CWD, builds a minimal transcript to
+pass the triviality check, and calls `session.CaptureFromParsed()` with
+`Source: "zed"` and `SkipEnrichment: true`.
+
+## Prompts
+
+The MCP server exposes 1 prompt:
+
+### `vv_session_guidelines`
+
+Agent instructions for when and how to call `vv_capture_session`. This prompt
+is returned via `prompts/list` and `prompts/get` — MCP clients can present it
+to agents as guidance for session capture.
+
+**Arguments:**
+
+| Argument  | Type   | Required | Description |
+|-----------|--------|----------|-------------|
+| `project` | string | no       | Project name for contextual instructions |
+
+Prompts capability is only advertised when prompts are registered.
 
 ## How It Works Under the Hood
 
@@ -80,7 +155,7 @@ trends.Compute()  →  4-week rolling averages, anomaly detection
     ↓
 inject.Render()  →  JSON with token-budget truncation
     ↓
-JSON-RPC response  →  Claude Code receives structured context
+JSON-RPC response  →  AI agent receives structured context
 ```
 
 ### Key data sources
@@ -110,10 +185,14 @@ JSON-RPC response  →  Claude Code receives structured context
 
 ## Setup
 
-### 1. Configure Claude Code
+### Claude Code
 
-Add to `~/.claude/settings.json` (global) or `.claude/settings.json`
-(per-project):
+```bash
+vv mcp install      # adds vibe-vault to ~/.claude/settings.json
+# restart Claude Code
+```
+
+This adds the following to your settings:
 
 ```json
 {
@@ -126,16 +205,34 @@ Add to `~/.claude/settings.json` (global) or `.claude/settings.json`
 }
 ```
 
-Claude Code will start the MCP server as a subprocess. The server reads
-JSON-RPC from stdin and writes responses to stdout. Logs go to stderr.
+### Zed
 
-### 2. Verify it works
+```bash
+vv mcp install --zed    # adds vibe-vault to ~/.config/zed/settings.json
+# restart Zed
+```
 
-After restarting Claude Code, the agent should have access to
-`get_project_context` and `list_projects` tools. You can verify by asking
-Claude to list your projects or get context for the current project.
+This adds the following to your Zed settings:
 
-### 3. Keep the index fresh
+```json
+{
+  "context_servers": {
+    "vibe-vault": {
+      "command": {
+        "path": "vv",
+        "args": ["mcp"]
+      }
+    }
+  }
+}
+```
+
+### Verify
+
+After restarting your editor, ask the agent to "list vibe-vault projects"
+or "capture this session". The agent will call the MCP tools automatically.
+
+### Keep the index fresh
 
 The MCP server reads from `session-index.json`, which is updated by:
 
@@ -146,150 +243,31 @@ The MCP server reads from `session-index.json`, which is updated by:
 Run `vv index` periodically (or after manual vault edits) to keep
 history.md and the index in sync.
 
-## How to Make Better Use of It
-
-### Current gaps
-
-1. **The agent doesn't call MCP tools proactively.** Claude Code has access
-   to the tools but no instruction to use them. Without explicit prompting
-   or CLAUDE.md instructions, the agent won't query vault context at session
-   start or when making architectural decisions.
-
-2. **No session-specific knowledge retrieval.** The `get_project_context`
-   tool returns a fixed-format summary (last 5 sessions, last 30 days of
-   decisions). There's no way to search for a specific past decision,
-   find sessions that touched a particular file, or retrieve the details
-   of a session by date.
-
-3. **Decisions are stored as strings, not structured data.** The index
-   captures decision text extracted by the LLM, but there's no
-   categorization (architectural vs. workflow vs. tooling), no linking
-   between decisions and the files they affect, and no way to query
-   "what did we decide about error handling?"
-
-4. **No knowledge.md access.** Per-project `knowledge.md` files contain
-   curated project knowledge (patterns, conventions, gotchas), but the
-   MCP server doesn't expose them. The agent can only see what's in the
-   session index.
-
-5. **Token budget is conservative.** The default 2000-token budget drops
-   sections aggressively. For complex projects with many active threads,
-   important context gets truncated.
-
-### Recommended improvements
-
-#### A. Instruct the agent to use vault context (no code changes)
-
-Add to your project's CLAUDE.md or the `/restart` workflow:
-
-```markdown
-## Vault Context
-
-At session start, call the `get_project_context` MCP tool for this project
-to load recent sessions, open threads, and decisions. Use this context to:
-- Avoid re-making decisions that were already settled
-- Continue open threads rather than starting fresh
-- Be aware of recent friction patterns
-```
-
-This is the highest-leverage change — the infrastructure exists, but the
-agent needs to be told to use it.
-
-#### B. Add a `search_sessions` tool
-
-A new MCP tool that accepts query parameters and searches the index:
-
-```
-search_sessions(query: "error handling", project: "vibe-vault", files: ["internal/hook/*"])
-```
-
-This would enable the agent to find relevant past sessions when
-investigating a bug or planning a feature, rather than relying on the
-fixed 5-session window.
-
-Possible search dimensions:
-- **Full-text** across session titles, summaries, and decisions
-- **File-based**: "show me sessions that touched this file"
-- **Date range**: "what happened last week?"
-- **Friction**: "show me high-friction sessions" (score ≥ 40)
-- **Thread**: "find sessions related to this open thread"
-
-#### C. Add a `get_knowledge` tool
-
-Expose per-project `knowledge.md` content through MCP:
-
-```
-get_knowledge(project: "vibe-vault")
-```
-
-This gives the agent access to curated conventions and patterns without
-reading vault files directly. Combined with `get_project_context`, the
-agent would have both dynamic session history and stable project knowledge.
-
-#### D. Add a `get_session_detail` tool
-
-Return the full content of a specific session note:
-
-```
-get_session_detail(project: "vibe-vault", date: "2026-03-09", iteration: 1)
-```
-
-When the agent sees a relevant session in the context summary, it could
-drill down to read the full note — work performed, prose dialogue,
-detailed decisions, files changed with commit SHAs.
-
-#### E. Expose friction analysis
-
-A tool wrapping `vv trends` output:
-
-```
-get_friction_trends(project: "vibe-vault", weeks: 8)
-```
-
-Returns weekly friction scores, anomalies, and per-metric breakdowns.
-The agent could use this to self-diagnose: "my friction score spiked
-last week because correction density was high — I should be more
-careful about investigating before implementing."
-
-#### F. Increase the default token budget
-
-The 2000-token default was conservative for early development. For
-projects with 50+ sessions, consider raising to 4000-6000 tokens in
-the MCP tool call, or making the default configurable in `config.toml`.
-
-### Priority order
-
-| Priority | Change | Effort | Impact |
-|----------|--------|--------|--------|
-| 1 | **A. CLAUDE.md instructions** | Zero (config only) | High — agent starts using existing tools |
-| 2 | **C. `get_knowledge` tool** | Low (read one file) | High — curated knowledge accessible |
-| 3 | **B. `search_sessions` tool** | Medium (index query) | High — targeted historical lookup |
-| 4 | **D. `get_session_detail` tool** | Low (read one file) | Medium — drill-down capability |
-| 5 | **F. Configurable token budget** | Low (config change) | Medium — richer context for complex projects |
-| 6 | **E. Friction trends tool** | Medium (format output) | Low — self-diagnosis is speculative |
-
 ## Architecture Reference
 
 ```
-cmd/vv/main.go:runMcp()          CLI entry point, registers tools
-internal/mcp/protocol.go         JSON-RPC 2.0 types, MCP handshake
-internal/mcp/server.go           Stdio transport, dispatch loop
-internal/mcp/tools.go            Tool definitions and handlers
+cmd/vv/main.go:runMcp()          CLI entry point, registers tools + prompts
+internal/mcp/protocol.go         JSON-RPC 2.0 types, MCP handshake, prompt types
+internal/mcp/server.go           Stdio transport, dispatch loop (tools + prompts)
+internal/mcp/tools.go            8 tool definitions and handlers
+internal/mcp/prompts.go          Prompt definitions and handlers
 internal/inject/inject.go        Context building and rendering
 internal/trends/trends.go        Trend computation and anomaly detection
 internal/index/index.go          SessionEntry struct, Load/Save
 internal/index/context.go        history.md generation (ProjectContext)
 internal/index/generate.go       vv index orchestration
 internal/friction/score.go       Friction scoring (composite 0-100)
+internal/hook/setup.go           MCP install/uninstall (Claude Code + Zed)
 ```
 
 ## Related Commands
 
 | Command | Relationship to MCP |
 |---------|-------------------|
-| `vv inject` | Same pipeline as `get_project_context`, but CLI output (md/json) |
+| `vv inject` | Same pipeline as `vv_get_project_context`, but CLI output (md/json) |
 | `vv index` | Rebuilds the session index that MCP tools read from |
 | `vv hook` | Writes new sessions that appear in MCP queries |
-| `vv trends` | Same trend engine used by MCP friction summaries |
+| `vv trends` | Same trend engine used by `vv_get_friction_trends` |
 | `vv stats` | Project statistics (not yet exposed via MCP) |
 | `vv reprocess` | Re-enriches sessions, improving MCP query results |
+| `vv effectiveness` | Same analysis as `vv_get_effectiveness`, but CLI output |

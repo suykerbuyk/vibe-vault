@@ -138,13 +138,21 @@ Claude Code / AI agent
    └────┬─────┘
         │
         ▼
-   mcp/server.go    Dispatch: initialize, tools/list, tools/call
+   mcp/server.go    Dispatch: initialize, tools/list, tools/call,
+        │                       prompts/list, prompts/get
         │
-        ├─── get_project_context    → index.Load() → trends.Compute()
-        │                           → inject.Build() → inject.Render()
+        ├─── vv_get_project_context  → index.Load() → trends.Compute()
+        │                            → inject.Build() → inject.Render()
+        ├─── vv_list_projects        → index.Load() → idx.Projects()
+        │                            → trends.Compute() per project
+        ├─── vv_search_sessions      → index.Load() → filter/search
+        ├─── vv_get_knowledge        → read Projects/{project}/knowledge.md
+        ├─── vv_get_session_detail   → read session note markdown
+        ├─── vv_get_friction_trends  → trends.Compute() → format
+        ├─── vv_get_effectiveness    → effectiveness analysis
+        ├─── vv_capture_session      → session.CaptureFromParsed()
         │
-        └─── list_projects          → index.Load() → idx.Projects()
-                                    → trends.Compute() per project
+        └─── prompt: vv_session_guidelines → agent instructions for capture
 ```
 
 ## Module Responsibilities
@@ -163,9 +171,10 @@ Claude Code / AI agent
 | `friction` | `score.go` | `Score()` — weighted composite friction score (0-100): correction density (30), token efficiency (25), file retry (20), error cycles (15), recurring threads (10) |
 | `friction` | `analyze.go` | `Analyze()` — pure-function orchestrator: corrections + narrative signals + token efficiency + thread recurrence → `Result` with score + human-readable signals |
 | `friction` | `format.go` | `ComputeProjectFriction()` — aggregate per-project friction from index; `Format()` — aligned terminal output for `vv friction` |
-| `mcp` | `protocol.go` | JSON-RPC 2.0 and MCP message types (Request, Response, InitializeResult, ToolDef, ToolsCallResult, ContentBlock) |
-| `mcp` | `server.go` | Stdio transport: `Server.Serve()` reads newline-delimited JSON, dispatches initialize/tools/list/tools/call, logs tool calls to stderr |
-| `mcp` | `tools.go` | `NewGetProjectContextTool()` — wraps inject pipeline; `NewListProjectsTool()` — wraps index.Projects() with per-project friction trends |
+| `mcp` | `protocol.go` | JSON-RPC 2.0 and MCP message types (Request, Response, InitializeResult, ToolDef, ToolsCallResult, ContentBlock, PromptDef, PromptArg, PromptMessage) |
+| `mcp` | `server.go` | Stdio transport: `Server.Serve()` reads newline-delimited JSON, dispatches initialize/tools/list/tools/call/prompts/list/prompts/get, logs tool calls to stderr |
+| `mcp` | `tools.go` | 8 tools (all `vv_`-prefixed): `vv_get_project_context`, `vv_list_projects`, `vv_search_sessions`, `vv_get_knowledge`, `vv_get_session_detail`, `vv_get_friction_trends`, `vv_get_effectiveness`, `vv_capture_session` |
+| `mcp` | `prompts.go` | `NewSessionGuidelinesPrompt()` — agent instructions for when/how to call `vv_capture_session` |
 | `help` | `commands.go` | Command/Flag/Arg structs, Version var (build-time injection via ldflags), registry of 16 subcommands + 2 hook + 3 context subcommands (init, migrate, sync), ManName() with space→hyphen |
 | `help` | `terminal.go` | `FormatTerminal()` and `FormatUsage()` — terminal help output |
 | `help` | `roff.go` | `FormatRoff()` and `FormatRoffTopLevel()` — roff-formatted man pages |
@@ -175,7 +184,7 @@ Claude Code / AI agent
 | `config` | `write.go` | Write/update config.toml with action status, ConfigDir(), CompressHome(), updateVaultPath(), `ProjectConfigTemplate()` for per-project overlay scaffolds |
 | `discover` | `discover.go` | Walk directories for UUID-named `.jsonl` transcripts, subagent detection, FindBySessionID |
 | `hook` | `handler.go` | Stdin JSON parsing (2s timeout), `handleInput()` dispatch logic (extracted for testability), dispatches SessionEnd/Stop/PreCompact, auto-refresh context on SessionEnd via `GenerateContext()` (no knowledge injection) |
-| `hook` | `setup.go` | `Install()`/`Uninstall()` for `~/.claude/settings.json`: 3 events (SessionEnd, Stop, PreCompact), idempotent JSON manipulation, backup, directory creation |
+| `hook` | `setup.go` | `Install()`/`Uninstall()` for `~/.claude/settings.json`: 3 events (SessionEnd, Stop, PreCompact), idempotent JSON manipulation, backup, directory creation; `InstallMCPZed()`/`UninstallMCPZed()` for `~/.config/zed/settings.json` (Zed `context_servers` format) |
 | `inject` | `inject.go` | `Build()` — assemble context from index entries and trends; `FormatMarkdown()`/`FormatJSON()` renderers; `Render()` — format + token-budget truncation loop (drops lowest-priority sections); `estimateTokens()` — word count × 1.3 |
 | `scaffold` | `scaffold.go` | `go:embed` vault scaffold templates (for `vv init`), `Init()` scaffolder with `{{VAULT_NAME}}` replacement. Distinct from `templates/` which holds agentctx templates for `vv context init` |
 | `transcript` | `parser.go` | Streaming JSONL parser, skips non-conversation types |

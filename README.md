@@ -165,14 +165,15 @@ To remove the hooks later: `vv hook uninstall`
 ### Enable the MCP Server
 
 ```bash
-vv mcp install
+vv mcp install           # Claude Code (adds to ~/.claude/settings.json)
+vv mcp install --zed     # Zed editor (adds to ~/.config/zed/settings.json)
 ```
 
-This registers the vibe-vault MCP server in `~/.claude/settings.json` so
-Claude Code can query project context, search sessions, and access friction
-trends on demand. Restart Claude Code after running this command.
+This registers the vibe-vault MCP server so AI agents can query project
+context, search sessions, capture new sessions, and access friction trends
+on demand. Restart your editor after running this command.
 
-To remove the MCP server later: `vv mcp uninstall`
+To remove the MCP server later: `vv mcp uninstall` or `vv mcp uninstall --zed`
 
 ### Verify Setup
 
@@ -280,8 +281,8 @@ deterministic heuristics rather than embeddings.
 | `vv effectiveness [--project X]` | Analyze context effectiveness on outcomes |
 | `vv context [init \| migrate \| sync]` | Manage vault-resident AI context files |
 | `vv mcp` | Start MCP server for AI agent integration |
-| `vv mcp install` | Register MCP server in `~/.claude/settings.json` |
-| `vv mcp uninstall` | Remove MCP server from `~/.claude/settings.json` |
+| `vv mcp install [--zed]` | Register MCP server in editor settings |
+| `vv mcp uninstall [--zed]` | Remove MCP server from editor settings |
 | `vv templates [list \| diff \| show \| reset]` | Inspect, compare, and reset vault templates |
 | `vv version` | Print version |
 
@@ -344,15 +345,19 @@ vv context sync --dry-run             # preview changes without modifying files
 
 **MCP server for AI agent integration:**
 ```bash
-vv mcp install      # register in ~/.claude/settings.json (then restart Claude Code)
-vv mcp uninstall    # remove from settings
-vv mcp              # start server directly (used by Claude Code, not run manually)
+vv mcp install           # register in ~/.claude/settings.json (then restart Claude Code)
+vv mcp install --zed     # register in ~/.config/zed/settings.json (then restart Zed)
+vv mcp uninstall         # remove from Claude Code settings
+vv mcp uninstall --zed   # remove from Zed settings
+vv mcp                   # start server directly (used by editors, not run manually)
 ```
 
-This exposes 7 tools: `get_project_context`, `list_projects`,
-`search_sessions`, `get_knowledge`, `get_session_detail`,
-`get_friction_trends`, and `get_effectiveness`. Claude Code calls these on
-demand instead of requiring pre-loaded context.
+This exposes 8 tools (`vv_get_project_context`, `vv_list_projects`,
+`vv_search_sessions`, `vv_get_knowledge`, `vv_get_session_detail`,
+`vv_get_friction_trends`, `vv_get_effectiveness`, `vv_capture_session`) and
+1 prompt (`vv_session_guidelines`). All names are prefixed with `vv_` to
+avoid collisions with other MCP servers. AI agents call these on demand
+instead of requiring pre-loaded context.
 
 **Inspect and reset vault templates:**
 ```bash
@@ -561,10 +566,11 @@ vault. An agent in project A can read `Projects/B/sessions/2026-03-10-06.md`
 to understand what was built, what decisions were made, and what went wrong.
 
 **2. `vv inject` and MCP tools provide structured access.** The `vv inject`
-command and MCP tools (`list_projects`, `search_sessions`, `get_project_context`)
-query across all projects. An agent can ask "what friction patterns exist in
-project B?" or "what was the last session in project C about?" and get structured
-answers from the vault — no JSONL transcript parsing, no Claude Code internals.
+command and MCP tools (`vv_list_projects`, `vv_search_sessions`,
+`vv_get_project_context`) query across all projects. An agent can ask "what
+friction patterns exist in project B?" or "what was the last session in project
+C about?" and get structured answers from the vault — no JSONL transcript
+parsing, no Claude Code internals.
 
 **3. Cancelled plans prevent re-litigation.** When a task is investigated and
 found not worth implementing, `/cancel-plan` records the rationale in the

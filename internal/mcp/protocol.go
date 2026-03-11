@@ -64,7 +64,8 @@ type ServerInfo struct {
 
 // Capabilities declares what the server supports.
 type Capabilities struct {
-	Tools *ToolsCap `json:"tools,omitempty"`
+	Tools   *ToolsCap   `json:"tools,omitempty"`
+	Prompts *PromptsCap `json:"prompts,omitempty"`
 }
 
 // ToolsCap declares tool support.
@@ -102,4 +103,48 @@ type ToolsCallResult struct {
 type ContentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+}
+
+// --- Prompt listing ---
+
+// PromptsCap declares prompt support.
+type PromptsCap struct{}
+
+// PromptsListResult is the response to prompts/list.
+type PromptsListResult struct {
+	Prompts []PromptDef `json:"prompts"`
+}
+
+// PromptDef describes a prompt.
+type PromptDef struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	Arguments   []PromptArg `json:"arguments,omitempty"`
+}
+
+// PromptArg describes an argument to a prompt.
+type PromptArg struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
+// --- Prompt retrieval ---
+
+// PromptsGetParams is the request params for prompts/get.
+type PromptsGetParams struct {
+	Name      string            `json:"name"`
+	Arguments map[string]string `json:"arguments,omitempty"`
+}
+
+// PromptsGetResult is the response to prompts/get.
+type PromptsGetResult struct {
+	Description string          `json:"description,omitempty"`
+	Messages    []PromptMessage `json:"messages"`
+}
+
+// PromptMessage is a single message in a prompt response.
+type PromptMessage struct {
+	Role    string       `json:"role"`
+	Content ContentBlock `json:"content"`
 }

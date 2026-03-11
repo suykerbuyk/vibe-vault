@@ -581,3 +581,148 @@ func TestInstallMCP_WithHooks(t *testing.T) {
 		t.Error("hook should still be present")
 	}
 }
+
+// --- Zed MCP install/uninstall tests ---
+
+func zedSettingsPath(home string) string {
+	return filepath.Join(home, ".config", "zed", "settings.json")
+}
+
+func hasMCPZed(settings map[string]any) bool {
+	servers, ok := settings["context_servers"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = servers[mcpServerName]
+	return ok
+}
+
+func TestInstallMCPZed_NoFile(t *testing.T) {
+	home := setupHome(t)
+
+	if err := InstallMCPZed(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := zedSettingsPath(home)
+	settings := readJSON(t, path)
+	if !hasMCPZed(settings) {
+		t.Error("missing vibe-vault Zed context_servers entry")
+	}
+
+	// Verify structure: context_servers.vibe-vault.command.path
+	servers := settings["context_servers"].(map[string]any)
+	vv := servers["vibe-vault"].(map[string]any)
+	cmd := vv["command"].(map[string]any)
+	if cmd["path"] != "vv" {
+		t.Errorf("expected command.path = vv, got %v", cmd["path"])
+	}
+}
+
+func TestInstallMCPZed_Existing(t *testing.T) {
+	home := setupHome(t)
+	path := zedSettingsPath(home)
+	writeJSON(t, path, map[string]any{
+		"theme":          "One Dark",
+		"context_servers": map[string]any{
+			"other-tool": map[string]any{
+				"command": map[string]any{"path": "other", "args": []any{"serve"}},
+			},
+		},
+	})
+
+	if err := InstallMCPZed(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	if !hasMCPZed(settings) {
+		t.Error("missing vibe-vault Zed entry")
+	}
+	// Existing settings preserved
+	if settings["theme"] != "One Dark" {
+		t.Error("existing theme setting was lost")
+	}
+	servers := settings["context_servers"].(map[string]any)
+	if _, ok := servers["other-tool"]; !ok {
+		t.Error("existing context server was lost")
+	}
+}
+
+func TestInstallMCPZed_Idempotent(t *testing.T) {
+	home := setupHome(t)
+
+	if err := InstallMCPZed(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := zedSettingsPath(home)
+	first, _ := os.ReadFile(path)
+
+	if err := InstallMCPZed(); err != nil {
+		t.Fatal(err)
+	}
+
+	second, _ := os.ReadFile(path)
+	if string(first) != string(second) {
+		t.Error("idempotent install modified the file")
+	}
+}
+
+func TestUninstallMCPZed(t *testing.T) {
+	home := setupHome(t)
+
+	if err := InstallMCPZed(); err != nil {
+		t.Fatal(err)
+	}
+	if err := UninstallMCPZed(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := zedSettingsPath(home)
+	settings := readJSON(t, path)
+	if hasMCPZed(settings) {
+		t.Error("vibe-vault Zed entry should be removed")
+	}
+	// Empty context_servers map should be cleaned up
+	if _, ok := settings["context_servers"]; ok {
+		t.Error("empty context_servers map should be removed entirely")
+	}
+}
+
+func TestUninstallMCPZed_PreservesOtherServers(t *testing.T) {
+	home := setupHome(t)
+	path := zedSettingsPath(home)
+	writeJSON(t, path, map[string]any{
+		"context_servers": map[string]any{
+			"vibe-vault": map[string]any{
+				"command": map[string]any{"path": "vv", "args": []any{"mcp"}},
+			},
+			"other-tool": map[string]any{
+				"command": map[string]any{"path": "other"},
+			},
+		},
+	})
+
+	if err := UninstallMCPZed(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	servers := settings["context_servers"].(map[string]any)
+	if _, ok := servers["vibe-vault"]; ok {
+		t.Error("vibe-vault should be removed")
+	}
+	if _, ok := servers["other-tool"]; !ok {
+		t.Error("other-tool should be preserved")
+	}
+}
+
+func TestUninstallMCPZed_NotInstalled(t *testing.T) {
+	setupHome(t)
+
+	err := UninstallMCPZed()
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}

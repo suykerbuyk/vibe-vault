@@ -1104,8 +1104,8 @@ func TestIntegration(t *testing.T) {
 			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test"}}}`,
 			`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 			`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
-			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_projects"}}`,
-			`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_project_context","arguments":{"project":"myproject"}}}`,
+			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"vv_list_projects"}}`,
+			`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"vv_get_project_context","arguments":{"project":"myproject"}}}`,
 			`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"nonexistent"}}`,
 			`{"jsonrpc":"2.0","id":6,"method":"unknown/method"}`,
 		}, "\n")
@@ -1139,45 +1139,45 @@ func TestIntegration(t *testing.T) {
 		// Response 1: tools/list — should have tools array
 		toolsResult := responses[1]["result"].(map[string]interface{})
 		tools := toolsResult["tools"].([]interface{})
-		if len(tools) != 7 {
-			t.Errorf("tools/list: expected 7 tools, got %d", len(tools))
+		if len(tools) != 8 {
+			t.Errorf("tools/list: expected 8 tools, got %d", len(tools))
 		}
 		toolNames := make(map[string]bool)
 		for _, tool := range tools {
 			toolNames[tool.(map[string]interface{})["name"].(string)] = true
 		}
-		if !toolNames["get_project_context"] {
-			t.Error("tools/list: missing get_project_context")
+		if !toolNames["vv_get_project_context"] {
+			t.Error("tools/list: missing vv_get_project_context")
 		}
-		if !toolNames["list_projects"] {
-			t.Error("tools/list: missing list_projects")
+		if !toolNames["vv_list_projects"] {
+			t.Error("tools/list: missing vv_list_projects")
 		}
 
-		// Response 2: list_projects — should return project data
+		// Response 2: vv_list_projects — should return project data
 		listResult := responses[2]["result"].(map[string]interface{})
 		content := listResult["content"].([]interface{})
 		if len(content) == 0 {
-			t.Fatal("list_projects: empty content")
+			t.Fatal("vv_list_projects: empty content")
 		}
 		listText := content[0].(map[string]interface{})["text"].(string)
 		var projects []map[string]interface{}
 		if err := json.Unmarshal([]byte(listText), &projects); err != nil {
-			t.Fatalf("list_projects: invalid JSON in text: %v", err)
+			t.Fatalf("vv_list_projects: invalid JSON in text: %v", err)
 		}
 		if len(projects) == 0 {
-			t.Error("list_projects: no projects returned")
+			t.Error("vv_list_projects: no projects returned")
 		}
 
-		// Response 3: get_project_context — should return context for myproject
+		// Response 3: vv_get_project_context — should return context for myproject
 		ctxResult := responses[3]["result"].(map[string]interface{})
 		ctxContent := ctxResult["content"].([]interface{})
 		ctxText := ctxContent[0].(map[string]interface{})["text"].(string)
 		var ctxParsed map[string]interface{}
 		if err := json.Unmarshal([]byte(ctxText), &ctxParsed); err != nil {
-			t.Fatalf("get_project_context: invalid JSON: %v", err)
+			t.Fatalf("vv_get_project_context: invalid JSON: %v", err)
 		}
 		if ctxParsed["project"] != "myproject" {
-			t.Errorf("get_project_context: project = %v, want myproject", ctxParsed["project"])
+			t.Errorf("vv_get_project_context: project = %v, want myproject", ctxParsed["project"])
 		}
 
 		// Response 4: unknown tool — should have isError
@@ -1192,7 +1192,7 @@ func TestIntegration(t *testing.T) {
 		}
 
 		// Stderr should contain tool call log lines
-		assertContains(t, stderr, "tools/call: list_projects", "stderr log")
-		assertContains(t, stderr, "tools/call: get_project_context", "stderr log")
+		assertContains(t, stderr, "tools/call: vv_list_projects", "stderr log")
+		assertContains(t, stderr, "tools/call: vv_get_project_context", "stderr log")
 	})
 }

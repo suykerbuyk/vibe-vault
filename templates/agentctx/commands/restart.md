@@ -12,7 +12,7 @@ references in referenced order to restore full project context:
    open threads, decisions, friction trends, knowledge). Include the
    full output verbatim in your context — do not summarize it.
 5. If MCP tools are available (vibe-vault server configured), call
-   `get_project_context` for this project. This provides structured JSON
+   `vv_get_project_context` for this project. This provides structured JSON
    context (sessions, threads, decisions, friction) that supplements inject.
 6. `doc/*.md` — stable reference (architecture, design, testing) — read on demand when needed
 7. When a task is completed, move it to `tasks/done/` and append a summary to `iterations.md`.

@@ -214,3 +214,147 @@ func TestIDPreserved(t *testing.T) {
 		t.Errorf("ID = %s, want \"abc\"", string(responses[0].ID))
 	}
 }
+
+// --- Prompts tests ---
+
+func testServerWithPrompt() *Server {
+	srv := testServer()
+	srv.RegisterPrompt(Prompt{
+		Definition: PromptDef{
+			Name:        "test_prompt",
+			Description: "a test prompt",
+			Arguments: []PromptArg{
+				{Name: "name", Description: "a name", Required: false},
+			},
+		},
+		Handler: func(args map[string]string) (PromptsGetResult, error) {
+			text := "hello"
+			if name, ok := args["name"]; ok && name != "" {
+				text = "hello " + name
+			}
+			return PromptsGetResult{
+				Description: "test prompt result",
+				Messages: []PromptMessage{
+					{Role: "user", Content: ContentBlock{Type: "text", Text: text}},
+				},
+			}, nil
+		},
+	})
+	return srv
+}
+
+func TestPromptsListEmpty(t *testing.T) {
+	srv := testServer() // no prompts registered
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"prompts/list"}`,
+	)
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+
+	data, _ := json.Marshal(responses[0].Result)
+	var result PromptsListResult
+	json.Unmarshal(data, &result)
+	if len(result.Prompts) != 0 {
+		t.Errorf("expected 0 prompts, got %d", len(result.Prompts))
+	}
+}
+
+func TestPromptsList(t *testing.T) {
+	srv := testServerWithPrompt()
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"prompts/list"}`,
+	)
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+
+	data, _ := json.Marshal(responses[0].Result)
+	var result PromptsListResult
+	json.Unmarshal(data, &result)
+	if len(result.Prompts) != 1 {
+		t.Fatalf("expected 1 prompt, got %d", len(result.Prompts))
+	}
+	if result.Prompts[0].Name != "test_prompt" {
+		t.Errorf("prompt name = %q, want test_prompt", result.Prompts[0].Name)
+	}
+}
+
+func TestPromptsGet(t *testing.T) {
+	srv := testServerWithPrompt()
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"test_prompt","arguments":{"name":"world"}}}`,
+	)
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+	if responses[0].Error != nil {
+		t.Fatalf("unexpected error: %v", responses[0].Error)
+	}
+
+	data, _ := json.Marshal(responses[0].Result)
+	var result PromptsGetResult
+	json.Unmarshal(data, &result)
+	if len(result.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result.Messages))
+	}
+	if result.Messages[0].Content.Text != "hello world" {
+		t.Errorf("text = %q, want 'hello world'", result.Messages[0].Content.Text)
+	}
+	if result.Messages[0].Role != "user" {
+		t.Errorf("role = %q, want user", result.Messages[0].Role)
+	}
+}
+
+func TestPromptsGetUnknown(t *testing.T) {
+	srv := testServerWithPrompt()
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"nonexistent"}}`,
+	)
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+	if responses[0].Error == nil {
+		t.Fatal("expected error for unknown prompt")
+	}
+	if !strings.Contains(responses[0].Error.Message, "unknown prompt") {
+		t.Errorf("error message = %q, want to contain 'unknown prompt'", responses[0].Error.Message)
+	}
+}
+
+func TestPromptsCapabilityAdvertised(t *testing.T) {
+	srv := testServerWithPrompt()
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test"}}}`,
+	)
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+
+	data, _ := json.Marshal(responses[0].Result)
+	var result InitializeResult
+	json.Unmarshal(data, &result)
+	if result.Capabilities.Tools == nil {
+		t.Error("expected tools capability")
+	}
+	if result.Capabilities.Prompts == nil {
+		t.Error("expected prompts capability when prompts are registered")
+	}
+}
+
+func TestPromptsCapabilityOmittedWhenEmpty(t *testing.T) {
+	srv := testServer() // no prompts
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test"}}}`,
+	)
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+
+	data, _ := json.Marshal(responses[0].Result)
+	var result InitializeResult
+	json.Unmarshal(data, &result)
+	if result.Capabilities.Prompts != nil {
+		t.Error("prompts capability should not be advertised when no prompts registered")
+	}
+}

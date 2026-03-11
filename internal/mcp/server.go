@@ -19,25 +19,38 @@ type Tool struct {
 	Handler    func(params json.RawMessage) (string, error)
 }
 
+// Prompt pairs a definition with its handler.
+type Prompt struct {
+	Definition PromptDef
+	Handler    func(args map[string]string) (PromptsGetResult, error)
+}
+
 // Server is a JSON-RPC 2.0 stdio MCP server.
 type Server struct {
-	tools  map[string]Tool
-	info   ServerInfo
-	logger *log.Logger
+	tools   map[string]Tool
+	prompts map[string]Prompt
+	info    ServerInfo
+	logger  *log.Logger
 }
 
 // NewServer creates a new MCP server.
 func NewServer(info ServerInfo, logger *log.Logger) *Server {
 	return &Server{
-		tools:  make(map[string]Tool),
-		info:   info,
-		logger: logger,
+		tools:   make(map[string]Tool),
+		prompts: make(map[string]Prompt),
+		info:    info,
+		logger:  logger,
 	}
 }
 
 // RegisterTool adds a tool to the server.
 func (s *Server) RegisterTool(t Tool) {
 	s.tools[t.Definition.Name] = t
+}
+
+// RegisterPrompt adds a prompt to the server.
+func (s *Server) RegisterPrompt(p Prompt) {
+	s.prompts[p.Definition.Name] = p
 }
 
 // Serve reads JSON-RPC requests from in and writes responses to out.
@@ -95,6 +108,10 @@ func (s *Server) dispatch(req Request) Response {
 		return s.handleToolsList(req)
 	case "tools/call":
 		return s.handleToolsCall(req)
+	case "prompts/list":
+		return s.handlePromptsList(req)
+	case "prompts/get":
+		return s.handlePromptsGet(req)
 	default:
 		return Response{
 			JSONRPC: "2.0",
@@ -105,10 +122,14 @@ func (s *Server) dispatch(req Request) Response {
 }
 
 func (s *Server) handleInitialize(req Request) Response {
+	caps := Capabilities{Tools: &ToolsCap{}}
+	if len(s.prompts) > 0 {
+		caps.Prompts = &PromptsCap{}
+	}
 	result := InitializeResult{
 		ProtocolVersion: "2024-11-05",
 		ServerInfo:      s.info,
-		Capabilities:    Capabilities{Tools: &ToolsCap{}},
+		Capabilities:    caps,
 	}
 	return Response{JSONRPC: "2.0", ID: req.ID, Result: result}
 }
@@ -165,6 +186,50 @@ func (s *Server) handleToolsCall(req Request) Response {
 		ID:      req.ID,
 		Result:  ToolsCallResult{Content: []ContentBlock{{Type: "text", Text: text}}},
 	}
+}
+
+func (s *Server) handlePromptsList(req Request) Response {
+	var defs []PromptDef
+	for _, p := range s.prompts {
+		defs = append(defs, p.Definition)
+	}
+	sort.Slice(defs, func(i, j int) bool {
+		return defs[i].Name < defs[j].Name
+	})
+	return Response{JSONRPC: "2.0", ID: req.ID, Result: PromptsListResult{Prompts: defs}}
+}
+
+func (s *Server) handlePromptsGet(req Request) Response {
+	var params PromptsGetParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return Response{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error:   &RPCError{Code: CodeInvalidParams, Message: "invalid params"},
+		}
+	}
+
+	prompt, ok := s.prompts[params.Name]
+	if !ok {
+		return Response{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error:   &RPCError{Code: CodeInvalidParams, Message: fmt.Sprintf("unknown prompt: %s", params.Name)},
+		}
+	}
+
+	s.logger.Printf("prompts/get: %s", params.Name)
+
+	result, err := prompt.Handler(params.Arguments)
+	if err != nil {
+		return Response{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error:   &RPCError{Code: CodeInternalError, Message: err.Error()},
+		}
+	}
+
+	return Response{JSONRPC: "2.0", ID: req.ID, Result: result}
 }
 
 func (s *Server) writeResponse(out io.Writer, resp Response) {

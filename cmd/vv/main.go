@@ -978,8 +978,14 @@ func runMcp() {
 				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdMcpInstall))
 				return
 			}
-			if err := hook.InstallMCP(); err != nil {
-				fatal("%v", err)
+			if hasFlag(args[1:], "--zed") {
+				if err := hook.InstallMCPZed(); err != nil {
+					fatal("%v", err)
+				}
+			} else {
+				if err := hook.InstallMCP(); err != nil {
+					fatal("%v", err)
+				}
 			}
 			return
 		case "uninstall":
@@ -987,8 +993,14 @@ func runMcp() {
 				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdMcpUninstall))
 				return
 			}
-			if err := hook.UninstallMCP(); err != nil {
-				fatal("%v", err)
+			if hasFlag(args[1:], "--zed") {
+				if err := hook.UninstallMCPZed(); err != nil {
+					fatal("%v", err)
+				}
+			} else {
+				if err := hook.UninstallMCP(); err != nil {
+					fatal("%v", err)
+				}
 			}
 			return
 		}
@@ -1007,6 +1019,8 @@ func runMcp() {
 	srv.RegisterTool(mcp.NewGetSessionDetailTool(cfg))
 	srv.RegisterTool(mcp.NewGetFrictionTrendsTool(cfg))
 	srv.RegisterTool(mcp.NewGetEffectivenessTool(cfg))
+	srv.RegisterTool(mcp.NewCaptureSessionTool(cfg))
+	srv.RegisterPrompt(mcp.NewSessionGuidelinesPrompt())
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	if err := srv.Serve(ctx, os.Stdin, os.Stdout); err != nil {

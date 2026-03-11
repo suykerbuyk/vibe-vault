@@ -337,33 +337,42 @@ var expectedTerminal = map[string]string{
 	"mcp": "vv mcp \u2014 start MCP server for AI agent integration\n" +
 		"\n" +
 		"Usage: vv mcp\n" +
-		"    vv mcp install\n" +
-		"    vv mcp uninstall\n" +
+		"    vv mcp install [--zed]\n" +
+		"    vv mcp uninstall [--zed]\n" +
 		"\n" +
 		"Starts a Model Context Protocol (MCP) server that exposes vibe-vault\n" +
 		"tools over JSON-RPC 2.0 on stdin/stdout. This allows AI agents like\n" +
-		"Claude Code to query project context programmatically.\n" +
+		"Claude Code and Zed to query project context programmatically.\n" +
 		"\n" +
 		"Subcommands:\n" +
-		"  install     Register the MCP server in Claude Code settings\n" +
-		"  uninstall   Remove the MCP server from Claude Code settings\n" +
+		"  install     Register the MCP server in editor settings\n" +
+		"  uninstall   Remove the MCP server from editor settings\n" +
 		"\n" +
 		"Available tools:\n" +
-		"  get_friction_trends   Friction and efficiency trend data over time\n" +
-		"  get_knowledge         Project knowledge.md content\n" +
-		"  get_project_context   Condensed project context (sessions, threads,\n" +
-		"                        decisions, friction trends)\n" +
-		"  get_session_detail    Full markdown of a specific session note\n" +
-		"  list_projects         All projects with session counts and date ranges\n" +
-		"  search_sessions       Search/filter sessions by query, project, files,\n" +
+		"  vv_capture_session    Record a session note from an agent conversation\n" +
+		"  vv_get_effectiveness  Context effectiveness analysis\n" +
+		"  vv_get_friction_trends  Friction and efficiency trend data over time\n" +
+		"  vv_get_knowledge      Project knowledge.md content\n" +
+		"  vv_get_project_context  Condensed project context (sessions, threads,\n" +
+		"                          decisions, friction trends)\n" +
+		"  vv_get_session_detail   Full markdown of a specific session note\n" +
+		"  vv_list_projects      All projects with session counts and date ranges\n" +
+		"  vv_search_sessions    Search/filter sessions by query, project, files,\n" +
 		"                        date range, friction score\n" +
 		"\n" +
-		"Setup:\n" +
+		"Available prompts:\n" +
+		"  vv_session_guidelines   Agent instructions for session capture\n" +
+		"\n" +
+		"Setup (Claude Code):\n" +
 		"  vv mcp install        # adds vibe-vault to ~/.claude/settings.json\n" +
 		"  (restart Claude Code)\n" +
 		"\n" +
-		"Verify \u2014 after restarting Claude Code, ask it to \"list vibe-vault\n" +
-		"projects\" or \"get project context for <project>\". The agent will\n" +
+		"Setup (Zed):\n" +
+		"  vv mcp install --zed  # adds vibe-vault to ~/.config/zed/settings.json\n" +
+		"  (restart Zed)\n" +
+		"\n" +
+		"Verify \u2014 after restarting your editor, ask the agent to \"list\n" +
+		"vibe-vault projects\" or \"capture this session\". The agent will\n" +
 		"call the MCP tools automatically.\n" +
 		"\n" +
 		"The server logs tool calls to stderr for observability.\n",

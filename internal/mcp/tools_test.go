@@ -606,6 +606,120 @@ func TestGetEffectivenessEmpty(t *testing.T) {
 	}
 }
 
+// --- capture_session tests ---
+
+func TestCaptureSessionTool_Success(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+
+	tool := NewCaptureSessionTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{
+		"summary": "Implemented OAuth login flow with Google provider.",
+		"title": "OAuth login implementation",
+		"tag": "implementation",
+		"model": "claude-sonnet-4-6",
+		"decisions": ["Use Google as initial OAuth provider"],
+		"files_changed": ["internal/auth/oauth.go", "internal/auth/handler.go"],
+		"open_threads": ["Add GitHub OAuth provider next"]
+	}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &resp); err != nil {
+		t.Fatalf("invalid JSON response: %v\nresult: %s", err, result)
+	}
+	if resp["status"] != "captured" {
+		t.Errorf("status = %v, want captured", resp["status"])
+	}
+	if resp["project"] == nil || resp["project"] == "" {
+		t.Error("project should be set")
+	}
+	if resp["note_path"] == nil || resp["note_path"] == "" {
+		t.Error("note_path should be set")
+	}
+	if resp["iteration"] == nil {
+		t.Error("iteration should be set")
+	}
+
+	// Verify note was actually written
+	notePath := resp["note_path"].(string)
+	absPath := filepath.Join(cfg.VaultPath, notePath)
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		t.Fatalf("note file not found: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "OAuth login implementation") {
+		t.Error("note should contain the title")
+	}
+	if !strings.Contains(content, "Implemented OAuth login flow") {
+		t.Error("note should contain the summary")
+	}
+	if !strings.Contains(content, "source: zed") {
+		t.Error("note should contain source: zed")
+	}
+}
+
+func TestCaptureSessionTool_MissingSummary(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+
+	tool := NewCaptureSessionTool(cfg)
+	_, err := tool.Handler(json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("expected error for missing summary")
+	}
+	if !strings.Contains(err.Error(), "summary is required") {
+		t.Errorf("error = %v, want 'summary is required'", err)
+	}
+}
+
+func TestCaptureSessionTool_MinimalInput(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+
+	tool := NewCaptureSessionTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"summary": "Fixed a bug in the login flow."}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if resp["status"] != "captured" {
+		t.Errorf("status = %v, want captured", resp["status"])
+	}
+
+	// Verify the note was written and title derived from summary
+	notePath := resp["note_path"].(string)
+	data, _ := os.ReadFile(filepath.Join(cfg.VaultPath, notePath))
+	content := string(data)
+	if !strings.Contains(content, "Fixed a bug in the login flow.") {
+		t.Error("note should contain the summary-derived title")
+	}
+}
+
+func TestFirstSentence(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Implemented OAuth login. Also added tests.", "Implemented OAuth login."},
+		{"Fixed a bug", "Fixed a bug"},
+		{"", "Session"},
+		{"First line\nSecond line", "First line"},
+		{"Short!", "Short!"},
+		{"Is this working? Yes it is.", "Is this working?"},
+	}
+	for _, tt := range tests {
+		got := firstSentence(tt.input)
+		if got != tt.want {
+			t.Errorf("firstSentence(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 // --- validateProjectName tests ---
 
 func TestValidateProjectName(t *testing.T) {

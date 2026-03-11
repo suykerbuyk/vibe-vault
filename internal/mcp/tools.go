@@ -4,18 +4,26 @@
 package mcp
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/johns/vibe-vault/internal/config"
 	"github.com/johns/vibe-vault/internal/effectiveness"
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/inject"
+	"github.com/johns/vibe-vault/internal/narrative"
+	"github.com/johns/vibe-vault/internal/session"
+	"github.com/johns/vibe-vault/internal/transcript"
 	"github.com/johns/vibe-vault/internal/trends"
 )
 
@@ -25,7 +33,7 @@ var dateRegexp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 func NewGetProjectContextTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
-			Name:        "get_project_context",
+			Name:        "vv_get_project_context",
 			Description: "Get condensed project context including recent sessions, open threads, decisions, and friction trends. Use this to understand what has been happening in a project.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
@@ -90,7 +98,7 @@ func NewGetProjectContextTool(cfg config.Config) Tool {
 func NewListProjectsTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
-			Name:        "list_projects",
+			Name:        "vv_list_projects",
 			Description: "List all projects in the vault with session counts and date ranges.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
@@ -167,7 +175,7 @@ func validateProjectName(name string) error {
 func NewSearchSessionsTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
-			Name:        "search_sessions",
+			Name:        "vv_search_sessions",
 			Description: `Search and filter session notes by query, project, files, date range, and friction score. File matching uses filepath.Match which supports * (single segment) but not ** (recursive globs).`,
 			InputSchema: json.RawMessage(`{
 				"type": "object",
@@ -327,7 +335,7 @@ func NewSearchSessionsTool(cfg config.Config) Tool {
 func NewGetKnowledgeTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
-			Name:        "get_knowledge",
+			Name:        "vv_get_knowledge",
 			Description: "Get the knowledge.md file for a project, containing curated project-specific knowledge.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
@@ -380,7 +388,7 @@ func NewGetKnowledgeTool(cfg config.Config) Tool {
 func NewGetSessionDetailTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
-			Name:        "get_session_detail",
+			Name:        "vv_get_session_detail",
 			Description: "Get the full markdown content of a specific session note.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
@@ -451,7 +459,7 @@ func NewGetSessionDetailTool(cfg config.Config) Tool {
 func NewGetFrictionTrendsTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
-			Name:        "get_friction_trends",
+			Name:        "vv_get_friction_trends",
 			Description: "Get friction and efficiency trend data over time, useful for understanding development velocity patterns.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
@@ -500,7 +508,7 @@ func NewGetFrictionTrendsTool(cfg config.Config) Tool {
 func NewGetEffectivenessTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
-			Name:        "get_effectiveness",
+			Name:        "vv_get_effectiveness",
 			Description: "Analyze whether context availability correlates with better session outcomes (lower friction, fewer corrections). Requires vv reprocess --backfill-context to have been run first.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
@@ -535,4 +543,182 @@ func NewGetEffectivenessTool(cfg config.Config) Tool {
 			return string(data) + "\n", nil
 		},
 	}
+}
+
+// NewCaptureSessionTool creates the vv_capture_session tool.
+// This enables push-based session capture from any Zed agent via MCP.
+func NewCaptureSessionTool(cfg config.Config) Tool {
+	return Tool{
+		Definition: ToolDef{
+			Name:        "vv_capture_session",
+			Description: "Record a session note from the current agent conversation. Call this at the end of a work session to capture what was accomplished.",
+			InputSchema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"summary": {
+						"type": "string",
+						"description": "What was accomplished in this session (required)."
+					},
+					"title": {
+						"type": "string",
+						"description": "Note title. Defaults to first sentence of summary."
+					},
+					"tag": {
+						"type": "string",
+						"description": "Activity tag: implementation, debugging, refactor, exploration, review, docs, etc."
+					},
+					"model": {
+						"type": "string",
+						"description": "Model that performed the work (e.g. claude-sonnet-4-6)."
+					},
+					"decisions": {
+						"type": "array",
+						"items": {"type": "string"},
+						"description": "Key decisions made during the session."
+					},
+					"files_changed": {
+						"type": "array",
+						"items": {"type": "string"},
+						"description": "Files that were created or modified."
+					},
+					"open_threads": {
+						"type": "array",
+						"items": {"type": "string"},
+						"description": "Unresolved items or follow-up work."
+					}
+				},
+				"required": ["summary"]
+			}`),
+		},
+		Handler: func(params json.RawMessage) (string, error) {
+			var args struct {
+				Summary      string   `json:"summary"`
+				Title        string   `json:"title"`
+				Tag          string   `json:"tag"`
+				Model        string   `json:"model"`
+				Decisions    []string `json:"decisions"`
+				FilesChanged []string `json:"files_changed"`
+				OpenThreads  []string `json:"open_threads"`
+			}
+			if err := json.Unmarshal(params, &args); err != nil {
+				return "", fmt.Errorf("invalid arguments: %w", err)
+			}
+			if args.Summary == "" {
+				return "", fmt.Errorf("summary is required")
+			}
+
+			// Derive title from summary if not provided
+			title := args.Title
+			if title == "" {
+				title = firstSentence(args.Summary)
+			}
+
+			// Detect context from CWD (Zed sets MCP server CWD to worktree root)
+			cwd, err := os.Getwd()
+			if err != nil {
+				return "", fmt.Errorf("get working directory: %w", err)
+			}
+
+			// Detect git branch (1s timeout, same as detect.go)
+			branch := detectBranch(cwd)
+
+			// Generate unique session ID
+			randBytes := make([]byte, 16)
+			if _, err := rand.Read(randBytes); err != nil {
+				return "", fmt.Errorf("generate session ID: %w", err)
+			}
+			sessionID := "zed-mcp:" + hex.EncodeToString(randBytes)
+
+			// Detect project and domain
+			info := session.Detect(cwd, branch, args.Model, sessionID, cfg)
+
+			// Build minimal transcript that passes triviality check
+			t := &transcript.Transcript{
+				Stats: transcript.Stats{
+					UserMessages:      2,
+					AssistantMessages: 2,
+					StartTime:         time.Now(),
+					FilesWritten:      make(map[string]bool),
+				},
+			}
+			for _, f := range args.FilesChanged {
+				t.Stats.FilesWritten[f] = true
+			}
+
+			// Build narrative from tool input
+			narr := &narrative.Narrative{
+				Title:       title,
+				Summary:     args.Summary,
+				Tag:         args.Tag,
+				Decisions:   args.Decisions,
+				OpenThreads: args.OpenThreads,
+			}
+
+			opts := session.CaptureOpts{
+				Source:         "zed",
+				SkipEnrichment: true,
+				CWD:            cwd,
+				SessionID:      sessionID,
+			}
+
+			result, err := session.CaptureFromParsed(t, info, narr, nil, opts, cfg)
+			if err != nil {
+				return "", fmt.Errorf("capture session: %w", err)
+			}
+
+			if result.Skipped {
+				return fmt.Sprintf(`{"status": "skipped", "reason": %q}`, result.Reason), nil
+			}
+
+			resp := map[string]any{
+				"status":    "captured",
+				"project":   result.Project,
+				"note_path": result.NotePath,
+				"iteration": result.Iteration,
+			}
+			data, _ := json.Marshal(resp)
+			return string(data), nil
+		},
+	}
+}
+
+// firstSentence extracts the first sentence from text.
+func firstSentence(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "Session"
+	}
+	// Split on sentence-ending punctuation followed by space or end
+	for i, ch := range text {
+		if ch == '.' || ch == '!' || ch == '?' {
+			if i+1 >= len(text) || text[i+1] == ' ' || text[i+1] == '\n' {
+				s := text[:i+1]
+				if len(s) > 80 {
+					return s[:77] + "..."
+				}
+				return s
+			}
+		}
+	}
+	// No sentence end found — take first line
+	if idx := strings.IndexByte(text, '\n'); idx > 0 {
+		text = text[:idx]
+	}
+	if len(text) > 80 {
+		return text[:77] + "..."
+	}
+	return text
+}
+
+// detectBranch runs git rev-parse to get the current branch with a 1s timeout.
+func detectBranch(cwd string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = cwd
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
