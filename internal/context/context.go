@@ -28,7 +28,7 @@ type Opts struct {
 // FileAction describes what happened to a file.
 type FileAction struct {
 	Path     string // relative or display path
-	Action   string // "CREATE", "SKIP", "MIGRATE", "UPDATE"
+	Action   string // "CREATE", "SKIP", "UPDATE", "DRY-RUN", "ERROR", "OUTDATED"
 	Location string // "vault", "repo", or "" (for migrations/meta actions)
 }
 
@@ -414,6 +414,11 @@ func validateVault(vaultPath string) error {
 		return fmt.Errorf("vault path %s is not a directory", vaultPath)
 	}
 	return nil
+}
+
+// ResolveProjectPublic resolves the project name from the working directory.
+func ResolveProjectPublic(cwd string) (string, error) {
+	return resolveProject(cwd, "")
 }
 
 func resolveProject(cwd, override string) (string, error) {

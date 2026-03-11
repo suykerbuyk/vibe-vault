@@ -298,6 +298,84 @@ func runContext() {
 				if psr.RepoSkipped {
 					fmt.Printf("  note: %s\n", psr.RepoNote)
 				}
+				// Hint for outdated commands
+				hasOutdated := false
+				for _, a := range psr.Actions {
+					if a.Action == "OUTDATED" {
+						hasOutdated = true
+						break
+					}
+				}
+				if hasOutdated {
+					fmt.Printf("\n  Outdated commands detected. Run: vv context diff --project %s\n", psr.Project)
+				}
+			}
+			return
+		case "diff":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdContextDiff))
+				return
+			}
+			cfg := mustLoadConfig()
+			cwd, err := os.Getwd()
+			if err != nil {
+				fatal("getwd: %v", err)
+			}
+			project := flagValue(args[1:], "--project")
+			if project == "" {
+				project, err = vvcontext.ResolveProjectPublic(cwd)
+				if err != nil {
+					fatal("%v", err)
+				}
+			}
+			agentctxPath := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx")
+			diffs := vvcontext.DiffProjectCommands(agentctxPath)
+			if len(diffs) == 0 {
+				fmt.Println("No outdated commands.")
+				return
+			}
+			for _, d := range diffs {
+				diff := templates.UnifiedDiff(
+					"a/commands/"+d.Name+" (current)",
+					"b/commands/"+d.Name+" (updated)",
+					d.Current,
+					d.Pending,
+				)
+				if diff != "" {
+					fmt.Println(diff)
+				}
+			}
+			return
+		case "accept":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdContextAccept))
+				return
+			}
+			cfg := mustLoadConfig()
+			cwd, err := os.Getwd()
+			if err != nil {
+				fatal("getwd: %v", err)
+			}
+			project := flagValue(args[1:], "--project")
+			if project == "" {
+				project, err = vvcontext.ResolveProjectPublic(cwd)
+				if err != nil {
+					fatal("%v", err)
+				}
+			}
+			agentctxPath := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx")
+			file := flagValue(args[1:], "--file")
+			keepMine := hasFlag(args[1:], "--keep-mine")
+			actions, err := vvcontext.AcceptCommands(agentctxPath, file, keepMine)
+			if err != nil {
+				fatal("%v", err)
+			}
+			if len(actions) == 0 {
+				fmt.Println("No pending updates.")
+				return
+			}
+			for _, a := range actions {
+				printAction(a)
 			}
 			return
 		}

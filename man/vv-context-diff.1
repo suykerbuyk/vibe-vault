@@ -1,0 +1,26 @@
+.TH VV-CONTEXT-DIFF 1 "2026-03-11" "vv 0.7.4-1-g1ba05ef" "Vibe-Vault Manual"
+.SH NAME
+vv-context-diff \- show diffs for outdated project commands
+.SH SYNOPSIS
+.B vv context diff [\-\-project <name>]
+.SH DESCRIPTION
+Shows unified diffs for project commands that have pending template updates.
+.PP
+When "vv context sync" detects that a vault template has changed since the
+project command was created, it writes a .pending sidecar and reports OUTDATED.
+This command shows what changed so you can decide whether to accept the update
+or keep your version.
+.SH OPTIONS
+.TP
+.B \-\-project <name>
+Override auto\-detected project name
+.SH EXAMPLES
+.nf
+vv context diff                       Diff current project
+vv context diff \-\-project myproject   Diff a specific project
+.fi
+.SH SEE ALSO
+.BR vv (1),
+.BR vv\-context (1),
+.BR vv\-context\-sync (1),
+.BR vv\-context\-accept (1)

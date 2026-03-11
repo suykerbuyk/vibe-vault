@@ -451,12 +451,25 @@ func TestPropagateSharedCommands(t *testing.T) {
 
 	actions := propagateSharedCommands(vault, agentctxDir, false)
 
-	// Only new-cmd should be propagated
-	if len(actions) != 1 {
-		t.Errorf("expected 1 action, got %d", len(actions))
+	// Should have CREATE for new-cmd and OUTDATED for existing
+	if len(actions) != 2 {
+		t.Fatalf("expected 2 actions, got %d: %v", len(actions), actions)
 	}
-	if len(actions) > 0 && actions[0].Path != "commands/new-cmd.md" {
-		t.Errorf("action path = %q, want commands/new-cmd.md", actions[0].Path)
+
+	createFound, outdatedFound := false, false
+	for _, a := range actions {
+		if a.Path == "commands/new-cmd.md" && a.Action == "CREATE" {
+			createFound = true
+		}
+		if a.Path == "commands/existing.md" && a.Action == "OUTDATED" {
+			outdatedFound = true
+		}
+	}
+	if !createFound {
+		t.Error("expected CREATE action for new-cmd.md")
+	}
+	if !outdatedFound {
+		t.Error("expected OUTDATED action for existing.md")
 	}
 
 	// existing.md should keep project content
@@ -469,6 +482,198 @@ func TestPropagateSharedCommands(t *testing.T) {
 	data, _ = os.ReadFile(filepath.Join(agentctxDir, "commands", "new-cmd.md"))
 	if string(data) != "# New" {
 		t.Errorf("new command content = %q", string(data))
+	}
+}
+
+func TestSync_PropagateFromV0(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	// Create a v0 (legacy) project — no .version file
+	agentctxDir := filepath.Join(vault, "Projects", "v0prop", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+	os.MkdirAll(filepath.Join(agentctxDir, "tasks"), 0o755)
+	os.WriteFile(filepath.Join(agentctxDir, "resume.md"), []byte("# Resume"), 0o644)
+
+	// Create a shared command template
+	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
+	os.MkdirAll(tmplCmds, 0o755)
+	os.WriteFile(filepath.Join(tmplCmds, "shared.md"), []byte("# Shared"), 0o644)
+
+	result, err := Sync(cfg, cwd, SyncOpts{Project: "v0prop"})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	// Verify migrations ran (v0 -> latest)
+	psr := result.Projects[0]
+	if psr.FromVersion != 0 {
+		t.Errorf("FromVersion = %d, want 0", psr.FromVersion)
+	}
+	if psr.ToVersion != LatestSchemaVersion {
+		t.Errorf("ToVersion = %d, want %d", psr.ToVersion, LatestSchemaVersion)
+	}
+
+	// Verify file exists on disk
+	sharedPath := filepath.Join(agentctxDir, "commands", "shared.md")
+	data, err := os.ReadFile(sharedPath)
+	if err != nil {
+		t.Fatalf("shared command not on disk: %v", err)
+	}
+	if string(data) != "# Shared" {
+		t.Errorf("shared command content = %q, want %q", string(data), "# Shared")
+	}
+
+	// Verify CREATE action reported
+	found := false
+	for _, a := range psr.Actions {
+		if a.Path == "commands/shared.md" && a.Action == "CREATE" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected CREATE action for commands/shared.md, got actions: %v", psr.Actions)
+	}
+}
+
+func TestPropagateSharedCommands_ErrorSurfaced(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("test requires non-root to trigger permission errors")
+	}
+
+	vault := t.TempDir()
+
+	// Create a template command
+	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
+	os.MkdirAll(tmplCmds, 0o755)
+	os.WriteFile(filepath.Join(tmplCmds, "cmd.md"), []byte("# Cmd"), 0o644)
+
+	// Create agentctx dir but make it read-only so MkdirAll for commands/ fails
+	agentctxDir := filepath.Join(vault, "Projects", "errtest", "agentctx")
+	os.MkdirAll(agentctxDir, 0o755)
+	os.Chmod(agentctxDir, 0o555)
+	t.Cleanup(func() { os.Chmod(agentctxDir, 0o755) })
+
+	actions := propagateSharedCommands(vault, agentctxDir, false)
+
+	if len(actions) == 0 {
+		t.Fatal("expected ERROR action, got empty slice")
+	}
+	if !strings.HasPrefix(actions[0].Action, "ERROR:") {
+		t.Errorf("action = %q, want ERROR: prefix", actions[0].Action)
+	}
+	if actions[0].Path != "commands/cmd.md" {
+		t.Errorf("path = %q, want commands/cmd.md", actions[0].Path)
+	}
+}
+
+func TestPropagateSharedCommands_OutdatedDetected(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+
+	// Create template and project command with different content
+	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
+	os.MkdirAll(tmplCmds, 0o755)
+	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte("# New Template Version"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# Old Project Version"), 0o644)
+
+	actions := propagateSharedCommands(vault, agentctxDir, false)
+
+	// Should have OUTDATED action
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
+	}
+	if actions[0].Action != "OUTDATED" {
+		t.Errorf("action = %q, want OUTDATED", actions[0].Action)
+	}
+	if actions[0].Path != "commands/wrap.md" {
+		t.Errorf("path = %q, want commands/wrap.md", actions[0].Path)
+	}
+
+	// .pending file should be written
+	pendingPath := filepath.Join(agentctxDir, "commands", "wrap.md.pending")
+	data, err := os.ReadFile(pendingPath)
+	if err != nil {
+		t.Fatalf("pending file not written: %v", err)
+	}
+	if string(data) != "# New Template Version" {
+		t.Errorf("pending content = %q", string(data))
+	}
+}
+
+func TestPropagateSharedCommands_IdenticalSkipped(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+
+	content := "# Same Content"
+	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
+	os.MkdirAll(tmplCmds, 0o755)
+	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte(content), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte(content), 0o644)
+
+	actions := propagateSharedCommands(vault, agentctxDir, false)
+
+	// No actions — content is identical
+	if len(actions) != 0 {
+		t.Errorf("expected 0 actions for identical content, got %d: %v", len(actions), actions)
+	}
+
+	// No .pending file
+	pendingPath := filepath.Join(agentctxDir, "commands", "wrap.md.pending")
+	if _, err := os.Stat(pendingPath); !os.IsNotExist(err) {
+		t.Error("pending file should not exist for identical content")
+	}
+}
+
+func TestPropagateSharedCommands_PinnedSkipped(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+
+	// Different content but .pinned marker exists
+	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
+	os.MkdirAll(tmplCmds, 0o755)
+	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte("# New Version"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# My Custom"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md.pinned"), []byte("pinned\n"), 0o644)
+
+	actions := propagateSharedCommands(vault, agentctxDir, false)
+
+	// No actions — pinned file is skipped
+	if len(actions) != 0 {
+		t.Errorf("expected 0 actions for pinned file, got %d: %v", len(actions), actions)
+	}
+
+	// No .pending file
+	pendingPath := filepath.Join(agentctxDir, "commands", "wrap.md.pending")
+	if _, err := os.Stat(pendingPath); !os.IsNotExist(err) {
+		t.Error("pending file should not exist for pinned command")
+	}
+}
+
+func TestSyncProject_EnsuresVaultTemplates(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	// Create a project at latest schema — no vault Templates/ dir yet
+	agentctxDir := filepath.Join(vault, "Projects", "tmpltest", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+	vf := newVersionFile(LatestSchemaVersion)
+	WriteVersion(agentctxDir, vf)
+
+	_, err := Sync(cfg, cwd, SyncOpts{Project: "tmpltest"})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	// Vault Templates/agentctx/commands/ should now exist (seeded by EnsureVaultTemplates)
+	tmplDir := filepath.Join(vault, "Templates", "agentctx", "commands")
+	if _, err := os.Stat(tmplDir); os.IsNotExist(err) {
+		t.Error("vault templates not seeded during sync")
 	}
 }
 

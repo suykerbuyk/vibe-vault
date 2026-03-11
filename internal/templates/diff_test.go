@@ -11,14 +11,14 @@ import (
 )
 
 func TestUnifiedDiffIdentical(t *testing.T) {
-	result := unifiedDiff("a", "b", "hello\nworld\n", "hello\nworld\n")
+	result := UnifiedDiff("a", "b", "hello\nworld\n", "hello\nworld\n")
 	if result != "" {
 		t.Errorf("expected empty diff for identical content, got:\n%s", result)
 	}
 }
 
 func TestUnifiedDiffAdded(t *testing.T) {
-	result := unifiedDiff("a", "b", "line1\nline3\n", "line1\nline2\nline3\n")
+	result := UnifiedDiff("a", "b", "line1\nline3\n", "line1\nline2\nline3\n")
 	if !strings.Contains(result, "+line2") {
 		t.Errorf("expected +line2 in diff:\n%s", result)
 	}
@@ -28,14 +28,14 @@ func TestUnifiedDiffAdded(t *testing.T) {
 }
 
 func TestUnifiedDiffRemoved(t *testing.T) {
-	result := unifiedDiff("a", "b", "line1\nline2\nline3\n", "line1\nline3\n")
+	result := UnifiedDiff("a", "b", "line1\nline2\nline3\n", "line1\nline3\n")
 	if !strings.Contains(result, "-line2") {
 		t.Errorf("expected -line2 in diff:\n%s", result)
 	}
 }
 
 func TestUnifiedDiffModified(t *testing.T) {
-	result := unifiedDiff("a", "b", "hello\nworld\n", "hello\nearth\n")
+	result := UnifiedDiff("a", "b", "hello\nworld\n", "hello\nearth\n")
 	if !strings.Contains(result, "-world") {
 		t.Errorf("expected -world in diff:\n%s", result)
 	}
@@ -47,14 +47,14 @@ func TestUnifiedDiffModified(t *testing.T) {
 func TestUnifiedDiffPreservesTemplateVars(t *testing.T) {
 	a := "# {{PROJECT}}\nold content\n"
 	b := "# {{PROJECT}}\nnew content\n"
-	result := unifiedDiff("a", "b", a, b)
+	result := UnifiedDiff("a", "b", a, b)
 	if !strings.Contains(result, "{{PROJECT}}") {
 		t.Errorf("expected {{PROJECT}} preserved in diff:\n%s", result)
 	}
 }
 
 func TestUnifiedDiffHasHunkHeaders(t *testing.T) {
-	result := unifiedDiff("a/file", "b/file", "line1\nline2\n", "line1\nline3\n")
+	result := UnifiedDiff("a/file", "b/file", "line1\nline2\n", "line1\nline3\n")
 	if !strings.Contains(result, "@@") {
 		t.Errorf("expected @@ hunk header in diff:\n%s", result)
 	}

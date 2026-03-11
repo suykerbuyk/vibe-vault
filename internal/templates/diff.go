@@ -25,7 +25,7 @@ func (r *Registry) Diff(vaultTemplatesDir, relPath string) (string, error) {
 		return "", fmt.Errorf("read vault template: %w", err)
 	}
 
-	return unifiedDiff(
+	return UnifiedDiff(
 		fmt.Sprintf("a/%s (default)", relPath),
 		fmt.Sprintf("b/%s (vault)", relPath),
 		string(defaultContent),
@@ -49,8 +49,8 @@ func (r *Registry) DiffAll(vaultTemplatesDir string) string {
 	return strings.Join(parts, "\n")
 }
 
-// unifiedDiff produces a unified diff between two strings with proper hunk headers.
-func unifiedDiff(nameA, nameB, a, b string) string {
+// UnifiedDiff produces a unified diff between two strings with proper hunk headers.
+func UnifiedDiff(nameA, nameB, a, b string) string {
 	linesA := splitLines(a)
 	linesB := splitLines(b)
 

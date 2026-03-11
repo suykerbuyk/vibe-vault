@@ -4,6 +4,7 @@
 package context
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -74,6 +75,9 @@ func Sync(cfg config.Config, cwd string, opts SyncOpts) (*SyncResult, error) {
 
 func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*ProjectSyncResult, error) {
 	agentctxPath := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx")
+
+	// Ensure vault templates are seeded (idempotent — safeWrite never overwrites)
+	EnsureVaultTemplates(cfg.VaultPath)
 
 	// Read current version
 	vf, err := ReadVersion(agentctxPath)
@@ -188,7 +192,35 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun bool) []File
 		}
 		dstPath := filepath.Join(projectCmdsDir, e.Name())
 		if _, err := os.Stat(dstPath); err == nil {
-			continue // already exists, don't overwrite
+			// Check for .pinned marker — user chose to keep their version
+			if _, pinErr := os.Stat(dstPath + ".pinned"); pinErr == nil {
+				continue
+			}
+			// Compare contents
+			srcPath := filepath.Join(templatesDir, e.Name())
+			srcData, err := os.ReadFile(srcPath)
+			if err != nil {
+				continue
+			}
+			dstData, err := os.ReadFile(dstPath)
+			if err != nil {
+				continue
+			}
+			if bytes.Equal(bytes.TrimSpace(srcData), bytes.TrimSpace(dstData)) {
+				continue // identical
+			}
+			// Write .pending sidecar with new version
+			pendingPath := dstPath + ".pending"
+			if !dryRun {
+				_ = os.MkdirAll(projectCmdsDir, 0o755)
+				os.WriteFile(pendingPath, srcData, 0o644)
+			}
+			actions = append(actions, FileAction{
+				Path:     "commands/" + e.Name(),
+				Action:   "OUTDATED",
+				Location: "vault",
+			})
+			continue
 		}
 
 		if dryRun {
@@ -203,12 +235,24 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun bool) []File
 		srcPath := filepath.Join(templatesDir, e.Name())
 		data, err := os.ReadFile(srcPath)
 		if err != nil {
+			actions = append(actions, FileAction{
+				Path:   "commands/" + e.Name(),
+				Action: "ERROR: " + err.Error(),
+			})
 			continue
 		}
 		if err := os.MkdirAll(projectCmdsDir, 0o755); err != nil {
+			actions = append(actions, FileAction{
+				Path:   "commands/" + e.Name(),
+				Action: "ERROR: " + err.Error(),
+			})
 			continue
 		}
 		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+			actions = append(actions, FileAction{
+				Path:   "commands/" + e.Name(),
+				Action: "ERROR: " + err.Error(),
+			})
 			continue
 		}
 		actions = append(actions, FileAction{

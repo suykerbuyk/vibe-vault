@@ -644,6 +644,52 @@ symlinks). Run from each repo root without --all for repo-side updates.`,
 	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-templates(1)"},
 }
 
+var CmdContextDiff = Command{
+	Name:     "context diff",
+	Synopsis: "show diffs for outdated project commands",
+	Brief:    "Diff outdated project commands",
+	Usage:    "vv context diff [--project <name>]",
+	Flags: []Flag{
+		{Name: "--project <name>", Desc: "Override auto-detected project name"},
+	},
+	Description: `Shows unified diffs for project commands that have pending template updates.
+
+When "vv context sync" detects that a vault template has changed since the
+project command was created, it writes a .pending sidecar and reports OUTDATED.
+This command shows what changed so you can decide whether to accept the update
+or keep your version.`,
+	Examples: []string{
+		"vv context diff                       Diff current project",
+		"vv context diff --project myproject   Diff a specific project",
+	},
+	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-context-sync(1)", "vv-context-accept(1)"},
+}
+
+var CmdContextAccept = Command{
+	Name:     "context accept",
+	Synopsis: "accept or pin outdated command updates",
+	Brief:    "Accept or pin command updates",
+	Usage:    "vv context accept [--project <name>] [--file <name>] [--keep-mine]",
+	Flags: []Flag{
+		{Name: "--project <name>", Desc: "Override auto-detected project name"},
+		{Name: "--file <name>", Desc: "Accept only this file (e.g. wrap.md)"},
+		{Name: "--keep-mine", Desc: "Pin current version instead of accepting the update"},
+	},
+	Description: `Resolves outdated command notifications from "vv context sync".
+
+Without --keep-mine, the pending template update replaces the current command.
+With --keep-mine, a .pinned marker is written so future syncs skip the file.
+
+Without --file, all pending updates are processed.`,
+	Examples: []string{
+		"vv context accept                                    Accept all pending updates",
+		"vv context accept --file wrap.md                     Accept one update",
+		"vv context accept --file wrap.md --keep-mine         Pin your version",
+		"vv context accept --project myproject --keep-mine    Pin all for a project",
+	},
+	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-context-sync(1)", "vv-context-diff(1)"},
+}
+
 var CmdTemplates = Command{
 	Name:     "templates",
 	Synopsis: "inspect, compare, and reset vault templates",
@@ -823,6 +869,8 @@ var ContextSubcommands = []Command{
 	CmdContextInit,
 	CmdContextMigrate,
 	CmdContextSync,
+	CmdContextDiff,
+	CmdContextAccept,
 }
 
 // McpSubcommands is the ordered list of mcp sub-subcommands.
