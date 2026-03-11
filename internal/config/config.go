@@ -27,6 +27,13 @@ type Config struct {
 	Pricing    PricingConfig    `toml:"pricing"`
 	History    HistoryConfig    `toml:"history"`
 	MCP        MCPConfig        `toml:"mcp"`
+	Zed        ZedConfig        `toml:"zed"`
+}
+
+// ZedConfig controls Zed integration behavior.
+type ZedConfig struct {
+	DBPath          string `toml:"db_path"`          // override threads.db location
+	DebounceMinutes int    `toml:"debounce_minutes"` // quiet period for watch (default 5)
 }
 
 // MCPConfig controls MCP server behavior.
@@ -121,6 +128,9 @@ func DefaultConfig() Config {
 		MCP: MCPConfig{
 			DefaultMaxTokens: 4000,
 		},
+		Zed: ZedConfig{
+			DebounceMinutes: 5,
+		},
 	}
 }
 
@@ -143,6 +153,7 @@ func Load() (Config, error) {
 	cfg.Domains.Work = expandHome(cfg.Domains.Work)
 	cfg.Domains.Personal = expandHome(cfg.Domains.Personal)
 	cfg.Domains.Opensource = expandHome(cfg.Domains.Opensource)
+	cfg.Zed.DBPath = expandHome(cfg.Zed.DBPath)
 
 	return cfg, nil
 }
@@ -257,6 +268,12 @@ func (c Config) Overlay(projectConfigPath string) Config {
 	}
 	if md.IsDefined("mcp", "default_max_tokens") {
 		c.MCP.DefaultMaxTokens = overlay.MCP.DefaultMaxTokens
+	}
+	if md.IsDefined("zed", "db_path") {
+		c.Zed.DBPath = overlay.Zed.DBPath
+	}
+	if md.IsDefined("zed", "debounce_minutes") {
+		c.Zed.DebounceMinutes = overlay.Zed.DebounceMinutes
 	}
 
 	return c

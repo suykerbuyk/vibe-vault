@@ -808,7 +808,8 @@ through the same capture pipeline as Claude Code sessions.
 
 Subcommands:
   vv zed backfill   Import threads from Zed threads database
-  vv zed list       List threads in the database`,
+  vv zed list       List threads in the database
+  vv zed watch      Watch for changes and auto-capture`,
 	SeeAlso: []string{"vv(1)", "vv-backfill(1)"},
 }
 
@@ -868,6 +869,7 @@ Shows thread ID, last updated time, message count, and title/summary.`,
 var ZedSubcommands = []Command{
 	CmdZedBackfill,
 	CmdZedList,
+	CmdZedWatch,
 }
 
 // TemplatesSubcommands is the ordered list of templates sub-subcommands.

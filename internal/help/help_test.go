@@ -332,7 +332,8 @@ var expectedTerminal = map[string]string{
 		"\n" +
 		"Subcommands:\n" +
 		"  vv zed backfill   Import threads from Zed threads database\n" +
-		"  vv zed list       List threads in the database\n",
+		"  vv zed list       List threads in the database\n" +
+		"  vv zed watch      Watch for changes and auto-capture\n",
 
 	"mcp": "vv mcp \u2014 start MCP server for AI agent integration\n" +
 		"\n" +

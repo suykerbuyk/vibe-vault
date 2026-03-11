@@ -624,8 +624,8 @@ func NewCaptureSessionTool(cfg config.Config) Tool {
 
 			// Generate unique session ID
 			randBytes := make([]byte, 16)
-			if _, err := rand.Read(randBytes); err != nil {
-				return "", fmt.Errorf("generate session ID: %w", err)
+			if _, randErr := rand.Read(randBytes); randErr != nil {
+				return "", fmt.Errorf("generate session ID: %w", randErr)
 			}
 			sessionID := "zed-mcp:" + hex.EncodeToString(randBytes)
 

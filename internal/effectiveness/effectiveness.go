@@ -250,21 +250,21 @@ func Format(r Result) string {
 	sb.WriteString(strings.Repeat("=", 50) + "\n\n")
 
 	for _, p := range r.Projects {
-		sb.WriteString(fmt.Sprintf("Project: %s (%d sessions, %d with context data)\n", p.Project, p.TotalSessions, p.WithContext))
-		sb.WriteString(fmt.Sprintf("Confidence: %s\n", p.Confidence))
+		fmt.Fprintf(&sb, "Project: %s (%d sessions, %d with context data)\n", p.Project, p.TotalSessions, p.WithContext)
+		fmt.Fprintf(&sb, "Confidence: %s\n", p.Confidence)
 
 		if len(p.Cohorts) > 0 {
-			sb.WriteString(fmt.Sprintf("\n  %-18s %8s %10s %12s %10s\n", "Cohort", "Sessions", "Friction", "Corrections", "Duration"))
-			sb.WriteString(fmt.Sprintf("  %-18s %8s %10s %12s %10s\n", strings.Repeat("-", 18), "--------", "----------", "------------", "----------"))
+			fmt.Fprintf(&sb, "\n  %-18s %8s %10s %12s %10s\n", "Cohort", "Sessions", "Friction", "Corrections", "Duration")
+			fmt.Fprintf(&sb, "  %-18s %8s %10s %12s %10s\n", strings.Repeat("-", 18), "--------", "----------", "------------", "----------")
 			for _, c := range p.Cohorts {
-				sb.WriteString(fmt.Sprintf("  %-18s %8d %10.1f %12.1f %8.0f min\n", c.Label, c.Sessions, c.AvgFriction, c.AvgCorrections, c.AvgDuration))
+				fmt.Fprintf(&sb, "  %-18s %8d %10.1f %12.1f %8.0f min\n", c.Label, c.Sessions, c.AvgFriction, c.AvgCorrections, c.AvgDuration)
 			}
 		}
 
 		if p.Correlation != 0 {
-			sb.WriteString(fmt.Sprintf("\nCorrelation (HistorySessions vs Friction): r = %.3f\n", p.Correlation))
+			fmt.Fprintf(&sb, "\nCorrelation (HistorySessions vs Friction): r = %.3f\n", p.Correlation)
 		}
-		sb.WriteString(fmt.Sprintf("Summary: %s\n\n", p.Summary))
+		fmt.Fprintf(&sb, "Summary: %s\n\n", p.Summary)
 	}
 
 	return sb.String()

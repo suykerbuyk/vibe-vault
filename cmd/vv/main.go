@@ -15,6 +15,7 @@ import (
 
 	"context"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/johns/vibe-vault/internal/archive"
@@ -794,6 +795,13 @@ func runZed() {
 			}
 			runZedList(args[1:])
 			return
+		case "watch":
+			if wantsHelp(args[1:]) {
+				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdZedWatch))
+				return
+			}
+			runZedWatch(args[1:])
+			return
 		}
 	}
 
@@ -837,83 +845,7 @@ func runZedBackfill(args []string) {
 	}
 	fmt.Printf("Found %d threads\n", len(threads))
 
-	// Load index once for batch mode
-	stateDir := cfg.StateDir()
-	if mkdirErr := os.MkdirAll(stateDir, 0o755); mkdirErr != nil {
-		log.Printf("warning: could not create state dir: %v", mkdirErr)
-	}
-	indexLockPath := filepath.Join(stateDir, "session-index.json")
-	fl, lockErr := index.Lock(indexLockPath)
-	if lockErr != nil {
-		log.Printf("warning: could not acquire index lock: %v", lockErr)
-	}
-	defer func() {
-		if fl != nil {
-			_ = fl.Unlock()
-		}
-	}()
-
-	idx, err := index.Load(cfg.StateDir())
-	if err != nil {
-		fatal("load index: %v", err)
-	}
-
-	var processed, skipped, errors int
-
-	for _, thread := range threads {
-		info := zed.DetectProject(&thread, cfg)
-
-		// Filter by project
-		if projectFilter != "" && info.Project != projectFilter {
-			skipped++
-			continue
-		}
-
-		// Convert thread to transcript
-		t, err := zed.Convert(&thread)
-		if err != nil {
-			log.Printf("error converting thread %s: %v", thread.ID, err)
-			errors++
-			continue
-		}
-		if t == nil {
-			skipped++
-			continue
-		}
-
-		// Extract narrative and dialogue
-		narr := zed.ExtractNarrative(&thread)
-		dialogue := zed.ExtractDialogue(&thread)
-
-		opts := session.CaptureOpts{
-			TranscriptPath: fmt.Sprintf("zed:%s#%s", dbPath, thread.ID),
-			Source:         "zed",
-			Force:          force,
-			SkipEnrichment: true,
-			Index:          idx,
-		}
-
-		result, err := session.CaptureFromParsed(t, info, narr, dialogue, opts, cfg)
-		if err != nil {
-			log.Printf("error processing thread %s: %v", thread.ID, err)
-			errors++
-			continue
-		}
-
-		if result.Skipped {
-			skipped++
-			continue
-		}
-
-		processed++
-		fmt.Printf("  %s → %s\n", result.Project, result.NotePath)
-	}
-
-	// Save index once after all processing
-	if err := idx.Save(); err != nil {
-		log.Printf("warning: could not save index: %v", err)
-	}
-
+	processed, skipped, errors := captureZedThreads(threads, dbPath, projectFilter, force, cfg)
 	fmt.Printf("\nprocessed: %d, skipped: %d, errors: %d\n", processed, skipped, errors)
 }
 
@@ -967,6 +899,152 @@ func runZedList(args []string) {
 		updated := t.UpdatedAt.Format("2006-01-02 15:04:05")
 		fmt.Printf("%-36s  %-19s  %-6d  %s\n", t.ID, updated, len(t.Messages), title)
 	}
+}
+
+func runZedWatch(args []string) {
+	cfg := mustLoadConfig()
+
+	dbPath := flagValue(args, "--db")
+	if dbPath == "" && cfg.Zed.DBPath != "" {
+		dbPath = cfg.Zed.DBPath
+	}
+	if dbPath == "" {
+		dbPath = zed.DefaultDBPath()
+	}
+	if dbPath == "" {
+		fatal("cannot determine Zed threads database path")
+	}
+
+	projectFilter := flagValue(args, "--project")
+
+	debounce := time.Duration(cfg.Zed.DebounceMinutes) * time.Minute
+	if d := flagValue(args, "--debounce"); d != "" {
+		parsed, err := time.ParseDuration(d)
+		if err != nil {
+			fatal("--debounce: %v", err)
+		}
+		debounce = parsed
+	}
+
+	fmt.Printf("Watching %s (debounce %s)\n", dbPath, debounce)
+	if projectFilter != "" {
+		fmt.Printf("Filtering for project: %s\n", projectFilter)
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+
+	// Mutex to prevent concurrent callback invocations
+	var mu sync.Mutex
+
+	err := zed.Watch(ctx, zed.WatcherConfig{
+		DBPath:   dbPath,
+		Debounce: debounce,
+		Logger:   log.Default(),
+	}, func() {
+		mu.Lock()
+		defer mu.Unlock()
+
+		window := debounce + time.Minute
+		since := time.Now().Add(-window)
+
+		threads, err := zed.ParseDB(dbPath, zed.ParseOpts{Since: since})
+		if err != nil {
+			log.Printf("error reading threads: %v", err)
+			return
+		}
+
+		if len(threads) == 0 {
+			return
+		}
+
+		processed, skipped, errors := captureZedThreads(threads, dbPath, projectFilter, false, cfg)
+		if processed > 0 || errors > 0 {
+			fmt.Printf("[%s] captured: %d, skipped: %d, errors: %d\n",
+				time.Now().Format("15:04:05"), processed, skipped, errors)
+		}
+	})
+
+	if err != nil && err != context.Canceled {
+		fatal("watcher: %v", err)
+	}
+}
+
+// captureZedThreads processes a batch of Zed threads through the capture pipeline.
+// Shared between runZedBackfill and runZedWatch.
+func captureZedThreads(threads []zed.Thread, dbPath, projectFilter string, force bool, cfg config.Config) (processed, skipped, errors int) {
+	stateDir := cfg.StateDir()
+	if mkdirErr := os.MkdirAll(stateDir, 0o755); mkdirErr != nil {
+		log.Printf("warning: could not create state dir: %v", mkdirErr)
+	}
+	indexLockPath := filepath.Join(stateDir, "session-index.json")
+	fl, lockErr := index.Lock(indexLockPath)
+	if lockErr != nil {
+		log.Printf("warning: could not acquire index lock: %v", lockErr)
+	}
+	defer func() {
+		if fl != nil {
+			_ = fl.Unlock()
+		}
+	}()
+
+	idx, err := index.Load(cfg.StateDir())
+	if err != nil {
+		log.Printf("error loading index: %v", err)
+		return 0, 0, len(threads)
+	}
+
+	for _, thread := range threads {
+		info := zed.DetectProject(&thread, cfg)
+
+		if projectFilter != "" && info.Project != projectFilter {
+			skipped++
+			continue
+		}
+
+		t, err := zed.Convert(&thread)
+		if err != nil {
+			log.Printf("error converting thread %s: %v", thread.ID, err)
+			errors++
+			continue
+		}
+		if t == nil {
+			skipped++
+			continue
+		}
+
+		narr := zed.ExtractNarrative(&thread)
+		dialogue := zed.ExtractDialogue(&thread)
+
+		opts := session.CaptureOpts{
+			TranscriptPath: fmt.Sprintf("zed:%s#%s", dbPath, thread.ID),
+			Source:         "zed",
+			Force:          force,
+			SkipEnrichment: true,
+			Index:          idx,
+		}
+
+		result, err := session.CaptureFromParsed(t, info, narr, dialogue, opts, cfg)
+		if err != nil {
+			log.Printf("error processing thread %s: %v", thread.ID, err)
+			errors++
+			continue
+		}
+
+		if result.Skipped {
+			skipped++
+			continue
+		}
+
+		processed++
+		fmt.Printf("  %s → %s\n", result.Project, result.NotePath)
+	}
+
+	if err := idx.Save(); err != nil {
+		log.Printf("warning: could not save index: %v", err)
+	}
+
+	return processed, skipped, errors
 }
 
 func runMcp() {
@@ -1225,7 +1303,7 @@ func runReprocess() {
 		if lockErr != nil {
 			fatal("acquire index lock: %v", lockErr)
 		}
-		defer fl.Unlock()
+		defer func() { _ = fl.Unlock() }()
 
 		idx, err := index.Load(cfg.StateDir())
 		if err != nil {

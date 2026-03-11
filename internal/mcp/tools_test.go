@@ -626,8 +626,8 @@ func TestCaptureSessionTool_Success(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	if err := json.Unmarshal([]byte(result), &resp); err != nil {
-		t.Fatalf("invalid JSON response: %v\nresult: %s", err, result)
+	if unmarshalErr := json.Unmarshal([]byte(result), &resp); unmarshalErr != nil {
+		t.Fatalf("invalid JSON response: %v\nresult: %s", unmarshalErr, result)
 	}
 	if resp["status"] != "captured" {
 		t.Errorf("status = %v, want captured", resp["status"])
