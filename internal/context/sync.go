@@ -212,8 +212,20 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun bool) []File
 			// Write .pending sidecar with new version
 			pendingPath := dstPath + ".pending"
 			if !dryRun {
-				_ = os.MkdirAll(projectCmdsDir, 0o755)
-				os.WriteFile(pendingPath, srcData, 0o644)
+				if err := os.MkdirAll(projectCmdsDir, 0o755); err != nil {
+					actions = append(actions, FileAction{
+						Path:   "commands/" + e.Name() + ".pending",
+						Action: "ERROR: " + err.Error(),
+					})
+					continue
+				}
+				if err := os.WriteFile(pendingPath, srcData, 0o644); err != nil {
+					actions = append(actions, FileAction{
+						Path:   "commands/" + e.Name() + ".pending",
+						Action: "ERROR: " + err.Error(),
+					})
+					continue
+				}
 			}
 			actions = append(actions, FileAction{
 				Path:     "commands/" + e.Name(),

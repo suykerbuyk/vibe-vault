@@ -677,4 +677,95 @@ func TestSyncProject_EnsuresVaultTemplates(t *testing.T) {
 	}
 }
 
+func TestSync_PropagatesThroughSymlink(t *testing.T) {
+	vault := t.TempDir()
+	repoDir := t.TempDir()
+	cfg := testConfig(vault)
+
+	// Create project agentctx in the vault at latest version
+	agentctxDir := filepath.Join(vault, "Projects", "symtest", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+	vf := newVersionFile(LatestSchemaVersion)
+	WriteVersion(agentctxDir, vf)
+
+	// Create a symlink from the repo to the vault agentctx (mimics real setup)
+	symlink := filepath.Join(repoDir, "agentctx")
+	if err := os.Symlink(agentctxDir, symlink); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// Create a shared command template
+	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
+	os.MkdirAll(tmplCmds, 0o755)
+	os.WriteFile(filepath.Join(tmplCmds, "shared.md"), []byte("# Shared Command"), 0o644)
+
+	result, err := Sync(cfg, repoDir, SyncOpts{Project: "symtest"})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	// Verify CREATE action reported
+	found := false
+	for _, psr := range result.Projects {
+		for _, a := range psr.Actions {
+			if a.Path == "commands/shared.md" && a.Action == "CREATE" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("expected CREATE action for commands/shared.md")
+	}
+
+	// Verify file exists at the vault path (direct)
+	vaultFile := filepath.Join(agentctxDir, "commands", "shared.md")
+	data, err := os.ReadFile(vaultFile)
+	if err != nil {
+		t.Fatalf("file not on disk at vault path: %v", err)
+	}
+	if string(data) != "# Shared Command" {
+		t.Errorf("vault content = %q", string(data))
+	}
+
+	// Verify file is accessible through the repo symlink
+	symlinkFile := filepath.Join(symlink, "commands", "shared.md")
+	data, err = os.ReadFile(symlinkFile)
+	if err != nil {
+		t.Fatalf("file not accessible through symlink: %v", err)
+	}
+	if string(data) != "# Shared Command" {
+		t.Errorf("symlink content = %q", string(data))
+	}
+}
+
+func TestPropagateSharedCommands_PendingErrorSurfaced(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("test requires non-root to trigger permission errors")
+	}
+
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	cmdsDir := filepath.Join(agentctxDir, "commands")
+	os.MkdirAll(cmdsDir, 0o755)
+
+	// Create template and project command with different content (triggers OUTDATED)
+	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
+	os.MkdirAll(tmplCmds, 0o755)
+	os.WriteFile(filepath.Join(tmplCmds, "cmd.md"), []byte("# New Version"), 0o644)
+	os.WriteFile(filepath.Join(cmdsDir, "cmd.md"), []byte("# Old Version"), 0o644)
+
+	// Make commands dir read-only so .pending write fails
+	os.Chmod(cmdsDir, 0o555)
+	t.Cleanup(func() { os.Chmod(cmdsDir, 0o755) })
+
+	actions := propagateSharedCommands(vault, agentctxDir, false)
+
+	if len(actions) == 0 {
+		t.Fatal("expected ERROR action for .pending write, got empty slice")
+	}
+	if !strings.HasPrefix(actions[0].Action, "ERROR:") {
+		t.Errorf("action = %q, want ERROR: prefix", actions[0].Action)
+	}
+}
+
 // testConfig is defined in context_test.go
