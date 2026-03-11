@@ -324,10 +324,77 @@ func readSettings(path string) (map[string]any, error) {
 	}
 
 	var settings map[string]any
-	if err := json.Unmarshal(data, &settings); err != nil {
+	if err := json.Unmarshal(stripJSONC(data), &settings); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", config.CompressHome(path), err)
 	}
 	return settings, nil
+}
+
+// stripJSONC removes // line comments, /* block comments */, and trailing
+// commas from JSONC input so it can be parsed by encoding/json. Handles
+// comments inside strings correctly (they are preserved).
+func stripJSONC(data []byte) []byte {
+	var out []byte
+	i := 0
+	for i < len(data) {
+		// String literal — copy verbatim (including any // or /* inside).
+		if data[i] == '"' {
+			out = append(out, data[i])
+			i++
+			for i < len(data) {
+				out = append(out, data[i])
+				if data[i] == '\\' {
+					i++
+					if i < len(data) {
+						out = append(out, data[i])
+					}
+				} else if data[i] == '"' {
+					break
+				}
+				i++
+			}
+			i++
+			continue
+		}
+
+		// Line comment.
+		if i+1 < len(data) && data[i] == '/' && data[i+1] == '/' {
+			for i < len(data) && data[i] != '\n' {
+				i++
+			}
+			continue
+		}
+
+		// Block comment.
+		if i+1 < len(data) && data[i] == '/' && data[i+1] == '*' {
+			i += 2
+			for i+1 < len(data) && !(data[i] == '*' && data[i+1] == '/') {
+				i++
+			}
+			i += 2
+			continue
+		}
+
+		out = append(out, data[i])
+		i++
+	}
+
+	// Strip trailing commas before } or ].
+	result := make([]byte, 0, len(out))
+	for j := 0; j < len(out); j++ {
+		if out[j] == ',' {
+			// Look ahead past whitespace for } or ].
+			k := j + 1
+			for k < len(out) && (out[k] == ' ' || out[k] == '\t' || out[k] == '\n' || out[k] == '\r') {
+				k++
+			}
+			if k < len(out) && (out[k] == '}' || out[k] == ']') {
+				continue // skip trailing comma
+			}
+		}
+		result = append(result, out[j])
+	}
+	return result
 }
 
 // writeSettings writes the settings map as pretty-printed JSON.

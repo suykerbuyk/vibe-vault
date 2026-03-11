@@ -726,3 +726,130 @@ func TestUninstallMCPZed_NotInstalled(t *testing.T) {
 		t.Fatalf("expected nil error, got: %v", err)
 	}
 }
+
+// --- JSONC stripping tests ---
+
+func TestStripJSONC_LineComments(t *testing.T) {
+	input := []byte(`// header comment
+{
+  // inline comment
+  "key": "value"
+}`)
+	var m map[string]any
+	if err := json.Unmarshal(stripJSONC(input), &m); err != nil {
+		t.Fatalf("failed to parse after stripping: %v", err)
+	}
+	if m["key"] != "value" {
+		t.Errorf("expected key=value, got %v", m["key"])
+	}
+}
+
+func TestStripJSONC_BlockComments(t *testing.T) {
+	input := []byte(`{
+  /* block comment */
+  "key": "value"
+}`)
+	var m map[string]any
+	if err := json.Unmarshal(stripJSONC(input), &m); err != nil {
+		t.Fatalf("failed to parse after stripping: %v", err)
+	}
+	if m["key"] != "value" {
+		t.Errorf("expected key=value, got %v", m["key"])
+	}
+}
+
+func TestStripJSONC_TrailingCommas(t *testing.T) {
+	input := []byte(`{
+  "a": 1,
+  "b": [1, 2, 3,],
+}`)
+	var m map[string]any
+	if err := json.Unmarshal(stripJSONC(input), &m); err != nil {
+		t.Fatalf("failed to parse after stripping: %v", err)
+	}
+	if m["a"] != float64(1) {
+		t.Errorf("expected a=1, got %v", m["a"])
+	}
+}
+
+func TestStripJSONC_CommentsInsideStrings(t *testing.T) {
+	input := []byte(`{
+  "url": "https://example.com/path",
+  "note": "this has // slashes and /* stars */"
+}`)
+	var m map[string]any
+	if err := json.Unmarshal(stripJSONC(input), &m); err != nil {
+		t.Fatalf("failed to parse after stripping: %v", err)
+	}
+	if m["url"] != "https://example.com/path" {
+		t.Errorf("URL was corrupted: %v", m["url"])
+	}
+	if m["note"] != "this has // slashes and /* stars */" {
+		t.Errorf("string content was corrupted: %v", m["note"])
+	}
+}
+
+func TestStripJSONC_ZedStyleSettings(t *testing.T) {
+	// Realistic Zed settings.json with comments before the object
+	input := []byte(`// Zed settings
+//
+// For information on how to configure Zed, see the Zed
+// documentation: https://zed.dev/docs/configuring-zed
+{
+  "theme": "One Dark",
+  "terminal": {
+    "dock": "right",
+  },
+}`)
+	var m map[string]any
+	if err := json.Unmarshal(stripJSONC(input), &m); err != nil {
+		t.Fatalf("failed to parse Zed-style settings: %v", err)
+	}
+	if m["theme"] != "One Dark" {
+		t.Errorf("expected theme=One Dark, got %v", m["theme"])
+	}
+}
+
+func TestStripJSONC_StrictJSON(t *testing.T) {
+	// Standard JSON (no comments, no trailing commas) passes through unchanged.
+	input := []byte(`{"key": "value", "num": 42}`)
+	var m map[string]any
+	if err := json.Unmarshal(stripJSONC(input), &m); err != nil {
+		t.Fatalf("strict JSON broke after stripping: %v", err)
+	}
+	if m["key"] != "value" {
+		t.Errorf("expected key=value, got %v", m["key"])
+	}
+}
+
+func TestInstallMCPZed_WithJSONC(t *testing.T) {
+	home := setupHome(t)
+	path := zedSettingsPath(home)
+
+	// Write a JSONC file (with comments and trailing commas) like Zed generates.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jsonc := []byte(`// Zed settings
+{
+  "theme": "One Dark",
+  "terminal": {
+    "dock": "right",
+  },
+}`)
+	if err := os.WriteFile(path, jsonc, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InstallMCPZed(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	if !hasMCPZed(settings) {
+		t.Error("missing vibe-vault Zed entry")
+	}
+	if settings["theme"] != "One Dark" {
+		t.Error("existing theme was lost")
+	}
+}
