@@ -25,12 +25,12 @@ project: {{PROJECT}}
 
 ## Reference Documents
 
-| Document | Location | Purpose |
-|----------|----------|---------|
-| resume.md | agentctx/ | This file — current state and navigation |
-| workflow.md | agentctx/ | AI workflow rules and pair programming paradigm |
-| iterations.md | agentctx/ | Append-only archive of iteration narratives |
-| tasks/ | agentctx/ | Active task files; tasks/done/ for completed |
+| Document | Access | Purpose |
+|----------|--------|---------|
+| resume.md | `vv_get_resume` | This file — current state and navigation |
+| workflow.md | `vv_get_workflow` | AI workflow rules and pair programming paradigm |
+| iterations.md | `vv_get_project_context` | Append-only archive of iteration narratives |
+| tasks/ | `vv_list_tasks` / `vv_get_task` | Active task files; tasks/done/ for completed |
 
 <!-- Add doc/ entries as project documentation grows:
 | ARCHITECTURE.md | doc/ | Data flow, module responsibilities |

@@ -771,66 +771,57 @@ func TestIntegration(t *testing.T) {
 			t.Error("vault agentctx/tasks/done/ not created")
 		}
 
-		// Repo-side: CLAUDE.md is a thin pointer to agentctx
+		// Repo-side: CLAUDE.md is a regular file with MCP-first content
 		if !fileExists(filepath.Join(repoCwd, "CLAUDE.md")) {
 			t.Error("repo CLAUDE.md not created by context init")
 		} else {
 			claudeContent := readFile(t, filepath.Join(repoCwd, "CLAUDE.md"))
-			assertContains(t, claudeContent, "agentctx", "CLAUDE.md points to agentctx")
+			assertContains(t, claudeContent, "vv_bootstrap_context", "CLAUDE.md references MCP bootstrap")
 		}
 
-		// Repo-side: .claude/commands is a directory symlink
+		// Repo-side: CLAUDE.md is NOT a symlink
+		if isSymlink(filepath.Join(repoCwd, "CLAUDE.md")) {
+			t.Error("CLAUDE.md should be a regular file, not a symlink")
+		}
+
+		// Repo-side: .claude/commands is a real directory (not symlink)
 		cmdsPath := filepath.Join(repoCwd, ".claude", "commands")
-		if !isSymlink(cmdsPath) {
-			t.Error(".claude/commands is not a symlink after context init")
-		} else {
-			target, err := os.Readlink(cmdsPath)
-			if err != nil {
-				t.Errorf("readlink .claude/commands: %v", err)
-			} else {
-				assertContains(t, target, filepath.Join("agentctx", "commands"), "symlink target points to agentctx/commands")
-			}
+		if isSymlink(cmdsPath) {
+			t.Error(".claude/commands should be a real directory, not a symlink")
 		}
 
-		// Symlink resolves: commands are readable through it
+		// Commands are readable through the directory
 		if !fileExists(filepath.Join(cmdsPath, "restart.md")) {
-			t.Error("restart.md not readable through .claude/commands symlink")
+			t.Error("restart.md not readable in .claude/commands/")
 		}
 		if !fileExists(filepath.Join(cmdsPath, "wrap.md")) {
-			t.Error("wrap.md not readable through .claude/commands symlink")
+			t.Error("wrap.md not readable in .claude/commands/")
 		}
 
-		// .gitignore contains expected entries (including agentctx)
+		// .gitignore contains expected entries (NOT agentctx)
 		gitignoreContent := readFile(t, filepath.Join(repoCwd, ".gitignore"))
 		assertContains(t, gitignoreContent, "CLAUDE.md", ".gitignore contains CLAUDE.md")
 		assertContains(t, gitignoreContent, "commit.msg", ".gitignore contains commit.msg")
-		assertContains(t, gitignoreContent, "agentctx", ".gitignore contains agentctx")
+		assertNotContains(t, gitignoreContent, "agentctx", ".gitignore should NOT contain agentctx")
 
-		// Phase 1: .version file created at latest schema
+		// .version file created at latest schema
 		if !fileExists(filepath.Join(agentctxDir, ".version")) {
 			t.Error("vault agentctx/.version not created")
 		} else {
 			versionContent := readFile(t, filepath.Join(agentctxDir, ".version"))
-			assertContains(t, versionContent, "schema_version = 4", ".version has latest schema")
+			assertContains(t, versionContent, "schema_version = 5", ".version has latest schema")
 		}
 
-		// Phase 2: agentctx symlink at repo root
-		if !isSymlink(filepath.Join(repoCwd, "agentctx")) {
-			t.Error("agentctx symlink not created at repo root")
+		// No agentctx symlink at repo root (v5)
+		if isSymlink(filepath.Join(repoCwd, "agentctx")) {
+			t.Error("agentctx symlink should NOT exist at repo root")
 		}
 
-		// Phase 2: CLAUDE.md has no absolute path
+		// CLAUDE.md has no absolute path
 		claudeContent := readFile(t, filepath.Join(repoCwd, "CLAUDE.md"))
 		assertNotContains(t, claudeContent, vaultPath, "CLAUDE.md should not contain absolute vault path")
-		assertContains(t, claudeContent, "agentctx/", "CLAUDE.md should contain relative agentctx reference")
 
-		// Phase 2: .claude/commands is a relative symlink
-		cmdsTarget, _ := os.Readlink(filepath.Join(repoCwd, ".claude", "commands"))
-		if cmdsTarget != filepath.Join("..", "agentctx", "commands") {
-			t.Errorf(".claude/commands target = %q, want ../agentctx/commands", cmdsTarget)
-		}
-
-		// Phase 3: Templates/agentctx/ seeded in vault
+		// Templates/agentctx/ seeded in vault
 		if !fileExists(filepath.Join(vaultPath, "Templates", "agentctx", "README.md")) {
 			t.Error("Templates/agentctx/README.md not seeded")
 		}
@@ -852,11 +843,11 @@ func TestIntegration(t *testing.T) {
 
 		// Repo-side CLAUDE.md content unchanged
 		claudeAfter := readFile(t, filepath.Join(repoCwd, "CLAUDE.md"))
-		assertContains(t, claudeAfter, "agentctx", "CLAUDE.md still points to agentctx after re-run")
+		assertContains(t, claudeAfter, "vv_bootstrap_context", "CLAUDE.md still has MCP content after re-run")
 
-		// .claude/commands still a valid symlink
-		if !isSymlink(cmdsPath) {
-			t.Error(".claude/commands not a symlink after idempotent re-run")
+		// .claude/commands still a valid directory
+		if !dirExists(cmdsPath) {
+			t.Error(".claude/commands not a directory after idempotent re-run")
 		}
 
 		// --- Section 3: context migrate — verify file copy + symlink replacement ---
@@ -921,14 +912,17 @@ func TestIntegration(t *testing.T) {
 			assertContains(t, content, "Pair Programming", "migrate agentctx/workflow.md behavioral rules")
 		}
 
-		// Repo-side: CLAUDE.md updated to thin pointer
+		// Repo-side: CLAUDE.md updated to MCP-first content
 		migrateClaudeContent := readFile(t, filepath.Join(migrateDir, "CLAUDE.md"))
-		assertContains(t, migrateClaudeContent, "agentctx", "migrated CLAUDE.md points to agentctx")
+		assertContains(t, migrateClaudeContent, "vv_bootstrap_context", "migrated CLAUDE.md has MCP-first content")
 
-		// Repo-side: .claude/commands is now a symlink (directory was replaced)
+		// Repo-side: .claude/commands is a real directory (not symlink)
 		migrateCmdsPath := filepath.Join(migrateDir, ".claude", "commands")
-		if !isSymlink(migrateCmdsPath) {
-			t.Error(".claude/commands is not a symlink after migrate")
+		if isSymlink(migrateCmdsPath) {
+			t.Error(".claude/commands should be a real directory after migrate")
+		}
+		if !dirExists(migrateCmdsPath) {
+			t.Error(".claude/commands should be a directory after migrate")
 		}
 
 		// Local originals preserved
@@ -960,28 +954,31 @@ func TestIntegration(t *testing.T) {
 		os.MkdirAll(filepath.Join(legacyAgentctx, "commands"), 0o755)
 		os.WriteFile(filepath.Join(legacyAgentctx, "resume.md"), []byte("# Resume"), 0o644)
 
-		// Run sync — should migrate 0→3
+		// Run sync — should migrate 0→5
 		stdout := mustRunVVInDir(t, env, syncCwd, "context", "sync", "--project", legacyProject)
 		assertContains(t, stdout, "v0", "sync shows from version")
-		assertContains(t, stdout, "v4", "sync shows to version")
+		assertContains(t, stdout, "v5", "sync shows to version")
 
 		// .version should be at latest
 		versionContent := readFile(t, filepath.Join(legacyAgentctx, ".version"))
-		assertContains(t, versionContent, "schema_version = 4", ".version at latest after sync")
+		assertContains(t, versionContent, "schema_version = 5", ".version at latest after sync")
 
-		// agentctx symlink at repo root
-		if !isSymlink(filepath.Join(syncCwd, "agentctx")) {
-			t.Error("agentctx symlink not created by sync")
+		// No agentctx symlink at repo root (v5)
+		if isSymlink(filepath.Join(syncCwd, "agentctx")) {
+			t.Error("agentctx symlink should NOT exist after v5 sync")
 		}
 
-		// CLAUDE.md has no absolute path
+		// CLAUDE.md should be a regular file with MCP-first content
+		if isSymlink(filepath.Join(syncCwd, "CLAUDE.md")) {
+			t.Error("CLAUDE.md should be a regular file after sync")
+		}
 		claudeContent := readFile(t, filepath.Join(syncCwd, "CLAUDE.md"))
 		assertNotContains(t, claudeContent, vaultPath, "CLAUDE.md should not contain absolute path after sync")
+		assertContains(t, claudeContent, "vv_bootstrap_context", "CLAUDE.md should have MCP-first content")
 
-		// .claude/commands is relative symlink
-		cmdsTarget, _ := os.Readlink(filepath.Join(syncCwd, ".claude", "commands"))
-		if cmdsTarget != filepath.Join("..", "agentctx", "commands") {
-			t.Errorf(".claude/commands target = %q after sync", cmdsTarget)
+		// .claude/commands is a real directory (not symlink)
+		if isSymlink(filepath.Join(syncCwd, ".claude", "commands")) {
+			t.Error(".claude/commands should be a real directory after sync")
 		}
 
 		// Add a shared command to Templates, run sync again → propagated

@@ -1,4 +1,4 @@
-.TH VV-CONTEXT-INIT 1 "2026-03-11" "vv 0.8.0-9-g55de15c" "Vibe-Vault Manual"
+.TH VV-CONTEXT-INIT 1 "2026-03-12" "vv 0.8.0-14-g1b35948" "Vibe-Vault Manual"
 .SH NAME
 vv-context-init \- scaffold vault\-resident context for a project
 .SH SYNOPSIS
@@ -14,8 +14,8 @@ Creates vault\-side context files:
   commands/        Slash commands (restart, wrap, license, makefile)
 .PP
 Creates repo\-side files:
-  CLAUDE.md            Symlink into vault (loaded by AI agents)
-  .claude/commands/    Symlink to vault commands (slash commands)
+  CLAUDE.md            MCP\-first instructions (loaded by AI agents)
+  .claude/commands/    Slash commands (deployed from vault)
   .vibe\-vault.toml     Project identity file (committed to repo)
 .PP
 The .vibe\-vault.toml is created with all values commented out. While

@@ -545,7 +545,7 @@ var CmdContext = Command{
 	Name:     "context",
 	Synopsis: "manage vault-resident AI context files",
 	Brief:    "Manage vault-resident AI context",
-	Usage:      "vv context [init | migrate | sync]",
+	Usage:      "vv context [init | migrate | sync | diff | accept]",
 	TableUsage: "vv context [init | ...]",
 	Description: `Manages AI workflow context files (resume, iterations, tasks) that live
 in the Obsidian vault rather than as untracked repo-local files. This
@@ -554,15 +554,19 @@ makes context portable, searchable, and visible to Obsidian.
 Typical workflow:
   1. vv context init     First-time setup for a new project
   2. vv context sync     Run after updating vv to get new features
+  3. vv context diff     Review pending command updates
+  4. vv context accept   Accept or pin outdated commands
 
 Use "migrate" only if you have an older project with local RESUME.md
 or HISTORY.md files that predate vault-resident context.
 
 Subcommands:
-  vv context init      First-time setup: create context files + repo symlinks
+  vv context init      First-time setup: create context files + repo bootstrap
   vv context migrate   One-time: move legacy local files into vault
-  vv context sync      Ongoing: apply schema upgrades + add new commands`,
-	SeeAlso: []string{"vv(1)", "vv-context-init(1)", "vv-context-migrate(1)", "vv-context-sync(1)"},
+  vv context sync      Ongoing: apply schema upgrades + deploy commands
+  vv context diff      Show pending command diffs
+  vv context accept    Accept or pin outdated command updates`,
+	SeeAlso: []string{"vv(1)", "vv-context-init(1)", "vv-context-migrate(1)", "vv-context-sync(1)", "vv-context-diff(1)", "vv-context-accept(1)"},
 }
 
 var CmdContextInit = Command{
@@ -584,8 +588,8 @@ Creates vault-side context files:
   commands/        Slash commands (restart, wrap, license, makefile)
 
 Creates repo-side files:
-  CLAUDE.md            Symlink into vault (loaded by AI agents)
-  .claude/commands/    Symlink to vault commands (slash commands)
+  CLAUDE.md            MCP-first instructions (loaded by AI agents)
+  .claude/commands/    Slash commands (deployed from vault)
   .vibe-vault.toml     Project identity file (committed to repo)
 
 The .vibe-vault.toml is created with all values commented out. While
@@ -621,7 +625,7 @@ Copies local files into the vault:
   HISTORY.md → Projects/{project}/agentctx/iterations.md
   tasks/     → Projects/{project}/agentctx/tasks/ (recursive)
 
-Then sets up repo-side symlinks (same as init). Local originals are
+Then sets up repo-side files (same as init). Local originals are
 preserved — remove them manually after verifying the migration.
 
 After migrating, use "vv context sync" for future updates.`,
@@ -640,27 +644,27 @@ var CmdContextSync = Command{
 	Usage:    "vv context sync [--project <name>] [--all] [--dry-run] [--force]",
 	Flags: []Flag{
 		{Name: "--project <name>", Desc: "Override auto-detected project name"},
-		{Name: "--all", Desc: "Sync all projects with agentctx (vault-only operations)"},
+		{Name: "--all", Desc: "Sync all projects (vault-only, skip repo deployment)"},
 		{Name: "--dry-run", Desc: "Report changes without modifying any files"},
 		{Name: "--force", Desc: "Force overwrite existing files during migration"},
 	},
 	Description: `Run this from your repo root after upgrading vv to pick up new features.
 
 What sync does:
-  1. Schema migrations — upgrades the agentctx directory structure
-     (e.g., adding symlinks, new directories) to the latest version
-  2. New commands — copies any new slash commands from vault templates
-     into the project's agentctx/commands/
+  1. Schema migrations — upgrades the vault-side agentctx directory and
+     repo-side files (CLAUDE.md, .claude/commands/) to the latest version
+  2. New commands — copies new slash commands from vault templates into
+     the project's agentctx/commands/ and deploys to repo .claude/commands/
 
 What sync does NOT do:
-  - It will not overwrite existing commands you may have customized.
+  - It will not overwrite vault commands you may have customized.
     To update a specific command to the latest default, use:
       vv templates reset --file commands/restart.md --force
     Or to see what changed:
       vv templates diff --file commands/restart.md
 
 In --all mode, only vault-side operations are performed (no repo-side
-symlinks). Run from each repo root without --all for repo-side updates.`,
+deployment). Run from each repo root without --all for repo-side updates.`,
 	Examples: []string{
 		"vv context sync                       Sync current project",
 		"vv context sync --dry-run             Preview changes",

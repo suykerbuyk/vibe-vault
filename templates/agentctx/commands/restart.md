@@ -1,27 +1,23 @@
 ## Restoring full AI thread context:
 
-Read `CLAUDE.md` for AI-specific workflow rules, then read each document it
-references in referenced order to restore full project context:
+Call `vv_bootstrap_context` to load resume, workflow, and active tasks in a
+single call. If MCP tools are not available, run `vv inject` via Bash instead.
 
-1. `resume.md` — current project state, open threads, navigation (thin gateway)
-2. `tasks/*.md` — active task files, if any exist (skip `tasks/done/`).
-   Use `ls agentctx/tasks/` via Bash to enumerate files, then read each one.
-   Do NOT rely on Glob alone — the `agentctx` symlink can cause silent misses.
-3. `iterations.md` — iteration narratives (on demand, not required for routine work)
-4. Run `vv inject` via Bash to load live vault context (recent sessions,
-   open threads, decisions, friction trends, knowledge). Include the
-   full output verbatim in your context — do not summarize it.
-5. If MCP tools are available (vibe-vault server configured), call
-   `vv_get_project_context` for this project. This provides structured JSON
-   context (sessions, threads, decisions, friction) that supplements inject.
-6. `doc/*.md` — stable reference (architecture, design, testing) — read on demand when needed
-7. When a task is completed, move it to `tasks/done/` and append a summary to `iterations.md`.
+After bootstrap, continue loading context in this order:
+
+1. `iterations.md` — iteration narratives (on demand, not required for routine work).
+   Use `vv_get_project_context` or read directly if needed.
+2. Call `vv_get_project_context` for structured context (sessions, threads,
+   decisions, friction trends, knowledge).
+3. `doc/*.md` — stable reference (architecture, design, testing) — read on demand when needed
+4. When a task is completed, use `vv_manage_task` with `action: retire` to move
+   it to `tasks/done/` and use `vv_append_iteration` to record a summary.
 
 After reading, briefly confirm what you loaded and note the current state:
-test count, open tasks, recent session activity from inject, and what was
-last worked on based on recent git history. If active task files exist,
-summarize each with its priority and status, and recommend which to start
-based on priority order and dependencies.
+test count, open tasks, recent session activity, and what was last worked on
+based on recent git history. If active task files exist, summarize each with
+its priority and status, and recommend which to start based on priority order
+and dependencies.
 
 ## Workflow Orchestration
 
@@ -110,9 +106,9 @@ based on priority order and dependencies.
 
 ## Task Management
 
-1. **Plan First**: Write plan to `agentctx/tasks/<task_name>.md` with checkable items
+1. **Plan First**: Write plan using `vv_manage_task` with `action: create`
 2. **Verify Plan**: Check in before starting implementation
-3. **Track Progress**: Mark items complete as you go
+3. **Track Progress**: Use `vv_manage_task` with `action: update_status` as you go
 4. **Explain Changes**: High-level summary at each step in the task file
 5. **Document Results**: Add review section to the task file
 6. **Capture Lessons**: Capture lessons to improve project workflow and deliverables

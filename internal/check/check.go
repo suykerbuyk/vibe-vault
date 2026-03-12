@@ -317,6 +317,50 @@ func CheckAgentctxSchema(vaultPath, project string, latestVersion int) *Result {
 	}
 }
 
+// CheckStaleSymlinks checks for leftover symlinks from pre-v5 schema.
+// Returns nil if no issues found.
+func CheckStaleSymlinks(repoPath string, schemaVersion int) []Result {
+	if schemaVersion < 5 {
+		return nil
+	}
+
+	var results []Result
+
+	// Check for stale agentctx symlink
+	agentctxPath := filepath.Join(repoPath, "agentctx")
+	if info, err := os.Lstat(agentctxPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		results = append(results, Result{
+			Name:   "stale-symlink",
+			Status: Warn,
+			Detail: "agentctx symlink exists but schema >= v5 — run `vv context sync` to remove",
+		})
+	}
+
+	// Check for stale .claude/ subdirectory symlinks
+	for _, sub := range []string{"commands", "rules", "skills", "agents"} {
+		subPath := filepath.Join(repoPath, ".claude", sub)
+		if info, err := os.Lstat(subPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			results = append(results, Result{
+				Name:   "stale-symlink",
+				Status: Warn,
+				Detail: fmt.Sprintf(".claude/%s is a symlink but schema >= v5 — run `vv context sync`", sub),
+			})
+		}
+	}
+
+	// Verify CLAUDE.md is a regular file
+	claudePath := filepath.Join(repoPath, "CLAUDE.md")
+	if info, err := os.Lstat(claudePath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		results = append(results, Result{
+			Name:   "stale-symlink",
+			Status: Warn,
+			Detail: "CLAUDE.md is a symlink but schema >= v5 — run `vv context sync`",
+		})
+	}
+
+	return results
+}
+
 // Run executes all checks against the given config and returns a report.
 func Run(cfg config.Config) Report {
 	var results []Result

@@ -1,4 +1,4 @@
-.TH VV-CONTEXT-MIGRATE 1 "2026-03-11" "vv 0.8.0-9-g55de15c" "Vibe-Vault Manual"
+.TH VV-CONTEXT-MIGRATE 1 "2026-03-12" "vv 0.8.0-14-g1b35948" "Vibe-Vault Manual"
 .SH NAME
 vv-context-migrate \- one\-time import of legacy local context files to vault
 .SH SYNOPSIS
@@ -13,7 +13,7 @@ Copies local files into the vault:
   HISTORY.md → Projects/{project}/agentctx/iterations.md
   tasks/     → Projects/{project}/agentctx/tasks/ (recursive)
 .PP
-Then sets up repo\-side symlinks (same as init). Local originals are
+Then sets up repo\-side files (same as init). Local originals are
 preserved — remove them manually after verifying the migration.
 .PP
 After migrating, use "vv context sync" for future updates.

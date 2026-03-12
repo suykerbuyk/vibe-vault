@@ -11,16 +11,15 @@ disambiguation steps below.
 
 ## Step 1: Identify the task to cancel
 
-List all `.md` files in `agentctx/tasks/` (excluding `done/` and `cancelled/`
-subdirectories). Use `ls` via Bash since `agentctx` is a symlink.
+Use `vv_list_tasks` to list all active tasks.
 
 - **If 0 tasks exist**: tell the user there are no active tasks to cancel.
   Stop here.
 - **If 1 task exists**: proceed with that task. Show its name and status,
   and confirm with the user before continuing.
 - **If 2+ tasks exist**: present a numbered list showing each task's name,
-  priority, and status (read from the file header). Ask the user which one
-  to cancel. Wait for their response before continuing.
+  priority, and status. Ask the user which one to cancel. Wait for their
+  response before continuing.
 
 If an argument was provided, match it against the task filenames. If no match,
 show what's available and ask the user to clarify.
@@ -39,7 +38,7 @@ Wait for their response before continuing.
 
 ## Step 3: Update the task file
 
-Read the task file. Make these changes:
+Use `vv_get_task` to read the task file. Make these changes:
 
 1. Update the **Status** line to `Cancelled (rev N+1)` (increment existing rev)
 2. Add a **Cancelled** date line (today's date, format: YYYY-MM-DD)
@@ -48,21 +47,14 @@ Read the task file. Make these changes:
 
 ## Step 4: Move to cancelled/
 
-Create `agentctx/tasks/cancelled/` if it doesn't exist. Move the task file
-there using Bash (`mv`).
+Use `vv_manage_task` with `action: cancel` to move the task to cancelled/.
 
 ## Step 5: Update iterations.md
 
-Append a brief iteration entry to `agentctx/iterations.md`:
+Use `vv_append_iteration` to append a brief entry:
 
-```
-## Iteration N — YYYY-MM-DD — Cancelled: {task name}
-
-Investigated {task name}; cancelled. {One-sentence rationale summary}.
-See `tasks/cancelled/{filename}` for the full analysis.
-```
-
-Read `iterations.md` to determine the next iteration number.
+Title: `Cancelled: {task name}`
+Narrative: `Investigated {task name}; cancelled. {One-sentence rationale summary}. See tasks/cancelled/{filename} for the full analysis.`
 
 ## Step 6: Update knowledge.md
 
@@ -78,6 +70,7 @@ This prevents future sessions from re-proposing the same work.
 
 ## Step 7: Update resume.md
 
+Using `vv_update_resume`:
 - Remove or update any reference to the cancelled task in the Open Threads
   section
 - Update iteration count if changed
@@ -91,5 +84,4 @@ Report what was done:
 - knowledge.md updated
 - resume.md cleaned up
 
-Note that vault files were updated directly (not staged in git, since
-agentctx is a symlink to the vault).
+Note that vault files were updated via MCP tools.

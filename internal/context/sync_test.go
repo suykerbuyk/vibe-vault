@@ -44,21 +44,29 @@ func TestSync_LegacyProject(t *testing.T) {
 		t.Errorf("SchemaVersion = %d, want %d", vf.SchemaVersion, LatestSchemaVersion)
 	}
 
-	// agentctx symlink should exist at cwd
+	// agentctx symlink should NOT exist at cwd (removed by v5 migration)
 	linkPath := filepath.Join(cwd, "agentctx")
-	if info, lstatErr := os.Lstat(linkPath); lstatErr != nil {
-		t.Errorf("agentctx symlink not created: %v", lstatErr)
-	} else if info.Mode()&os.ModeSymlink == 0 {
-		t.Error("agentctx should be a symlink")
+	if _, lstatErr := os.Lstat(linkPath); !os.IsNotExist(lstatErr) {
+		t.Error("agentctx symlink should not exist after v5 migration")
 	}
 
-	// CLAUDE.md should use relative paths
+	// CLAUDE.md should be a regular file with MCP-first content
+	info, err := os.Lstat(filepath.Join(cwd, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("CLAUDE.md not created: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("CLAUDE.md should be a regular file")
+	}
 	data, err := os.ReadFile(filepath.Join(cwd, "CLAUDE.md"))
 	if err != nil {
 		t.Fatalf("read CLAUDE.md: %v", err)
 	}
 	if strings.Contains(string(data), vault) {
 		t.Error("CLAUDE.md contains absolute vault path")
+	}
+	if !strings.Contains(string(data), "vv_bootstrap_context") {
+		t.Error("CLAUDE.md should contain MCP-first content")
 	}
 }
 
@@ -322,12 +330,12 @@ func TestMigrate1to2_CreatesSymlink(t *testing.T) {
 		t.Fatalf("migrate1to2: %v", err)
 	}
 
-	// agentctx symlink
+	// migrate1to2 still creates agentctx symlink (removed later by migrate4to5)
 	linkPath := filepath.Join(cwd, "agentctx")
 	if info, err := os.Lstat(linkPath); err != nil {
 		t.Errorf("agentctx symlink not created: %v", err)
 	} else if info.Mode()&os.ModeSymlink == 0 {
-		t.Error("agentctx should be a symlink")
+		t.Error("agentctx should be a symlink after migrate1to2")
 	}
 }
 
@@ -357,8 +365,8 @@ func TestMigrate1to2_RewritesCLAUDEMD(t *testing.T) {
 	if strings.Contains(content, vault) {
 		t.Error("CLAUDE.md still contains absolute vault path")
 	}
-	if !strings.Contains(content, "agentctx/") {
-		t.Error("CLAUDE.md missing agentctx reference")
+	if !strings.Contains(content, "vv_bootstrap_context") {
+		t.Error("CLAUDE.md missing vv_bootstrap_context reference")
 	}
 }
 
@@ -765,6 +773,210 @@ func TestPropagateSharedCommands_PendingErrorSurfaced(t *testing.T) {
 	}
 	if !strings.HasPrefix(actions[0].Action, "ERROR:") {
 		t.Errorf("action = %q, want ERROR: prefix", actions[0].Action)
+	}
+}
+
+func TestMigrate4to5(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "restart.md"), []byte("# Restart"), 0o644)
+
+	// Set up v4 layout: symlinks
+	os.Symlink(agentctxDir, filepath.Join(cwd, "agentctx"))
+	os.Symlink(filepath.Join("agentctx", "CLAUDE.md"), filepath.Join(cwd, "CLAUDE.md"))
+	dotClaude := filepath.Join(cwd, ".claude")
+	os.MkdirAll(dotClaude, 0o755)
+	for _, sub := range claudeSubdirs {
+		os.Symlink(filepath.Join("..", "agentctx", sub), filepath.Join(dotClaude, sub))
+	}
+	os.Symlink(filepath.Join("agentctx", "commit.msg"), filepath.Join(cwd, "commit.msg"))
+	os.WriteFile(filepath.Join(agentctxDir, "commit.msg"), []byte("old msg"), 0o644)
+	os.WriteFile(filepath.Join(cwd, ".gitignore"), []byte("/CLAUDE.md\n/commit.msg\n/agentctx\n/agentctx/commands\n"), 0o644)
+
+	// Seed vault templates so resolveTemplate works
+	EnsureVaultTemplates(vault)
+
+	ctx := MigrationContext{
+		AgentctxPath: agentctxDir,
+		RepoPath:     cwd,
+		Project:      "test",
+		VaultPath:    vault,
+		Force:        true,
+	}
+	actions, err := migrate4to5(ctx)
+	if err != nil {
+		t.Fatalf("migrate4to5: %v", err)
+	}
+	if len(actions) == 0 {
+		t.Fatal("expected actions from migrate4to5")
+	}
+
+	// agentctx symlink should be removed
+	if _, lstatErr := os.Lstat(filepath.Join(cwd, "agentctx")); !os.IsNotExist(lstatErr) {
+		t.Error("agentctx symlink should be removed")
+	}
+
+	// CLAUDE.md should be a regular file
+	info, lstatErr := os.Lstat(filepath.Join(cwd, "CLAUDE.md"))
+	if lstatErr != nil {
+		t.Fatalf("CLAUDE.md missing: %v", lstatErr)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("CLAUDE.md should be a regular file")
+	}
+	data, _ := os.ReadFile(filepath.Join(cwd, "CLAUDE.md"))
+	if !strings.Contains(string(data), "vv_bootstrap_context") {
+		t.Error("CLAUDE.md should have MCP-first content")
+	}
+
+	// .claude/commands should be a real directory
+	cmdsInfo, cmdsErr := os.Lstat(filepath.Join(cwd, ".claude", "commands"))
+	if cmdsErr != nil {
+		t.Fatalf(".claude/commands missing: %v", cmdsErr)
+	}
+	if cmdsInfo.Mode()&os.ModeSymlink != 0 {
+		t.Error(".claude/commands should be a real directory")
+	}
+	if !cmdsInfo.IsDir() {
+		t.Error(".claude/commands should be a directory")
+	}
+	// Commands should be deployed
+	if _, statErr := os.Stat(filepath.Join(cwd, ".claude", "commands", "restart.md")); os.IsNotExist(statErr) {
+		t.Error("restart.md not deployed to .claude/commands/")
+	}
+
+	// commit.msg should be a regular file
+	cmInfo, err := os.Lstat(filepath.Join(cwd, "commit.msg"))
+	if err != nil {
+		t.Fatalf("commit.msg missing: %v", err)
+	}
+	if cmInfo.Mode()&os.ModeSymlink != 0 {
+		t.Error("commit.msg should be a regular file")
+	}
+	cmData, _ := os.ReadFile(filepath.Join(cwd, "commit.msg"))
+	if string(cmData) != "old msg" {
+		t.Errorf("commit.msg content = %q, want %q", string(cmData), "old msg")
+	}
+
+	// .gitignore should not contain /agentctx
+	giData, _ := os.ReadFile(filepath.Join(cwd, ".gitignore"))
+	if strings.Contains(string(giData), "agentctx") {
+		t.Error(".gitignore should not contain agentctx after v5 migration")
+	}
+	if !strings.Contains(string(giData), "CLAUDE.md") {
+		t.Error(".gitignore should still contain CLAUDE.md")
+	}
+}
+
+func TestMigrate4to5_VaultOnlySkipsRepo(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+
+	ctx := MigrationContext{
+		AgentctxPath: agentctxDir,
+		RepoPath:     "", // --all mode
+		Project:      "test",
+		VaultPath:    vault,
+	}
+	actions, err := migrate4to5(ctx)
+	if err != nil {
+		t.Fatalf("migrate4to5: %v", err)
+	}
+
+	// Should not have any repo-side actions
+	for _, a := range actions {
+		if a.Location == "repo" {
+			t.Errorf("unexpected repo-side action: %s %s", a.Action, a.Path)
+		}
+	}
+
+	// Should have vault-side template updates
+	if len(actions) == 0 {
+		t.Error("expected vault-side template update actions")
+	}
+}
+
+func TestDeployCommandsToRepo(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+
+	// Set up vault commands
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	cmdsDir := filepath.Join(agentctxDir, "commands")
+	os.MkdirAll(cmdsDir, 0o755)
+	os.WriteFile(filepath.Join(cmdsDir, "restart.md"), []byte("# Restart MCP"), 0o644)
+	os.WriteFile(filepath.Join(cmdsDir, "wrap.md"), []byte("# Wrap MCP"), 0o644)
+	os.WriteFile(filepath.Join(cmdsDir, "wrap.md.pending"), []byte("pending"), 0o644) // should be skipped
+
+	// Set up repo commands dir
+	repoCmdsDir := filepath.Join(cwd, ".claude", "commands")
+	os.MkdirAll(repoCmdsDir, 0o755)
+	os.WriteFile(filepath.Join(repoCmdsDir, "restart.md"), []byte("# Old Restart"), 0o644)
+
+	actions := deployCommandsToRepo(cwd, agentctxDir)
+
+	// restart.md should be updated (different content)
+	// wrap.md should be deployed (new)
+	if len(actions) != 2 {
+		t.Errorf("expected 2 actions, got %d: %v", len(actions), actions)
+	}
+
+	// Verify content
+	data, _ := os.ReadFile(filepath.Join(repoCmdsDir, "restart.md"))
+	if string(data) != "# Restart MCP" {
+		t.Errorf("restart.md not updated: %q", string(data))
+	}
+	data, _ = os.ReadFile(filepath.Join(repoCmdsDir, "wrap.md"))
+	if string(data) != "# Wrap MCP" {
+		t.Errorf("wrap.md not deployed: %q", string(data))
+	}
+
+	// .pending should NOT be deployed
+	if _, err := os.Stat(filepath.Join(repoCmdsDir, "wrap.md.pending")); !os.IsNotExist(err) {
+		t.Error(".pending sidecar should not be deployed to repo")
+	}
+}
+
+func TestGitignoreRemove(t *testing.T) {
+	dir := t.TempDir()
+	giPath := filepath.Join(dir, ".gitignore")
+	os.WriteFile(giPath, []byte("/CLAUDE.md\n/commit.msg\n/agentctx\n"), 0o644)
+
+	removed, err := gitignoreRemove(giPath, "/agentctx")
+	if err != nil {
+		t.Fatalf("gitignoreRemove: %v", err)
+	}
+	if !removed {
+		t.Error("expected entry to be removed")
+	}
+
+	data, _ := os.ReadFile(giPath)
+	content := string(data)
+	if strings.Contains(content, "agentctx") {
+		t.Error("agentctx still in .gitignore")
+	}
+	if !strings.Contains(content, "CLAUDE.md") {
+		t.Error("CLAUDE.md missing from .gitignore")
+	}
+	if !strings.Contains(content, "commit.msg") {
+		t.Error("commit.msg missing from .gitignore")
+	}
+}
+
+func TestGitignoreRemove_NotPresent(t *testing.T) {
+	dir := t.TempDir()
+	giPath := filepath.Join(dir, ".gitignore")
+	os.WriteFile(giPath, []byte("/CLAUDE.md\n/commit.msg\n"), 0o644)
+
+	removed, err := gitignoreRemove(giPath, "/agentctx")
+	if err != nil {
+		t.Fatalf("gitignoreRemove: %v", err)
+	}
+	if removed {
+		t.Error("expected false when entry not present")
 	}
 }
 

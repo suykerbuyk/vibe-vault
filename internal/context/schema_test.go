@@ -93,8 +93,8 @@ func TestWriteVersion_Overwrites(t *testing.T) {
 
 func TestMigrationsFrom_Zero(t *testing.T) {
 	m := migrationsFrom(0)
-	if len(m) != 4 {
-		t.Errorf("migrationsFrom(0) = %d migrations, want 4", len(m))
+	if len(m) != 5 {
+		t.Errorf("migrationsFrom(0) = %d migrations, want 5", len(m))
 	}
 	if m[0].From != 0 || m[0].To != 1 {
 		t.Errorf("first migration: %d→%d, want 0→1", m[0].From, m[0].To)
@@ -108,12 +108,15 @@ func TestMigrationsFrom_Zero(t *testing.T) {
 	if m[3].From != 3 || m[3].To != 4 {
 		t.Errorf("fourth migration: %d→%d, want 3→4", m[3].From, m[3].To)
 	}
+	if m[4].From != 4 || m[4].To != 5 {
+		t.Errorf("fifth migration: %d→%d, want 4→5", m[4].From, m[4].To)
+	}
 }
 
 func TestMigrationsFrom_One(t *testing.T) {
 	m := migrationsFrom(1)
-	if len(m) != 3 {
-		t.Errorf("migrationsFrom(1) = %d migrations, want 3", len(m))
+	if len(m) != 4 {
+		t.Errorf("migrationsFrom(1) = %d migrations, want 4", len(m))
 	}
 	if m[0].From != 1 || m[0].To != 2 {
 		t.Errorf("first migration: %d→%d, want 1→2", m[0].From, m[0].To)
@@ -125,8 +128,8 @@ func TestMigrationsFrom_One(t *testing.T) {
 
 func TestMigrationsFrom_Two(t *testing.T) {
 	m := migrationsFrom(2)
-	if len(m) != 2 {
-		t.Errorf("migrationsFrom(2) = %d migrations, want 2", len(m))
+	if len(m) != 3 {
+		t.Errorf("migrationsFrom(2) = %d migrations, want 3", len(m))
 	}
 	if m[0].From != 2 || m[0].To != 3 {
 		t.Errorf("first migration: %d→%d, want 2→3", m[0].From, m[0].To)
@@ -135,11 +138,21 @@ func TestMigrationsFrom_Two(t *testing.T) {
 
 func TestMigrationsFrom_Three(t *testing.T) {
 	m := migrationsFrom(3)
-	if len(m) != 1 {
-		t.Errorf("migrationsFrom(3) = %d migrations, want 1", len(m))
+	if len(m) != 2 {
+		t.Errorf("migrationsFrom(3) = %d migrations, want 2", len(m))
 	}
 	if m[0].From != 3 || m[0].To != 4 {
 		t.Errorf("migration: %d→%d, want 3→4", m[0].From, m[0].To)
+	}
+}
+
+func TestMigrationsFrom_Four(t *testing.T) {
+	m := migrationsFrom(4)
+	if len(m) != 1 {
+		t.Errorf("migrationsFrom(4) = %d migrations, want 1", len(m))
+	}
+	if m[0].From != 4 || m[0].To != 5 {
+		t.Errorf("migration: %d→%d, want 4→5", m[0].From, m[0].To)
 	}
 }
 

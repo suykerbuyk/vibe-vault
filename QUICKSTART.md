@@ -87,8 +87,11 @@ vv mcp install
 
 This adds a `vibe-vault` entry to the `mcpServers` section of
 `~/.claude/settings.json`. Restart Claude Code after running this command.
-The MCP server exposes 6 tools that let the agent search sessions, read
-project knowledge, and access friction trends on demand.
+This detects all installed editors (Claude Code, Zed) and installs into each
+one. Use `--claude-only` or `--zed-only` to target a single editor.
+
+The MCP server exposes 17 tools that let the agent search sessions, read
+project knowledge, manage AI context, and access friction trends on demand.
 
 To remove the MCP server later: `vv mcp uninstall`
 
@@ -261,7 +264,7 @@ vv context init
 
 This creates:
 - **Vault-side** (`Projects/{project}/agentctx/`):
-  - `CLAUDE.md` — thin pointer (symlinked from repo root)
+  - `CLAUDE.md` — MCP-first instructions (deployed as regular file to repo)
   - `workflow.md` — behavioral rules (pair programming, plan mode, verification)
   - `resume.md` — project state scaffold
   - `iterations.md` — iteration history
@@ -269,15 +272,12 @@ This creates:
   - `commands/restart.md`, `commands/wrap.md` — slash commands
   - `rules/`, `skills/`, `agents/` — Claude Code extensions
   - `tasks/`, `tasks/done/` — task tracking
-- **Repo-side** (single symlink, everything chains through it):
-  - `agentctx` → vault's `Projects/{project}/agentctx/`
-  - `CLAUDE.md` → `agentctx/CLAUDE.md`
-  - `.claude/commands` → `../agentctx/commands`
-  - `.claude/rules` → `../agentctx/rules`
-  - `.claude/skills` → `../agentctx/skills`
-  - `.claude/agents` → `../agentctx/agents`
-  - `commit.msg` → `agentctx/commit.msg`
-- Updates `.gitignore` to exclude `CLAUDE.md`, `commit.msg`, and `agentctx`
+- **Repo-side** (regular files, no symlinks):
+  - `CLAUDE.md` — MCP-first instructions (calls `vv_bootstrap_context`)
+  - `.claude/commands/` — slash commands deployed from vault
+  - `.claude/rules/`, `.claude/skills/`, `.claude/agents/` — Claude Code extensions
+  - `commit.msg` — commit message scratch file
+- Updates `.gitignore` to exclude `CLAUDE.md`, `commit.msg`, and `.claude/`
 
 The project name is auto-detected from the git remote. To override:
 
@@ -299,31 +299,33 @@ This copies:
 - `tasks/` → `Projects/{project}/agentctx/tasks/` (recursive)
 - `.claude/commands/*.md` → `Projects/{project}/agentctx/commands/` (regular files only)
 
-Then rewrites the repo-side CLAUDE.md to point at the vault and replaces
-local commands with symlinks. Local originals are preserved — remove them
-manually after verifying the migration.
+Then deploys MCP-first `CLAUDE.md` and commands as regular files to the repo.
+Local originals are preserved — remove them manually after verifying.
 
 ### Sync schema and shared commands
 
 After upgrading `vv`, existing projects may have an older agentctx schema.
-Sync brings them up to date and propagates any new shared commands from
-`Templates/agentctx/commands/`:
+Sync brings them up to date, propagates any new shared commands from
+`Templates/agentctx/commands/`, and deploys them to the repo:
 
 ```bash
 vv context sync                    # sync current project
 vv context sync --all              # sync all projects (vault-only)
 vv context sync --dry-run          # preview changes
+vv context diff                    # review pending command updates
+vv context accept                  # accept or pin outdated commands
 ```
 
 ### How it works after setup
 
-- Only one real symlink exists: `agentctx → vault`. Everything else chains through it
-- `CLAUDE.md → agentctx/CLAUDE.md` — Claude Code reads project instructions from the vault
-- `.claude/{commands,rules,skills,agents}` → `../agentctx/{...}` — all Claude Code extensions live in the vault
-- `/restart` reads `resume.md` from the vault's `agentctx/` directory
-- `/wrap` updates vault-side files (resume, tasks) in `agentctx/`
+- Vault-side `agentctx/` is the canonical source for all context files
+- `CLAUDE.md` instructs the AI to call `vv_bootstrap_context` at session start (MCP tool)
+- `.claude/commands/` contains slash commands deployed from the vault on each `vv context sync`
+- `/restart` loads context via MCP tools (`vv_bootstrap_context`, `vv_list_tasks`)
+- `/wrap` updates vault-side files via MCP tools (`vv_update_resume`, `vv_append_iteration`)
+- If MCP tools are unavailable, `vv inject` via Bash provides the same context
 - Everything is searchable in Obsidian alongside session notes
-- Clone the repo on another machine, point `agentctx` at the vault, and resume with full context
+- Clone the repo, run `vv context init`, and resume with full context on any machine
 
 ## 7. Optional: Enable LLM Enrichment
 
@@ -387,6 +389,8 @@ vv reprocess --project myproject   # one project only
 | Init project context | `vv context init` |
 | Migrate local context | `vv context migrate` |
 | Sync schema/commands | `vv context sync` |
+| Review command updates | `vv context diff` |
+| Accept command updates | `vv context accept` |
 | Process one file | `vv process path/to/transcript.jsonl` |
 | Per-command help | `vv <command> --help` |
 | Man pages | `man vv` or `man vv-<command>` |

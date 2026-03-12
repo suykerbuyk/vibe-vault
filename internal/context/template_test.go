@@ -113,8 +113,8 @@ func TestBuiltinTemplates_ContainsCLAUDE(t *testing.T) {
 	if !ok {
 		t.Fatal("BuiltinTemplates missing CLAUDE.md")
 	}
-	if !strings.Contains(content, "agentctx") {
-		t.Error("CLAUDE.md should reference agentctx")
+	if !strings.Contains(content, "vv_bootstrap_context") {
+		t.Error("CLAUDE.md should reference vv_bootstrap_context")
 	}
 }
 

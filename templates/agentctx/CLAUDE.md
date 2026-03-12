@@ -1,10 +1,9 @@
 # CLAUDE.md
 
-Read agentctx/resume.md at session start for full context and behavioral rules.
+Call `vv_bootstrap_context` at session start for full context and behavioral
+rules — it returns resume, workflow, and active tasks in a single call.
 
-If you have the `vv_bootstrap_context` MCP tool available, call it at session
-start instead of reading files manually — it returns resume, workflow, and
-active tasks in a single call.
+If MCP tools are not available, run `vv inject` via Bash for context.
 
 Do not commit this file, commit.msg, or anything under .claude/.
 

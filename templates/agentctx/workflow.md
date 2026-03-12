@@ -12,8 +12,6 @@
 
 - **Never commit without explicit human permission.** Stage files and
   update commit.msg freely, but the actual git commit requires human approval.
-- **commit.msg is symlinked.** Write it once at the repo root — it
-  resolves to the vault agentctx/ copy automatically.
 - **Never commit AI context files.** CLAUDE.md, commit.msg, and anything
   under .claude/ are local-only.
 - **Git commit messages are the project's history.** Write them to be
@@ -79,11 +77,11 @@ Never jump to coding short-term fixes without investigation.
 
 ## Task Management
 
-1. Write plan to tasks/<task_name>.md with checkable items
+1. Write plan using `vv_manage_task` with `action: create`
 2. Check in before starting implementation
 3. Track progress and explain changes at each step
 4. Add review section to the task file
-5. When complete: update and move to tasks/done/
+5. When complete: use `vv_manage_task` with `action: retire`
 
 ## Core Principles
 

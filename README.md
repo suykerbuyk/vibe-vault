@@ -165,15 +165,16 @@ To remove the hooks later: `vv hook uninstall`
 ### Enable the MCP Server
 
 ```bash
-vv mcp install           # Claude Code (adds to ~/.claude/settings.json)
-vv mcp install --zed     # Zed editor (adds to ~/.config/zed/settings.json)
+vv mcp install           # detects and installs into all editors (Claude Code, Zed)
+vv mcp install --claude-only   # Claude Code only
+vv mcp install --zed-only      # Zed only
 ```
 
 This registers the vibe-vault MCP server so AI agents can query project
 context, search sessions, capture new sessions, and access friction trends
 on demand. Restart your editor after running this command.
 
-To remove the MCP server later: `vv mcp uninstall` or `vv mcp uninstall --zed`
+To remove the MCP server later: `vv mcp uninstall`
 
 ### Verify Setup
 
@@ -279,10 +280,10 @@ deterministic heuristics rather than embeddings.
 | `vv inject [--project X]` | Output session-start context payload |
 | `vv export [--format X]` | Export session data (JSON or CSV) |
 | `vv effectiveness [--project X]` | Analyze context effectiveness on outcomes |
-| `vv context [init \| migrate \| sync]` | Manage vault-resident AI context files |
+| `vv context [init \| migrate \| sync \| diff \| accept]` | Manage vault-resident AI context files |
 | `vv mcp` | Start MCP server for AI agent integration |
-| `vv mcp install [--zed]` | Register MCP server in editor settings |
-| `vv mcp uninstall [--zed]` | Remove MCP server from editor settings |
+| `vv mcp install` | Register MCP server in all detected editors |
+| `vv mcp uninstall` | Remove MCP server from all detected editors |
 | `vv templates [list \| diff \| show \| reset]` | Inspect, compare, and reset vault templates |
 | `vv version` | Print version |
 
@@ -335,29 +336,31 @@ vv inject --max-tokens 500                   # compact output
 
 **Set up vault-resident AI context for a project:**
 ```bash
-vv context init                       # scaffold agentctx/ from current directory
+vv context init                       # scaffold context from current directory
 vv context init --project myproject   # specify project name
 vv context migrate                    # copy existing RESUME.md/HISTORY.md/tasks/commands to vault
-vv context sync                       # run schema migrations + propagate shared commands
+vv context sync                       # run schema migrations + deploy commands to repo
 vv context sync --all                 # sync all projects (vault-only operations)
 vv context sync --dry-run             # preview changes without modifying files
+vv context diff                       # review pending command updates
+vv context accept                     # accept or pin outdated commands
 ```
 
 **MCP server for AI agent integration:**
 ```bash
-vv mcp install           # register in ~/.claude/settings.json (then restart Claude Code)
-vv mcp install --zed     # register in ~/.config/zed/settings.json (then restart Zed)
-vv mcp uninstall         # remove from Claude Code settings
-vv mcp uninstall --zed   # remove from Zed settings
-vv mcp                   # start server directly (used by editors, not run manually)
+vv mcp install                 # detect and install into all editors (then restart)
+vv mcp install --claude-only   # Claude Code only
+vv mcp install --zed-only      # Zed only
+vv mcp uninstall               # remove from all editors
+vv mcp                         # start server directly (used by editors, not run manually)
 ```
 
-This exposes 8 tools (`vv_get_project_context`, `vv_list_projects`,
-`vv_search_sessions`, `vv_get_knowledge`, `vv_get_session_detail`,
-`vv_get_friction_trends`, `vv_get_effectiveness`, `vv_capture_session`) and
-1 prompt (`vv_session_guidelines`). All names are prefixed with `vv_` to
-avoid collisions with other MCP servers. AI agents call these on demand
-instead of requiring pre-loaded context.
+This exposes 17 tools including `vv_bootstrap_context` (session-start context
+in one call), `vv_get_project_context`, `vv_list_projects`,
+`vv_search_sessions`, `vv_get_resume`, `vv_update_resume`, `vv_manage_task`,
+`vv_capture_session`, and more. Plus 1 prompt (`vv_session_guidelines`). All
+names are prefixed with `vv_` to avoid collisions with other MCP servers. AI
+agents call these on demand instead of requiring pre-loaded context.
 
 **Inspect and reset vault templates:**
 ```bash
@@ -423,7 +426,7 @@ vibe-vault/
 ├── Projects/                   # Project-centric organization
 │   └── {project}/
 │       ├── agentctx/           # AI context package (vv context init)
-│       │   ├── CLAUDE.md       # Thin pointer (symlinked from repo root)
+│       │   ├── CLAUDE.md       # MCP-first instructions (deployed to repo)
 │       │   ├── workflow.md     # Behavioral rules and workflow standards
 │       │   ├── resume.md       # Project state, architecture, decisions
 │       │   ├── iterations.md   # Iteration narratives and history
@@ -620,10 +623,10 @@ decisions in full context, with the reasoning preserved.
 `agentctx/` directory per project in the vault, containing behavioral rules,
 project state, iteration history, slash commands, rules, skills, agents, and
 tasks. `vv context migrate` moves existing repo-local files into `agentctx/`.
-The repo gets a single `agentctx` symlink to the vault, and everything else
-chains through it: `CLAUDE.md → agentctx/CLAUDE.md`, `.claude/{commands,rules,
-skills,agents} → ../agentctx/{commands,rules,skills,agents}`. Clone the repo,
-restore the vault, and resume with full context on any machine.
+The repo gets regular files (`CLAUDE.md`, `.claude/commands/`) deployed from
+the vault by `vv context sync`. MCP tools (`vv_bootstrap_context`,
+`vv_update_resume`, etc.) provide direct access to vault context. Clone the
+repo, run `vv context init`, and resume with full context on any machine.
 
 **3. AI Behavioral Observability** — Every transcript logs which tools the AI
 used, how many tokens it consumed, whether it needed corrections. Aggregating
@@ -693,7 +696,7 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 ### Test Suite
 
-**755 tests** across 29 test packages + **1 integration test** with 22
+**1034 tests** across 29 test packages + **1 integration test** with 22
 subtests. The integration test exercises the full pipeline:
 `init` → `process` → `index` → `stats` →
 `backfill` → `archive` → `checkpoint lifecycle` → `friction` →

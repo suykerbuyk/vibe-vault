@@ -45,12 +45,12 @@ type MigrateResult struct {
 }
 
 // Init scaffolds vault-resident context for a project and writes repo-side
-// bootstrap files (CLAUDE.md symlink, .claude/commands/).
+// bootstrap files (CLAUDE.md, .claude/commands/).
 //
 // Vault layout:
 //
 //	Projects/{project}/agentctx/       — all AI context for this project
-//	  CLAUDE.md                        — thin pointer (symlinked from repo root)
+//	  CLAUDE.md                        — MCP-first instructions
 //	  workflow.md                      — behavioral rules and workflow standards
 //	  resume.md                        — project state
 //	  iterations.md                    — iteration history
@@ -61,8 +61,8 @@ type MigrateResult struct {
 //
 // Repo layout:
 //
-//	CLAUDE.md                          — symlink to agentctx/CLAUDE.md
-//	.claude/{commands,rules,skills,agents}/ — symlinks to agentctx/
+//	CLAUDE.md                          — regular file (MCP-first instructions)
+//	.claude/{commands,rules,skills,agents}/ — regular directories with files
 func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 	if err := validateVault(cfg.VaultPath); err != nil {
 		return nil, err
@@ -137,41 +137,51 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 		Location: "vault",
 	})
 
-	// Repo-side agentctx symlink → vault agentctx path
-	agentctxLink := filepath.Join(cwd, "agentctx")
-	aLinkAction := safeSymlink(agentctxLink, agentctx, opts.Force)
-	result.Actions = append(result.Actions, FileAction{Path: "agentctx", Action: aLinkAction, Location: "repo"})
-
-	// Repo-side CLAUDE.md → symlink through agentctx
-	claudeMDLink := filepath.Join(cwd, "CLAUDE.md")
-	claudeMDAction := safeSymlink(claudeMDLink, filepath.Join("agentctx", "CLAUDE.md"), opts.Force)
+	// Repo-side CLAUDE.md as regular file
+	claudeMDPath := filepath.Join(cwd, "CLAUDE.md")
+	claudeContent := resolveTemplate(cfg.VaultPath, "CLAUDE.md", vars)
+	claudeMDAction := safeWrite(claudeMDPath, claudeContent, opts.Force)
 	result.Actions = append(result.Actions, FileAction{Path: "CLAUDE.md", Action: claudeMDAction, Location: "repo"})
 
-	// Repo-side commit.msg → symlink through agentctx
+	// Repo-side commit.msg as regular file
 	commitMsgVault := filepath.Join(agentctx, "commit.msg")
 	safeWrite(commitMsgVault, "", false) // ensure vault-side file exists
-	commitMsgLink := filepath.Join(cwd, "commit.msg")
-	cmAction := safeSymlink(commitMsgLink, filepath.Join("agentctx", "commit.msg"), opts.Force)
+	commitMsgPath := filepath.Join(cwd, "commit.msg")
+	cmAction := safeWrite(commitMsgPath, "", opts.Force)
 	result.Actions = append(result.Actions, FileAction{Path: "commit.msg", Action: cmAction, Location: "repo"})
 
-	// Repo-side .claude/ directory with symlinks through agentctx
+	// Repo-side .claude/ directory with real subdirectories
 	dotClaude := filepath.Join(cwd, ".claude")
 	if err := os.MkdirAll(dotClaude, 0o755); err != nil {
 		return nil, fmt.Errorf("create .claude/: %w", err)
 	}
 	for _, sub := range claudeSubdirs {
-		link := filepath.Join(dotClaude, sub)
-		target := filepath.Join("..", "agentctx", sub)
-		action := safeSymlink(link, target, opts.Force)
+		subDir := filepath.Join(dotClaude, sub)
+		if err := os.MkdirAll(subDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create .claude/%s: %w", sub, err)
+		}
+		// Deploy vault content to repo
+		vaultSubDir := filepath.Join(agentctx, sub)
+		entries, _ := os.ReadDir(vaultSubDir)
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(vaultSubDir, e.Name()))
+			if err != nil {
+				continue
+			}
+			safeWrite(filepath.Join(subDir, e.Name()), string(data), opts.Force)
+		}
 		result.Actions = append(result.Actions, FileAction{
 			Path:     ".claude/" + sub,
-			Action:   action,
+			Action:   "CREATE",
 			Location: "repo",
 		})
 	}
 
-	// .gitignore
-	for _, entry := range []string{"/CLAUDE.md", "/commit.msg", "/agentctx"} {
+	// .gitignore (no /agentctx entry needed)
+	for _, entry := range []string{"/CLAUDE.md", "/commit.msg"} {
 		giAction, err := gitignoreEnsure(filepath.Join(cwd, ".gitignore"), entry)
 		if err != nil {
 			return nil, err
@@ -347,29 +357,40 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 		return nil, fmt.Errorf("write .version: %w", err)
 	}
 
-	// Repo-side agentctx symlink
-	agentctxLink := filepath.Join(cwd, "agentctx")
-	safeSymlink(agentctxLink, agentctx, true)
-	result.Actions = append(result.Actions, FileAction{Path: "agentctx", Action: "UPDATE", Location: "repo"})
-
-	// Repo-side CLAUDE.md → symlink through agentctx
-	claudeMDLink := filepath.Join(cwd, "CLAUDE.md")
-	// Remove existing regular file before creating symlink
-	if info, err := os.Lstat(claudeMDLink); err == nil && info.Mode()&os.ModeSymlink == 0 {
-		os.Remove(claudeMDLink)
+	// Repo-side CLAUDE.md as regular file
+	claudeMDPath := filepath.Join(cwd, "CLAUDE.md")
+	// Remove existing symlink before writing regular file
+	if info, err := os.Lstat(claudeMDPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		os.Remove(claudeMDPath)
 	}
-	safeSymlink(claudeMDLink, filepath.Join("agentctx", "CLAUDE.md"), true)
+	safeWrite(claudeMDPath, claudeContent, true)
 	result.Actions = append(result.Actions, FileAction{Path: "CLAUDE.md", Action: "UPDATE", Location: "repo"})
 
-	// Force-update repo-side .claude/ symlinks through agentctx
+	// Force-update repo-side .claude/ as real directories
 	dotClaude := filepath.Join(cwd, ".claude")
 	if err := os.MkdirAll(dotClaude, 0o755); err != nil {
 		return nil, fmt.Errorf("create .claude/: %w", err)
 	}
 	for _, sub := range claudeSubdirs {
-		link := filepath.Join(dotClaude, sub)
-		target := filepath.Join("..", "agentctx", sub)
-		safeSymlink(link, target, true)
+		subPath := filepath.Join(dotClaude, sub)
+		// Remove symlink if present
+		if info, err := os.Lstat(subPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			os.Remove(subPath)
+		}
+		_ = os.MkdirAll(subPath, 0o755)
+		// Deploy vault content
+		vaultSubDir := filepath.Join(agentctx, sub)
+		entries, _ := os.ReadDir(vaultSubDir)
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			data, readErr := os.ReadFile(filepath.Join(vaultSubDir, e.Name()))
+			if readErr != nil {
+				continue
+			}
+			_ = os.WriteFile(filepath.Join(subPath, e.Name()), data, 0o644)
+		}
 		result.Actions = append(result.Actions, FileAction{
 			Path:     ".claude/" + sub,
 			Action:   "UPDATE",
@@ -377,15 +398,25 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 		})
 	}
 
-	// Repo-side commit.msg → symlink through agentctx
+	// Repo-side commit.msg as regular file
 	commitMsgVault := filepath.Join(agentctx, "commit.msg")
 	safeWrite(commitMsgVault, "", false) // ensure vault-side file exists
-	commitMsgLink := filepath.Join(cwd, "commit.msg")
-	safeSymlink(commitMsgLink, filepath.Join("agentctx", "commit.msg"), true)
+	commitMsgPath := filepath.Join(cwd, "commit.msg")
+	// Remove symlink if present
+	if info, err := os.Lstat(commitMsgPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		os.Remove(commitMsgPath)
+	}
+	safeWrite(commitMsgPath, "", true)
 	result.Actions = append(result.Actions, FileAction{Path: "commit.msg", Action: "UPDATE", Location: "repo"})
 
-	// .gitignore
-	for _, entry := range []string{"/CLAUDE.md", "/commit.msg", "/agentctx"} {
+	// Remove agentctx symlink if present (migration from v4)
+	agentctxLink := filepath.Join(cwd, "agentctx")
+	if info, err := os.Lstat(agentctxLink); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		os.Remove(agentctxLink)
+	}
+
+	// .gitignore (no /agentctx entry needed)
+	for _, entry := range []string{"/CLAUDE.md", "/commit.msg"} {
 		giAction, err := gitignoreEnsure(filepath.Join(cwd, ".gitignore"), entry)
 		if err != nil {
 			return nil, err

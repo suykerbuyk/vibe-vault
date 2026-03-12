@@ -1,4 +1,4 @@
-.TH VV-CONTEXT-SYNC 1 "2026-03-11" "vv 0.8.0-9-g55de15c" "Vibe-Vault Manual"
+.TH VV-CONTEXT-SYNC 1 "2026-03-12" "vv 0.8.0-14-g1b35948" "Vibe-Vault Manual"
 .SH NAME
 vv-context-sync \- update project context after upgrading vv
 .SH SYNOPSIS
@@ -7,27 +7,27 @@ vv-context-sync \- update project context after upgrading vv
 Run this from your repo root after upgrading vv to pick up new features.
 .PP
 What sync does:
-  1. Schema migrations — upgrades the agentctx directory structure
-     (e.g., adding symlinks, new directories) to the latest version
-  2. New commands — copies any new slash commands from vault templates
-     into the project's agentctx/commands/
+  1. Schema migrations — upgrades the vault\-side agentctx directory and
+     repo\-side files (CLAUDE.md, .claude/commands/) to the latest version
+  2. New commands — copies new slash commands from vault templates into
+     the project's agentctx/commands/ and deploys to repo .claude/commands/
 .PP
 What sync does NOT do:
-  \- It will not overwrite existing commands you may have customized.
+  \- It will not overwrite vault commands you may have customized.
     To update a specific command to the latest default, use:
       vv templates reset \-\-file commands/restart.md \-\-force
     Or to see what changed:
       vv templates diff \-\-file commands/restart.md
 .PP
 In \-\-all mode, only vault\-side operations are performed (no repo\-side
-symlinks). Run from each repo root without \-\-all for repo\-side updates.
+deployment). Run from each repo root without \-\-all for repo\-side updates.
 .SH OPTIONS
 .TP
 .B \-\-project <name>
 Override auto\-detected project name
 .TP
 .B \-\-all
-Sync all projects with agentctx (vault\-only operations)
+Sync all projects (vault\-only, skip repo deployment)
 .TP
 .B \-\-dry\-run
 Report changes without modifying any files

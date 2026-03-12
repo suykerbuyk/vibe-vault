@@ -146,6 +146,12 @@ func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*P
 	if !opts.DryRun {
 		cmdActions := propagateSharedCommands(cfg.VaultPath, agentctxPath, false)
 		psr.Actions = append(psr.Actions, cmdActions...)
+
+		// Deploy commands to repo (skip in --all mode)
+		if repoPath != "" {
+			deployActions := deployCommandsToRepo(repoPath, agentctxPath)
+			psr.Actions = append(psr.Actions, deployActions...)
+		}
 	} else {
 		cmdActions := propagateSharedCommands(cfg.VaultPath, agentctxPath, true)
 		psr.Actions = append(psr.Actions, cmdActions...)
@@ -376,4 +382,197 @@ func migrate1to2(ctx MigrationContext) ([]FileAction, error) {
 	}
 
 	return actions, nil
+}
+
+// migrate4to5 converts repo-side symlinks to regular files/directories.
+// The agentctx symlink is removed; CLAUDE.md, commit.msg, and .claude/
+// subdirectories become regular files written from vault content.
+// Also force-updates vault templates so new MCP-first content propagates.
+func migrate4to5(ctx MigrationContext) ([]FileAction, error) {
+	var actions []FileAction
+
+	// Force-update vault templates with new MCP-first content
+	tmplActions := forceUpdateVaultTemplates(ctx.VaultPath)
+	actions = append(actions, tmplActions...)
+
+	// Repo-side operations (skip if no repo path — --all mode)
+	if ctx.RepoPath == "" {
+		return actions, nil
+	}
+
+	vars := DefaultVars(ctx.Project)
+
+	// 1. Convert CLAUDE.md from symlink to regular file
+	claudeMDPath := filepath.Join(ctx.RepoPath, "CLAUDE.md")
+	claudeContent := resolveTemplate(ctx.VaultPath, "CLAUDE.md", vars)
+	if info, err := os.Lstat(claudeMDPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		os.Remove(claudeMDPath)
+	}
+	safeWrite(claudeMDPath, claudeContent, true)
+	actions = append(actions, FileAction{Path: "CLAUDE.md", Action: "UPDATE", Location: "repo"})
+
+	// 2. Convert .claude/ subdirectories from symlinks to real directories
+	dotClaude := filepath.Join(ctx.RepoPath, ".claude")
+	_ = os.MkdirAll(dotClaude, 0o755)
+	for _, sub := range claudeSubdirs {
+		link := filepath.Join(dotClaude, sub)
+		// Read contents from vault before removing symlink
+		vaultSubDir := filepath.Join(ctx.AgentctxPath, sub)
+		var files map[string][]byte
+		if info, err := os.Lstat(link); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			files = readDirFiles(vaultSubDir)
+			os.Remove(link)
+		} else if info != nil && info.IsDir() {
+			// Already a real directory — read from vault to sync
+			files = readDirFiles(vaultSubDir)
+		}
+		_ = os.MkdirAll(link, 0o755)
+		for name, data := range files {
+			_ = os.WriteFile(filepath.Join(link, name), data, 0o644)
+		}
+		actions = append(actions, FileAction{Path: ".claude/" + sub, Action: "UPDATE", Location: "repo"})
+	}
+
+	// 3. Convert commit.msg from symlink to regular file
+	commitMsgPath := filepath.Join(ctx.RepoPath, "commit.msg")
+	if info, err := os.Lstat(commitMsgPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		// Read current content before removing symlink
+		content, _ := os.ReadFile(commitMsgPath)
+		os.Remove(commitMsgPath)
+		_ = os.WriteFile(commitMsgPath, content, 0o644)
+	} else if os.IsNotExist(err) {
+		_ = os.WriteFile(commitMsgPath, []byte(""), 0o644)
+	}
+	actions = append(actions, FileAction{Path: "commit.msg", Action: "UPDATE", Location: "repo"})
+
+	// 4. Remove agentctx symlink from repo root
+	agentctxLink := filepath.Join(ctx.RepoPath, "agentctx")
+	if info, err := os.Lstat(agentctxLink); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		os.Remove(agentctxLink)
+		actions = append(actions, FileAction{Path: "agentctx", Action: "REMOVE", Location: "repo"})
+	}
+
+	// 5. Remove /agentctx entries from .gitignore
+	giPath := filepath.Join(ctx.RepoPath, ".gitignore")
+	giUpdated := false
+	for _, entry := range []string{"/agentctx", "/agentctx/commands"} {
+		if removed, err := gitignoreRemove(giPath, entry); err == nil && removed {
+			giUpdated = true
+		}
+	}
+	if giUpdated {
+		actions = append(actions, FileAction{Path: ".gitignore", Action: "UPDATE", Location: "repo"})
+	}
+
+	return actions, nil
+}
+
+// readDirFiles reads all .md files from a directory into a map.
+func readDirFiles(dir string) map[string][]byte {
+	result := make(map[string][]byte)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return result
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err == nil {
+			result[e.Name()] = data
+		}
+	}
+	return result
+}
+
+// deployCommandsToRepo copies vault agentctx/commands/*.md to repo .claude/commands/.
+// This overwrites repo-side commands on every sync (vault is canonical).
+func deployCommandsToRepo(repoPath, agentctxPath string) []FileAction {
+	vaultCmdsDir := filepath.Join(agentctxPath, "commands")
+	entries, err := os.ReadDir(vaultCmdsDir)
+	if err != nil {
+		return nil
+	}
+
+	repoCmdsDir := filepath.Join(repoPath, ".claude", "commands")
+	if err := os.MkdirAll(repoCmdsDir, 0o755); err != nil {
+		return nil
+	}
+
+	var actions []FileAction
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		// Skip .pending and .pinned sidecars
+		if strings.HasSuffix(e.Name(), ".pending") || strings.HasSuffix(e.Name(), ".pinned") {
+			continue
+		}
+		srcPath := filepath.Join(vaultCmdsDir, e.Name())
+		dstPath := filepath.Join(repoCmdsDir, e.Name())
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			continue
+		}
+		// Check if identical
+		existing, err := os.ReadFile(dstPath)
+		if err == nil && bytes.Equal(existing, data) {
+			continue
+		}
+		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+			continue
+		}
+		actions = append(actions, FileAction{
+			Path:     ".claude/commands/" + e.Name(),
+			Action:   "UPDATE",
+			Location: "repo",
+		})
+	}
+	return actions
+}
+
+// gitignoreRemove removes an entry from .gitignore. Returns true if the entry was removed.
+func gitignoreRemove(giPath, entry string) (bool, error) {
+	data, err := os.ReadFile(giPath)
+	if err != nil {
+		return false, err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	bare := strings.TrimPrefix(entry, "/")
+	var filtered []string
+	removed := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == entry || trimmed == bare {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+
+	if !removed {
+		return false, nil
+	}
+
+	return true, os.WriteFile(giPath, []byte(strings.Join(filtered, "\n")), 0o644)
+}
+
+// forceUpdateVaultTemplates overwrites vault Templates/agentctx/ with embedded
+// defaults. Used during v4→v5 migration to push MCP-first template content.
+func forceUpdateVaultTemplates(vaultPath string) []FileAction {
+	tmplDir := filepath.Join(vaultPath, "Templates", "agentctx")
+
+	var actions []FileAction
+	for relPath, content := range BuiltinTemplates() {
+		path := filepath.Join(tmplDir, relPath)
+		action := safeWrite(path, content, true) // force=true
+		actions = append(actions, FileAction{
+			Path:     filepath.Join("Templates", "agentctx", relPath),
+			Action:   action,
+			Location: "vault",
+		})
+	}
+	return actions
 }

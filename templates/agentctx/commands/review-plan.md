@@ -6,8 +6,8 @@ identify what will actually go wrong.
 
 ## Inputs
 
-If no argument is given, review all files in `agentctx/tasks/` (excluding
-`tasks/done/`). If a filename is given, review only that task.
+If no argument is given, use `vv_list_tasks` to find all active tasks and
+review them. If a filename is given, use `vv_get_task` to read only that task.
 
 ## Step 1: Read the plan
 

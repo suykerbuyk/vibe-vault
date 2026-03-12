@@ -69,15 +69,15 @@ func TestInit_CreatesRepoFiles(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// CLAUDE.md should be a symlink through agentctx
+	// CLAUDE.md should be a regular file (not symlink)
 	claudeInfo, err2 := os.Lstat(filepath.Join(cwd, "CLAUDE.md"))
 	if err2 != nil {
 		t.Error("repo CLAUDE.md not created")
-	} else if claudeInfo.Mode()&os.ModeSymlink == 0 {
-		t.Error("CLAUDE.md should be a symlink")
+	} else if claudeInfo.Mode()&os.ModeSymlink != 0 {
+		t.Error("CLAUDE.md should be a regular file, not a symlink")
 	}
 
-	// Commands should be accessible through the directory symlink
+	// Commands should be accessible through the real directory
 	for _, name := range []string{"restart.md", "wrap.md"} {
 		path := filepath.Join(cwd, ".claude", "commands", name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -86,7 +86,7 @@ func TestInit_CreatesRepoFiles(t *testing.T) {
 	}
 }
 
-func TestInit_ClaudeSubdirSymlinks(t *testing.T) {
+func TestInit_ClaudeSubdirsRealDirs(t *testing.T) {
 	vault := t.TempDir()
 	cwd := t.TempDir()
 	cfg := testConfig(vault)
@@ -96,31 +96,26 @@ func TestInit_ClaudeSubdirSymlinks(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// All .claude/ subdirectories should be symlinks through agentctx
+	// All .claude/ subdirectories should be real directories (not symlinks)
 	for _, sub := range []string{"commands", "rules", "skills", "agents"} {
 		link := filepath.Join(cwd, ".claude", sub)
 		info, err := os.Lstat(link)
 		if err != nil {
-			t.Fatalf(".claude/%s link not created: %v", sub, err)
+			t.Fatalf(".claude/%s not created: %v", sub, err)
 		}
-		if info.Mode()&os.ModeSymlink == 0 {
-			t.Fatalf(".claude/%s should be a symlink, got mode %v", sub, info.Mode())
+		if info.Mode()&os.ModeSymlink != 0 {
+			t.Fatalf(".claude/%s should be a real directory, not a symlink", sub)
 		}
-		target, err := os.Readlink(link)
-		if err != nil {
-			t.Fatalf("readlink .claude/%s: %v", sub, err)
-		}
-		expected := filepath.Join("..", "agentctx", sub)
-		if target != expected {
-			t.Errorf(".claude/%s symlink target = %q, want %q", sub, target, expected)
+		if !info.IsDir() {
+			t.Fatalf(".claude/%s should be a directory, got mode %v", sub, info.Mode())
 		}
 	}
 
-	// Commands should be accessible through the symlink
+	// Commands should be accessible
 	for _, name := range []string{"restart.md", "wrap.md"} {
 		path := filepath.Join(cwd, ".claude", "commands", name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			t.Errorf("command %s not accessible through symlink", name)
+			t.Errorf("command %s not accessible through directory", name)
 		}
 	}
 }
@@ -202,20 +197,20 @@ func TestInit_ForceOverwrite(t *testing.T) {
 		t.Fatalf("Init force: %v", err)
 	}
 
-	// All actions should be CREATE
+	// All actions should be CREATE or UPDATE
 	for _, a := range result.Actions {
 		if a.Action != "CREATE" && a.Action != "UPDATE" {
 			t.Errorf("expected CREATE or UPDATE, got %s for %s", a.Action, a.Path)
 		}
 	}
 
-	// CLAUDE.md should be a symlink
+	// CLAUDE.md should be a regular file (not symlink)
 	info, err := os.Lstat(filepath.Join(cwd, "CLAUDE.md"))
 	if err != nil {
 		t.Fatal("CLAUDE.md missing after force init")
 	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Error("CLAUDE.md should be a symlink after force init")
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("CLAUDE.md should be a regular file after force init")
 	}
 }
 
@@ -263,27 +258,23 @@ func TestInit_ClaudeMDContent(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// CLAUDE.md should be a symlink through agentctx
+	// CLAUDE.md should be a regular file (not symlink)
 	info, err := os.Lstat(filepath.Join(cwd, "CLAUDE.md"))
 	if err != nil {
 		t.Fatalf("lstat CLAUDE.md: %v", err)
 	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatal("CLAUDE.md should be a symlink")
-	}
-	target, _ := os.Readlink(filepath.Join(cwd, "CLAUDE.md"))
-	if target != filepath.Join("agentctx", "CLAUDE.md") {
-		t.Errorf("CLAUDE.md symlink target = %q, want agentctx/CLAUDE.md", target)
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("CLAUDE.md should be a regular file, not a symlink")
 	}
 
-	// Content should be readable and reference agentctx
+	// Content should be readable and reference MCP bootstrap
 	data, err := os.ReadFile(filepath.Join(cwd, "CLAUDE.md"))
 	if err != nil {
-		t.Fatalf("read CLAUDE.md through symlink: %v", err)
+		t.Fatalf("read CLAUDE.md: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, "agentctx") {
-		t.Error("CLAUDE.md missing agentctx reference")
+	if !strings.Contains(content, "vv_bootstrap_context") {
+		t.Error("CLAUDE.md missing vv_bootstrap_context reference")
 	}
 	// Should NOT contain absolute vault path
 	if strings.Contains(content, vault) {
@@ -329,7 +320,7 @@ func TestInit_GitignoreIdempotent(t *testing.T) {
 	cfg := testConfig(vault)
 
 	giPath := filepath.Join(cwd, ".gitignore")
-	os.WriteFile(giPath, []byte("CLAUDE.md\ncommit.msg\nagentctx\n"), 0o644)
+	os.WriteFile(giPath, []byte("CLAUDE.md\ncommit.msg\n"), 0o644)
 
 	result, err := Init(cfg, cwd, Opts{Project: "myproject"})
 	if err != nil {
@@ -486,58 +477,56 @@ func TestMigrate_CopiesLocalCommands(t *testing.T) {
 		}
 	}
 
-	// All .claude/ subdirs should be symlinks through agentctx after migrate
+	// All .claude/ subdirs should be real directories (not symlinks) after migrate
 	for _, sub := range []string{"commands", "rules", "skills", "agents"} {
 		link := filepath.Join(cwd, ".claude", sub)
 		info, err := os.Lstat(link)
 		if err != nil {
 			t.Fatalf("lstat .claude/%s: %v", sub, err)
 		}
-		if info.Mode()&os.ModeSymlink == 0 {
-			t.Errorf(".claude/%s should be a symlink after migrate", sub)
+		if info.Mode()&os.ModeSymlink != 0 {
+			t.Errorf(".claude/%s should be a real directory after migrate, not a symlink", sub)
 		}
-		target, _ := os.Readlink(link)
-		expected := filepath.Join("..", "agentctx", sub)
-		if target != expected {
-			t.Errorf(".claude/%s symlink target = %q, want %q", sub, target, expected)
+		if !info.IsDir() {
+			t.Errorf(".claude/%s should be a directory", sub)
 		}
 	}
 
-	// All commands should be accessible through the symlink
+	// All commands should be accessible
 	cmdsPath := filepath.Join(cwd, ".claude", "commands")
 	for _, name := range []string{"restart.md", "wrap.md", "custom.md"} {
 		if _, err := os.Stat(filepath.Join(cmdsPath, name)); os.IsNotExist(err) {
-			t.Errorf("command %s not accessible through symlink", name)
+			t.Errorf("command %s not accessible in .claude/commands/", name)
 		}
 	}
 }
 
-func TestMigrate_SkipsAlreadySymlinkedCommands(t *testing.T) {
+func TestMigrate_HandlesExistingDirsGracefully(t *testing.T) {
 	vault := t.TempDir()
 	cwd := t.TempDir()
 	cfg := testConfig(vault)
 
-	// First init creates the directory symlink
+	// First init creates the real directories
 	_, err := Init(cfg, cwd, Opts{Project: "myproject"})
 	if err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// Now migrate — should handle the existing symlink gracefully
+	// Now migrate — should handle the existing directories gracefully
 	_, err = Migrate(cfg, cwd, Opts{Project: "myproject"})
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	// All .claude/ subdirs should still be symlinks
+	// All .claude/ subdirs should still be real directories
 	for _, sub := range []string{"commands", "rules", "skills", "agents"} {
 		link := filepath.Join(cwd, ".claude", sub)
 		info, err := os.Lstat(link)
 		if err != nil {
 			t.Fatalf("lstat .claude/%s: %v", sub, err)
 		}
-		if info.Mode()&os.ModeSymlink == 0 {
-			t.Errorf(".claude/%s should still be a symlink", sub)
+		if info.Mode()&os.ModeSymlink != 0 {
+			t.Errorf(".claude/%s should be a real directory", sub)
 		}
 	}
 }
@@ -622,20 +611,20 @@ func TestMigrate_UpdatesRepoFiles(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	// CLAUDE.md should now be a symlink through agentctx
+	// CLAUDE.md should be a regular file (not symlink)
 	info, err := os.Lstat(filepath.Join(cwd, "CLAUDE.md"))
 	if err != nil {
 		t.Fatalf("lstat CLAUDE.md: %v", err)
 	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Error("CLAUDE.md should be a symlink after migrate")
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("CLAUDE.md should be a regular file after migrate")
 	}
 
-	// Content should be readable and reference agentctx
+	// Content should be readable and reference MCP bootstrap
 	data, _ := os.ReadFile(filepath.Join(cwd, "CLAUDE.md"))
 	content := string(data)
-	if !strings.Contains(content, "agentctx") {
-		t.Error("CLAUDE.md not updated to agentctx pointer")
+	if !strings.Contains(content, "vv_bootstrap_context") {
+		t.Error("CLAUDE.md not updated to MCP-first content")
 	}
 	if strings.Contains(content, "old content") {
 		t.Error("CLAUDE.md still has old content")
@@ -670,9 +659,9 @@ func TestMigrate_PreservesOriginals(t *testing.T) {
 	}
 }
 
-// --- Phase 2 tests: agentctx symlink and relative paths ---
+// --- Schema v5 tests: no symlinks ---
 
-func TestInit_AgentctxSymlink(t *testing.T) {
+func TestInit_NoSymlinks(t *testing.T) {
 	vault := t.TempDir()
 	cwd := t.TempDir()
 	cfg := testConfig(vault)
@@ -682,76 +671,45 @@ func TestInit_AgentctxSymlink(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	linkPath := filepath.Join(cwd, "agentctx")
-	info, err := os.Lstat(linkPath)
+	// No agentctx symlink should exist
+	if _, lstatErr := os.Lstat(filepath.Join(cwd, "agentctx")); !os.IsNotExist(lstatErr) {
+		t.Error("agentctx symlink should not exist")
+	}
+
+	// CLAUDE.md should be a regular file
+	info, err := os.Lstat(filepath.Join(cwd, "CLAUDE.md"))
 	if err != nil {
-		t.Fatalf("agentctx symlink not created: %v", err)
+		t.Fatalf("CLAUDE.md not created: %v", err)
 	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatal("agentctx should be a symlink")
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("CLAUDE.md should be a regular file")
 	}
 
-	// Should resolve to vault agentctx path
-	target, err := filepath.EvalSymlinks(linkPath)
+	// commit.msg should be a regular file
+	info, err = os.Lstat(filepath.Join(cwd, "commit.msg"))
 	if err != nil {
-		t.Fatalf("eval symlink: %v", err)
+		t.Fatalf("commit.msg not created: %v", err)
 	}
-	expected := filepath.Join(vault, "Projects", "myproject", "agentctx")
-	if target != expected {
-		t.Errorf("agentctx symlink target = %q, want %q", target, expected)
-	}
-}
-
-func TestInit_ClaudeMDSymlink(t *testing.T) {
-	vault := t.TempDir()
-	cwd := t.TempDir()
-	cfg := testConfig(vault)
-
-	_, err := Init(cfg, cwd, Opts{Project: "myproject"})
-	if err != nil {
-		t.Fatalf("Init: %v", err)
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("commit.msg should be a regular file")
 	}
 
-	// CLAUDE.md should be a relative symlink through agentctx
-	target, err := os.Readlink(filepath.Join(cwd, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("readlink CLAUDE.md: %v", err)
-	}
-	if target != filepath.Join("agentctx", "CLAUDE.md") {
-		t.Errorf("CLAUDE.md symlink target = %q, want relative agentctx/CLAUDE.md", target)
-	}
-
-	// Content should be readable and not contain absolute paths
-	data, _ := os.ReadFile(filepath.Join(cwd, "CLAUDE.md"))
-	if strings.Contains(string(data), vault) {
-		t.Error("CLAUDE.md contains absolute vault path")
-	}
-}
-
-func TestInit_ClaudeSubdirsRelativeSymlinks(t *testing.T) {
-	vault := t.TempDir()
-	cwd := t.TempDir()
-	cfg := testConfig(vault)
-
-	_, err := Init(cfg, cwd, Opts{Project: "myproject"})
-	if err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-
+	// .claude/ subdirs should be real directories
 	for _, sub := range []string{"commands", "rules", "skills", "agents"} {
-		link := filepath.Join(cwd, ".claude", sub)
-		target, err := os.Readlink(link)
+		info, err := os.Lstat(filepath.Join(cwd, ".claude", sub))
 		if err != nil {
-			t.Fatalf("readlink .claude/%s: %v", sub, err)
+			t.Fatalf(".claude/%s not created: %v", sub, err)
 		}
-		expected := filepath.Join("..", "agentctx", sub)
-		if target != expected {
-			t.Errorf(".claude/%s symlink target = %q, want %q", sub, target, expected)
+		if info.Mode()&os.ModeSymlink != 0 {
+			t.Errorf(".claude/%s should be a real directory", sub)
+		}
+		if !info.IsDir() {
+			t.Errorf(".claude/%s should be a directory", sub)
 		}
 	}
 }
 
-func TestInit_GitignoreAgentctx(t *testing.T) {
+func TestInit_GitignoreNoAgentctx(t *testing.T) {
 	vault := t.TempDir()
 	cwd := t.TempDir()
 	cfg := testConfig(vault)
@@ -762,8 +720,15 @@ func TestInit_GitignoreAgentctx(t *testing.T) {
 	}
 
 	data, _ := os.ReadFile(filepath.Join(cwd, ".gitignore"))
-	if !strings.Contains(string(data), "agentctx") {
-		t.Error(".gitignore missing agentctx entry")
+	content := string(data)
+	if strings.Contains(content, "agentctx") {
+		t.Error(".gitignore should NOT contain agentctx entry")
+	}
+	if !strings.Contains(content, "CLAUDE.md") {
+		t.Error(".gitignore should contain CLAUDE.md entry")
+	}
+	if !strings.Contains(content, "commit.msg") {
+		t.Error(".gitignore should contain commit.msg entry")
 	}
 }
 

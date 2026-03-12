@@ -328,7 +328,7 @@ func NewManageTaskTool(cfg config.Config) Tool {
 					},
 					"action": {
 						"type": "string",
-						"enum": ["create", "update_status", "retire"],
+						"enum": ["create", "update_status", "retire", "cancel"],
 						"description": "Action to perform on the task."
 					},
 					"status": {
@@ -422,8 +422,30 @@ func NewManageTaskTool(cfg config.Config) Tool {
 				}
 				return fmt.Sprintf("Retired task %q in project %q (moved to done/)", args.Task, project), nil
 
+			case "cancel":
+				data, err := os.ReadFile(taskPath)
+				if err != nil {
+					if os.IsNotExist(err) {
+						return "", fmt.Errorf("task %q not found in project %q", args.Task, project)
+					}
+					return "", fmt.Errorf("read task: %w", err)
+				}
+				// Update status to Cancelled
+				updated := replaceStatus(string(data), "Cancelled")
+				// Write to cancelled/ directory
+				cancelledDir := filepath.Join(tasksDir, "cancelled")
+				cancelledPath := filepath.Join(cancelledDir, args.Task+".md")
+				if err := atomicWriteFile(cancelledPath, []byte(updated), 0o644); err != nil {
+					return "", fmt.Errorf("write cancelled task: %w", err)
+				}
+				// Remove original
+				if err := os.Remove(taskPath); err != nil {
+					return "", fmt.Errorf("remove original task: %w", err)
+				}
+				return fmt.Sprintf("Cancelled task %q in project %q (moved to cancelled/)", args.Task, project), nil
+
 			default:
-				return "", fmt.Errorf("unknown action %q — expected create, update_status, or retire", args.Action)
+				return "", fmt.Errorf("unknown action %q — expected create, update_status, retire, or cancel", args.Action)
 			}
 		},
 	}
