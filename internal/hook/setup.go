@@ -252,10 +252,8 @@ func addMCPZed(settings map[string]any) {
 		settings["context_servers"] = servers
 	}
 	servers[mcpServerName] = map[string]any{
-		"command": map[string]any{
-			"path": mcpCommand,
-			"args": []any{"mcp"},
-		},
+		"command": mcpCommand,
+		"args":    []any{"mcp"},
 	}
 }
 

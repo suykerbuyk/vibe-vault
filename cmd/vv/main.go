@@ -5,6 +5,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -978,79 +979,19 @@ func runZedWatch(args []string) {
 
 // captureZedThreads processes a batch of Zed threads through the capture pipeline.
 // Shared between runZedBackfill and runZedWatch.
+// Thin wrapper around zed.BatchCapture that prints to stdout.
 func captureZedThreads(threads []zed.Thread, dbPath, projectFilter string, force bool, cfg config.Config) (processed, skipped, errors int) {
-	stateDir := cfg.StateDir()
-	if mkdirErr := os.MkdirAll(stateDir, 0o755); mkdirErr != nil {
-		log.Printf("warning: could not create state dir: %v", mkdirErr)
-	}
-	indexLockPath := filepath.Join(stateDir, "session-index.json")
-	fl, lockErr := index.Lock(indexLockPath)
-	if lockErr != nil {
-		log.Printf("warning: could not acquire index lock: %v", lockErr)
-	}
-	defer func() {
-		if fl != nil {
-			_ = fl.Unlock()
-		}
-	}()
-
-	idx, err := index.Load(cfg.StateDir())
-	if err != nil {
-		log.Printf("error loading index: %v", err)
-		return 0, 0, len(threads)
-	}
-
-	for _, thread := range threads {
-		info := zed.DetectProject(&thread, cfg)
-
-		if projectFilter != "" && info.Project != projectFilter {
-			skipped++
-			continue
-		}
-
-		t, err := zed.Convert(&thread)
-		if err != nil {
-			log.Printf("error converting thread %s: %v", thread.ID, err)
-			errors++
-			continue
-		}
-		if t == nil {
-			skipped++
-			continue
-		}
-
-		narr := zed.ExtractNarrative(&thread)
-		dialogue := zed.ExtractDialogue(&thread)
-
-		opts := session.CaptureOpts{
-			TranscriptPath: fmt.Sprintf("zed:%s#%s", dbPath, thread.ID),
-			Source:         "zed",
-			Force:          force,
-			SkipEnrichment: true,
-			Index:          idx,
-		}
-
-		result, err := session.CaptureFromParsed(t, info, narr, dialogue, opts, cfg)
-		if err != nil {
-			log.Printf("error processing thread %s: %v", thread.ID, err)
-			errors++
-			continue
-		}
-
-		if result.Skipped {
-			skipped++
-			continue
-		}
-
-		processed++
-		fmt.Printf("  %s → %s\n", result.Project, result.NotePath)
-	}
-
-	if err := idx.Save(); err != nil {
-		log.Printf("warning: could not save index: %v", err)
-	}
-
-	return processed, skipped, errors
+	// Use a logger that prints to stdout for interactive CLI output
+	logger := log.New(os.Stdout, "", 0)
+	result := zed.BatchCapture(zed.BatchCaptureOpts{
+		Threads:       threads,
+		DBPath:        dbPath,
+		ProjectFilter: projectFilter,
+		Force:         force,
+		Cfg:           cfg,
+		Logger:        logger,
+	})
+	return result.Processed, result.Skipped, result.Errors
 }
 
 func runMcp() {
@@ -1107,6 +1048,30 @@ func runMcp() {
 	srv.RegisterPrompt(mcp.NewSessionGuidelinesPrompt())
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
+
+	if cfg.Zed.AutoCapture {
+		dbPath := cfg.Zed.DBPath
+		if dbPath == "" {
+			dbPath = zed.DefaultDBPath()
+		}
+		debounce := time.Duration(cfg.Zed.DebounceMinutes) * time.Minute
+		if debounce == 0 {
+			debounce = 5 * time.Minute
+		}
+		errCh := mcp.StartAutoCapture(ctx, mcp.AutoCaptureConfig{
+			DBPath:   dbPath,
+			Debounce: debounce,
+			Logger:   logger,
+			Cfg:      cfg,
+		})
+		defer func() {
+			cancel() // stop watcher before draining
+			if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
+				logger.Printf("auto-capture watcher error: %v", err)
+			}
+		}()
+	}
+
 	if err := srv.Serve(ctx, os.Stdin, os.Stdout); err != nil {
 		logger.Printf("mcp server error: %v", err)
 		os.Exit(1)

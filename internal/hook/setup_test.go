@@ -610,12 +610,11 @@ func TestInstallMCPZed_NoFile(t *testing.T) {
 		t.Error("missing vibe-vault Zed context_servers entry")
 	}
 
-	// Verify structure: context_servers.vibe-vault.command.path
+	// Verify structure: context_servers.vibe-vault.command = "vv"
 	servers := settings["context_servers"].(map[string]any)
 	vv := servers["vibe-vault"].(map[string]any)
-	cmd := vv["command"].(map[string]any)
-	if cmd["path"] != "vv" {
-		t.Errorf("expected command.path = vv, got %v", cmd["path"])
+	if vv["command"] != "vv" {
+		t.Errorf("expected command = vv, got %v", vv["command"])
 	}
 }
 
@@ -696,10 +695,11 @@ func TestUninstallMCPZed_PreservesOtherServers(t *testing.T) {
 	writeJSON(t, path, map[string]any{
 		"context_servers": map[string]any{
 			"vibe-vault": map[string]any{
-				"command": map[string]any{"path": "vv", "args": []any{"mcp"}},
+				"command": "vv",
+				"args":    []any{"mcp"},
 			},
 			"other-tool": map[string]any{
-				"command": map[string]any{"path": "other"},
+				"command": "other",
 			},
 		},
 	})

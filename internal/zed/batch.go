@@ -1,0 +1,118 @@
+// Copyright 2026 John Suykerbuyk <john@syketech.com>
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
+package zed
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+
+	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/index"
+	"github.com/johns/vibe-vault/internal/session"
+)
+
+// BatchCaptureOpts configures a batch capture of Zed threads.
+type BatchCaptureOpts struct {
+	Threads       []Thread
+	DBPath        string
+	ProjectFilter string
+	Force         bool
+	AutoCaptured  bool
+	Cfg           config.Config
+	Logger        *log.Logger
+}
+
+// BatchResult holds the outcome of a batch capture operation.
+type BatchResult struct {
+	Processed int
+	Skipped   int
+	Errors    int
+}
+
+// BatchCapture processes a batch of Zed threads through the capture pipeline.
+func BatchCapture(opts BatchCaptureOpts) BatchResult {
+	logger := opts.Logger
+	if logger == nil {
+		logger = log.New(os.Stderr, "", log.LstdFlags)
+	}
+
+	var result BatchResult
+
+	stateDir := opts.Cfg.StateDir()
+	if mkdirErr := os.MkdirAll(stateDir, 0o755); mkdirErr != nil {
+		logger.Printf("warning: could not create state dir: %v", mkdirErr)
+	}
+	indexLockPath := filepath.Join(stateDir, "session-index.json")
+	fl, lockErr := index.Lock(indexLockPath)
+	if lockErr != nil {
+		logger.Printf("warning: could not acquire index lock: %v", lockErr)
+	}
+	defer func() {
+		if fl != nil {
+			_ = fl.Unlock()
+		}
+	}()
+
+	idx, err := index.Load(opts.Cfg.StateDir())
+	if err != nil {
+		logger.Printf("error loading index: %v", err)
+		result.Errors = len(opts.Threads)
+		return result
+	}
+
+	for _, thread := range opts.Threads {
+		info := DetectProject(&thread, opts.Cfg)
+
+		if opts.ProjectFilter != "" && info.Project != opts.ProjectFilter {
+			result.Skipped++
+			continue
+		}
+
+		t, err := Convert(&thread)
+		if err != nil {
+			logger.Printf("error converting thread %s: %v", thread.ID, err)
+			result.Errors++
+			continue
+		}
+		if t == nil {
+			result.Skipped++
+			continue
+		}
+
+		narr := ExtractNarrative(&thread)
+		dialogue := ExtractDialogue(&thread)
+
+		captureOpts := session.CaptureOpts{
+			TranscriptPath: fmt.Sprintf("zed:%s#%s", opts.DBPath, thread.ID),
+			Source:         "zed",
+			Force:          opts.Force,
+			AutoCaptured:   opts.AutoCaptured,
+			SkipEnrichment: true,
+			Index:          idx,
+		}
+
+		captureResult, err := session.CaptureFromParsed(t, info, narr, dialogue, captureOpts, opts.Cfg)
+		if err != nil {
+			logger.Printf("error processing thread %s: %v", thread.ID, err)
+			result.Errors++
+			continue
+		}
+
+		if captureResult.Skipped {
+			result.Skipped++
+			continue
+		}
+
+		result.Processed++
+		logger.Printf("  %s → %s", captureResult.Project, captureResult.NotePath)
+	}
+
+	if err := idx.Save(); err != nil {
+		logger.Printf("warning: could not save index: %v", err)
+	}
+
+	return result
+}

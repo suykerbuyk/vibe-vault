@@ -37,6 +37,7 @@ type CaptureOpts struct {
 	SkipEnrichment bool         // skip LLM enrichment
 	Provider       llm.Provider // LLM provider (nil = heuristic only)
 	Index          *index.Index // shared index for batch operations (nil = load/save per call)
+	AutoCaptured   bool         // mark note as auto-captured (lower confidence)
 }
 
 // CaptureResult holds the output of a capture operation.
@@ -271,6 +272,11 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 	// Mark checkpoint status
 	if opts.Checkpoint {
 		noteData.Status = "checkpoint"
+	}
+
+	// Mark auto-captured status (lower confidence than explicit captures)
+	if opts.AutoCaptured {
+		noteData.Status = "auto-captured"
 	}
 
 	// Tool effectiveness analysis (Task 20)

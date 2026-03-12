@@ -34,6 +34,7 @@ type Config struct {
 type ZedConfig struct {
 	DBPath          string `toml:"db_path"`          // override threads.db location
 	DebounceMinutes int    `toml:"debounce_minutes"` // quiet period for watch (default 5)
+	AutoCapture     bool   `toml:"auto_capture"`     // auto-capture threads via MCP watcher
 }
 
 // MCPConfig controls MCP server behavior.
@@ -130,6 +131,7 @@ func DefaultConfig() Config {
 		},
 		Zed: ZedConfig{
 			DebounceMinutes: 5,
+			AutoCapture:     true,
 		},
 	}
 }
@@ -274,6 +276,9 @@ func (c Config) Overlay(projectConfigPath string) Config {
 	}
 	if md.IsDefined("zed", "debounce_minutes") {
 		c.Zed.DebounceMinutes = overlay.Zed.DebounceMinutes
+	}
+	if md.IsDefined("zed", "auto_capture") {
+		c.Zed.AutoCapture = overlay.Zed.AutoCapture
 	}
 
 	return c

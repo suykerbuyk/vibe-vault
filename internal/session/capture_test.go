@@ -400,6 +400,48 @@ func TestCaptureFromParsed_Idempotent(t *testing.T) {
 	}
 }
 
+func TestCaptureFromParsed_AutoCaptured(t *testing.T) {
+	cfg := testConfig(t)
+	os.MkdirAll(filepath.Join(cfg.VaultPath, "Projects", "autoproj", "sessions"), 0o755)
+
+	tr := &transcript.Transcript{
+		Stats: transcript.Stats{
+			SessionID:         "zed:auto-test-1",
+			UserMessages:      3,
+			AssistantMessages: 3,
+			StartTime:         time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC),
+		},
+	}
+
+	info := Info{Project: "autoproj", Domain: "personal", SessionID: "zed:auto-test-1"}
+	idx := &index.Index{Entries: make(map[string]index.SessionEntry)}
+
+	opts := CaptureOpts{
+		Source:       "zed",
+		AutoCaptured: true,
+		Index:        idx,
+	}
+
+	result, err := CaptureFromParsed(tr, info, nil, nil, opts, cfg)
+	if err != nil {
+		t.Fatalf("CaptureFromParsed error: %v", err)
+	}
+	if result.Skipped {
+		t.Fatalf("expected non-skipped, got skipped: %s", result.Reason)
+	}
+
+	// Verify note contains status: auto-captured in frontmatter
+	notePath := filepath.Join(cfg.VaultPath, result.NotePath)
+	data, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("read note: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "status: auto-captured") {
+		t.Error("note missing 'status: auto-captured' in frontmatter")
+	}
+}
+
 func TestCaptureFromParsed_ContextAvailable_NoContext(t *testing.T) {
 	cfg := testConfig(t)
 	os.MkdirAll(filepath.Join(cfg.VaultPath, "Projects", "newproj", "sessions"), 0o755)
