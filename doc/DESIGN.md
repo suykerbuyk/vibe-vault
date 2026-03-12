@@ -277,7 +277,7 @@ Key architectural and design decisions in vibe-vault, with rationale.
     tool can quantify whether its own context injection improves AI session
     quality.
 
-37. **MCP server as stdio JSON-RPC gateway:** `vv mcp` serves 8 tools + 1
+37. **MCP server as stdio JSON-RPC gateway:** `vv mcp` serves 17 tools + 1
     prompt over stdin/stdout JSON-RPC 2.0. All tool names use `vv_` prefix to
     avoid namespace collisions. Install paths differ by editor: Claude Code
     writes to `~/.claude/settings.json` `mcpServers`, Zed writes to
@@ -311,3 +311,14 @@ Key architectural and design decisions in vibe-vault, with rationale.
     SHA-256 content hashes. `vv context diff` shows the delta, `vv context
     accept` pulls updates. This catches command template drift without requiring
     schema version bumps.
+
+42. **MCP context gateway — read/write/bootstrap tools for agent-managed
+    context.** 9 new tools added across three phases: read tools
+    (`vv_get_workflow`, `vv_get_resume`, `vv_list_tasks`, `vv_get_task`), write
+    tools (`vv_update_resume`, `vv_append_iteration`, `vv_manage_task`,
+    `vv_refresh_index`), and a bootstrap tool (`vv_bootstrap_context`). Design
+    principles: composable single-purpose tools, vault as single source of
+    truth, human-editable markdown preserved throughout. The bootstrap tool
+    enables single-call session start — one invocation returns resume, workflow,
+    and active tasks — replacing the multi-file bootstrap chain for MCP-capable
+    agents.

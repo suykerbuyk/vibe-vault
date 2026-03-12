@@ -2,6 +2,10 @@
 
 Read agentctx/resume.md at session start for full context and behavioral rules.
 
+If you have the `vv_bootstrap_context` MCP tool available, call it at session
+start instead of reading files manually — it returns resume, workflow, and
+active tasks in a single call.
+
 Do not commit this file, commit.msg, or anything under .claude/.
 
 ## Session Capture

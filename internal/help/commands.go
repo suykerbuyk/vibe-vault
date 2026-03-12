@@ -418,16 +418,25 @@ Subcommands:
   uninstall   Remove the MCP server from editor settings
 
 Available tools:
-  vv_capture_session    Record a session note from an agent conversation
-  vv_get_effectiveness  Context effectiveness analysis
+  vv_append_iteration     Append a narrative to the iteration log
+  vv_bootstrap_context    Single-call session start (resume + workflow + tasks)
+  vv_capture_session      Record a session note from an agent conversation
+  vv_get_effectiveness    Context effectiveness analysis
   vv_get_friction_trends  Friction and efficiency trend data over time
-  vv_get_knowledge      Project knowledge.md content
+  vv_get_knowledge        Project knowledge.md content
   vv_get_project_context  Condensed project context (sessions, threads,
                           decisions, friction trends)
+  vv_get_resume           Current resume.md content
   vv_get_session_detail   Full markdown of a specific session note
-  vv_list_projects      All projects with session counts and date ranges
-  vv_search_sessions    Search/filter sessions by query, project, files,
-                        date range, friction score
+  vv_get_task             Read a specific task file
+  vv_get_workflow         Current workflow.md content
+  vv_list_projects        All projects with session counts and date ranges
+  vv_list_tasks           List active and completed task files
+  vv_manage_task          Create, update, or complete task files
+  vv_refresh_index        Rebuild the session index
+  vv_search_sessions      Search/filter sessions by query, project, files,
+                          date range, friction score
+  vv_update_resume        Update resume.md sections
 
 Available prompts:
   vv_session_guidelines   Agent instructions for session capture

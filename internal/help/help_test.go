@@ -350,16 +350,25 @@ var expectedTerminal = map[string]string{
 		"  uninstall   Remove the MCP server from editor settings\n" +
 		"\n" +
 		"Available tools:\n" +
-		"  vv_capture_session    Record a session note from an agent conversation\n" +
-		"  vv_get_effectiveness  Context effectiveness analysis\n" +
+		"  vv_append_iteration     Append a narrative to the iteration log\n" +
+		"  vv_bootstrap_context    Single-call session start (resume + workflow + tasks)\n" +
+		"  vv_capture_session      Record a session note from an agent conversation\n" +
+		"  vv_get_effectiveness    Context effectiveness analysis\n" +
 		"  vv_get_friction_trends  Friction and efficiency trend data over time\n" +
-		"  vv_get_knowledge      Project knowledge.md content\n" +
+		"  vv_get_knowledge        Project knowledge.md content\n" +
 		"  vv_get_project_context  Condensed project context (sessions, threads,\n" +
 		"                          decisions, friction trends)\n" +
+		"  vv_get_resume           Current resume.md content\n" +
 		"  vv_get_session_detail   Full markdown of a specific session note\n" +
-		"  vv_list_projects      All projects with session counts and date ranges\n" +
-		"  vv_search_sessions    Search/filter sessions by query, project, files,\n" +
-		"                        date range, friction score\n" +
+		"  vv_get_task             Read a specific task file\n" +
+		"  vv_get_workflow         Current workflow.md content\n" +
+		"  vv_list_projects        All projects with session counts and date ranges\n" +
+		"  vv_list_tasks           List active and completed task files\n" +
+		"  vv_manage_task          Create, update, or complete task files\n" +
+		"  vv_refresh_index        Rebuild the session index\n" +
+		"  vv_search_sessions      Search/filter sessions by query, project, files,\n" +
+		"                          date range, friction score\n" +
+		"  vv_update_resume        Update resume.md sections\n" +
 		"\n" +
 		"Available prompts:\n" +
 		"  vv_session_guidelines   Agent instructions for session capture\n" +

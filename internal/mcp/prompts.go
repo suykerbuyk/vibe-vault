@@ -64,6 +64,14 @@ Call vv_capture_session with:
 - Write summaries that would help a developer resuming this work tomorrow
 - Capture decisions with enough context to understand the "why"
 - List open threads as actionable items, not vague notes
+
+### Context management (optional)
+If you want to keep project context up-to-date as you work, these tools are available:
+- vv_update_resume: Update the resume.md current-state and open-threads sections
+- vv_append_iteration: Append a narrative to the iteration log when completing a work unit
+- vv_manage_task: Create, update, or complete task files in the tasks directory
+
+These are optional — session capture alone is sufficient for most workflows.
 `)
 
 	if project != "" {
