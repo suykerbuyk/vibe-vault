@@ -143,30 +143,42 @@ func runInit() {
 		fatal("resolve path: %v", err)
 	}
 
-	fmt.Printf("Creating vault at %s\n", absTarget)
-
-	if initErr := scaffold.Init(absTarget, scaffold.Options{GitInit: gitInit}); initErr != nil {
+	initAction, initErr := scaffold.Init(absTarget, scaffold.Options{GitInit: gitInit})
+	if initErr != nil {
 		fatal("init: %v", initErr)
 	}
 
-	cfgPath, action, err := config.WriteDefault(absTarget)
+	switch initAction {
+	case "adopted":
+		fmt.Printf("Adopted existing vault at %s\n", absTarget)
+	default:
+		fmt.Printf("Created new vault at %s\n", absTarget)
+	}
+
+	cfgPath, cfgAction, err := config.WriteDefault(absTarget)
 	if err != nil {
 		fatal("write config: %v", err)
 	}
 
-	fmt.Println("\nDone! Next steps:")
-	fmt.Printf("  1. Open %s in Obsidian\n", absTarget)
-	fmt.Println("  2. Install community plugins: Dataview, Templater")
-	fmt.Println("  3. Run: vv hook install")
-	fmt.Println("  4. Run: vv mcp install")
-
-	switch action {
+	switch cfgAction {
 	case "created":
-		fmt.Printf("\nConfig written to %s\n", cfgPath)
+		fmt.Printf("Config written to %s\n", cfgPath)
 	case "updated":
-		fmt.Printf("\nConfig updated: vault_path → %s (%s)\n", config.CompressHome(absTarget), cfgPath)
+		fmt.Printf("Config updated: vault_path → %s (%s)\n", config.CompressHome(absTarget), cfgPath)
 	case "unchanged":
-		fmt.Printf("\nConfig already set to this vault (%s)\n", cfgPath)
+		fmt.Printf("Config already set to this vault (%s)\n", cfgPath)
+	}
+
+	if initAction == "adopted" {
+		fmt.Println("\nNext steps:")
+		fmt.Println("  1. Run: vv hook install")
+		fmt.Println("  2. Run: vv mcp install")
+	} else {
+		fmt.Println("\nNext steps:")
+		fmt.Printf("  1. Open %s in Obsidian\n", absTarget)
+		fmt.Println("  2. Install community plugins: Dataview, Templater")
+		fmt.Println("  3. Run: vv hook install")
+		fmt.Println("  4. Run: vv mcp install")
 	}
 
 	fmt.Println("\nTip: enable LLM enrichment for richer session notes — see vv check for status")

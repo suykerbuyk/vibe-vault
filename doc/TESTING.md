@@ -2,7 +2,7 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**871 tests** across 29 test packages + **1 integration test** (22 subtests). All passing.
+**1035 tests** across 29 test packages + **1 integration test** (23 subtests). All passing.
 
 Run unit tests: `make test` (or `go test -short ./...`)
 Run integration: `make integration` (or `go test -run TestIntegration -timeout 60s ./test/`)
@@ -14,7 +14,7 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 | `session/capture_test.go` | 7 | `CaptureFromParsed_Basic`, `CaptureFromParsed_ZedSource`, `CaptureFromParsed_TrivialSkip`, `CaptureFromParsed_Dedup`, `CaptureFromParsed_ZedFallbackSummary`, `CaptureFromParsed_WithNarrativeAndDialogue`, `CaptureFromParsed_Idempotent` |
 | `session/detect_test.go` | 8 | `DetectProject` (5 variants: baseline, git remote SSH/HTTPS, no remote, not git repo), `detectDomain`, `TitleFromFirstMessage`, `repoNameFromURL` |
 | `transcript/parser_test.go` | 7 | `Parse` (full round-trip), `FirstUserMessage`, `FirstUserMessage_SkipsResume`, `ContentBlocks_StringContent`, `TextContent`, `ParseParentUUID_ContinuedSession`, `ParseParentUUID_NoContinuation` |
-| `scaffold/scaffold_test.go` | 5 | `CreatesVault`, `RefusesExistingObsidian`, `RefusesExistingVibeVault`, `VaultNameReplacement`, `ExecutablePermissions` |
+| `scaffold/scaffold_test.go` | 6 | `CreatesVault`, `AdoptsExistingVibeVault`, `RefusesExistingObsidian`, `RefusesExistingVibeVault`, `VaultNameReplacement`, `ExecutablePermissions` |
 | `config/config_test.go` | 16 | `DefaultConfig`, `Load_NoConfig`, `Load_ValidConfig`, `Load_FrictionConfig`, `Load_FrictionConfigAbsent`, `Load_ExpandsHome`, `Load_XDGPriority`, `Load_InvalidTOML`, `Overlay_TagsOverride`, `Overlay_PartialOverride`, `Overlay_MissingFile`, `Overlay_FullyCommented`, `WithProjectOverlay`, `SessionTag`, `SessionTags`, `ProjectsDir_StateDir` |
 | `config/write_test.go` | 6 | `WriteDefault_CreatesConfig`, `WriteDefault_UpdatesExistingVaultPath`, `WriteDefault_UnchangedExisting`, `WriteDefault_PreservesAllSections`, `WriteDefault_MissingVaultPathKey`, `CompressHome` |
 | `enrichment/enrichment_test.go` | 11 | `Truncate`, `BuildMessages`, `ParseResponse`, `ParseResponse_EmptyChoices`, `ParseResponse_BadJSON`, `ValidateTag`, `Generate_Disabled`, `Generate_NoAPIKey`, `Generate_MockServer`, `Generate_Timeout`, `Generate_ServerError` |

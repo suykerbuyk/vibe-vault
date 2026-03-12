@@ -228,7 +228,7 @@ func TestIntegration(t *testing.T) {
 		assertContains(t, cfgContent, "vault_path", "config content")
 
 		// stdout
-		assertContains(t, stdout, "Done", "init stdout")
+		assertContains(t, stdout, "Created new vault", "init stdout")
 		assertContains(t, stdout, "Config written to", "init config created message")
 
 		// Re-init with a different path updates config

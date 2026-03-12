@@ -10,8 +10,12 @@ func TestInit_CreatesVault(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "my-vault")
 
-	if err := Init(target, Options{}); err != nil {
+	action, err := Init(target, Options{})
+	if err != nil {
 		t.Fatalf("Init: %v", err)
+	}
+	if action != "created" {
+		t.Fatalf("action = %q, want %q", action, "created")
 	}
 
 	// Verify key files exist.
@@ -42,16 +46,36 @@ func TestInit_CreatesVault(t *testing.T) {
 	}
 }
 
+func TestInit_AdoptsExistingVibeVault(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "existing")
+	os.MkdirAll(filepath.Join(target, ".obsidian"), 0o755)
+	os.MkdirAll(filepath.Join(target, "Projects"), 0o755)
+
+	action, err := Init(target, Options{})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if action != "adopted" {
+		t.Fatalf("action = %q, want %q", action, "adopted")
+	}
+
+	// Adoption should not write any template files.
+	if _, err := os.Stat(filepath.Join(target, "README.md")); err == nil {
+		t.Error("adopted vault should not have README.md written by scaffold")
+	}
+}
+
 func TestInit_RefusesExistingObsidian(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "existing")
 	os.MkdirAll(filepath.Join(target, ".obsidian"), 0o755)
 
-	err := Init(target, Options{})
+	_, err := Init(target, Options{})
 	if err == nil {
-		t.Fatal("expected error for existing .obsidian/")
+		t.Fatal("expected error for existing .obsidian/ without Projects/")
 	}
-	if want := "already contains .obsidian/"; !contains(err.Error(), want) {
+	if want := "not a vibe-vault"; !contains(err.Error(), want) {
 		t.Errorf("error = %q, want substring %q", err, want)
 	}
 }
@@ -61,7 +85,7 @@ func TestInit_RefusesExistingVibeVault(t *testing.T) {
 	target := filepath.Join(dir, "existing")
 	os.MkdirAll(filepath.Join(target, ".vibe-vault"), 0o755)
 
-	err := Init(target, Options{})
+	_, err := Init(target, Options{})
 	if err == nil {
 		t.Fatal("expected error for existing .vibe-vault/")
 	}
@@ -74,7 +98,7 @@ func TestInit_VaultNameReplacement(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "test-vault")
 
-	if err := Init(target, Options{}); err != nil {
+	if _, err := Init(target, Options{}); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 
@@ -95,7 +119,7 @@ func TestInit_ExecutablePermissions(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "perm-vault")
 
-	if err := Init(target, Options{}); err != nil {
+	if _, err := Init(target, Options{}); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 

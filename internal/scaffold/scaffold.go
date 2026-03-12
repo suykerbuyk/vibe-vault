@@ -24,21 +24,53 @@ type Options struct {
 	GitInit bool // run git init after scaffolding
 }
 
-// Init creates a new vibe-vault Obsidian vault at targetPath.
-func Init(targetPath string, opts Options) error {
+// vaultState describes what already exists at a target path.
+type vaultState int
+
+const (
+	vaultNone        vaultState = iota // nothing exists
+	vaultVibeVault                     // .obsidian/ + Projects/ — an existing vibe-vault
+	vaultObsidian                      // .obsidian/ only — not a vibe-vault
+	vaultStateDir                      // .vibe-vault/ only — state dir exists
+)
+
+// detectVault inspects targetPath and returns its vault state.
+func detectVault(targetPath string) vaultState {
+	hasObsidian := dirExists(filepath.Join(targetPath, ".obsidian"))
+	hasProjects := dirExists(filepath.Join(targetPath, "Projects"))
+	hasState := dirExists(filepath.Join(targetPath, ".vibe-vault"))
+
+	switch {
+	case hasObsidian && hasProjects:
+		return vaultVibeVault
+	case hasObsidian:
+		return vaultObsidian
+	case hasState:
+		return vaultStateDir
+	default:
+		return vaultNone
+	}
+}
+
+// Init creates or adopts a vibe-vault Obsidian vault at targetPath.
+// It returns an action string ("created" or "adopted") and any error.
+func Init(targetPath string, opts Options) (string, error) {
 	targetPath, err := filepath.Abs(targetPath)
 	if err != nil {
-		return fmt.Errorf("resolve path: %w", err)
+		return "", fmt.Errorf("resolve path: %w", err)
 	}
 
-	// Refuse if target already contains a vault or vibe-vault state.
-	if dirExists(filepath.Join(targetPath, ".obsidian")) {
-		return fmt.Errorf("%s already contains .obsidian/ — refusing to overwrite", targetPath)
-	}
-	if dirExists(filepath.Join(targetPath, ".vibe-vault")) {
-		return fmt.Errorf("%s already contains .vibe-vault/ — refusing to overwrite", targetPath)
+	switch detectVault(targetPath) {
+	case vaultVibeVault:
+		// Existing vibe-vault — adopt it (just write config, skip scaffolding).
+		return "adopted", nil
+	case vaultObsidian:
+		return "", fmt.Errorf("%s contains .obsidian/ but no Projects/ — looks like an Obsidian vault, not a vibe-vault", targetPath)
+	case vaultStateDir:
+		return "", fmt.Errorf("%s already contains .vibe-vault/ — refusing to overwrite", targetPath)
 	}
 
+	// vaultNone — scaffold a new vault.
 	vaultName := filepath.Base(targetPath)
 
 	// Walk embedded templates and copy to target.
@@ -80,7 +112,7 @@ func Init(targetPath string, opts Options) error {
 		return os.WriteFile(dest, data, perm)
 	})
 	if err != nil {
-		return fmt.Errorf("scaffold vault: %w", err)
+		return "", fmt.Errorf("scaffold vault: %w", err)
 	}
 
 	if opts.GitInit {
@@ -88,11 +120,11 @@ func Init(targetPath string, opts Options) error {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("git init: %w", err)
+			return "", fmt.Errorf("git init: %w", err)
 		}
 	}
 
-	return nil
+	return "created", nil
 }
 
 // filePermission returns 0o755 for shell scripts and git hooks, 0o644 for everything else.
