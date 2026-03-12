@@ -5,6 +5,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -326,6 +327,173 @@ func TestGetTaskMissingName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "task name is required") {
 		t.Errorf("error = %v, want 'task name is required'", err)
+	}
+}
+
+// --- vv_bootstrap_context tests ---
+
+func TestBootstrapContextBasic(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{
+		"s1": {
+			SessionID: "s1", Project: "testproj", Date: "2026-03-10",
+			Title: "Recent Session", Summary: "Did some work.",
+			Decisions: []string{"Used Go"}, OpenThreads: []string{"Fix tests"},
+		},
+	}, map[string]string{
+		"Projects/testproj/agentctx/workflow.md":              "# Workflow\n\nStep 1: do things.",
+		"Projects/testproj/agentctx/resume.md":                "# Resume\n\nPick up here.",
+		"Projects/testproj/agentctx/tasks/implement-auth.md":  "# Implement Auth\nStatus: in-progress\nPriority: high\n",
+	})
+
+	tool := NewBootstrapContextTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var parsed struct {
+		Project     string      `json:"project"`
+		Workflow    string      `json:"workflow"`
+		Resume      string      `json:"resume"`
+		ActiveTasks []taskEntry `json:"active_tasks"`
+		Context     string      `json:"context"`
+	}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v\nresult: %s", err, result)
+	}
+	if parsed.Project != "testproj" {
+		t.Errorf("project = %v, want testproj", parsed.Project)
+	}
+	if !strings.Contains(parsed.Workflow, "Step 1") {
+		t.Errorf("workflow missing expected content, got: %s", parsed.Workflow)
+	}
+	if !strings.Contains(parsed.Resume, "Pick up here") {
+		t.Errorf("resume missing expected content, got: %s", parsed.Resume)
+	}
+	if len(parsed.ActiveTasks) != 1 {
+		t.Fatalf("expected 1 active task, got %d", len(parsed.ActiveTasks))
+	}
+	if parsed.ActiveTasks[0].Name != "implement-auth" {
+		t.Errorf("task name = %v, want implement-auth", parsed.ActiveTasks[0].Name)
+	}
+	if parsed.Context == "" {
+		t.Error("context should not be empty")
+	}
+}
+
+func TestBootstrapContextMissingResume(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/workflow.md": "# Workflow",
+	})
+
+	tool := NewBootstrapContextTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var parsed struct {
+		Resume string `json:"resume"`
+	}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if parsed.Resume != "" {
+		t.Errorf("resume = %q, want empty string for missing resume", parsed.Resume)
+	}
+}
+
+func TestBootstrapContextWorkflowFallback(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+
+	tool := NewBootstrapContextTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"newproj"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var parsed struct {
+		Workflow string `json:"workflow"`
+	}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if parsed.Workflow == "" {
+		t.Error("expected non-empty workflow from template fallback")
+	}
+	if strings.Contains(parsed.Workflow, "{{PROJECT}}") {
+		t.Error("template placeholder {{PROJECT}} should have been replaced")
+	}
+}
+
+func TestBootstrapContextNoTasks(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/workflow.md": "# Workflow",
+	})
+
+	tool := NewBootstrapContextTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var parsed struct {
+		ActiveTasks []taskEntry `json:"active_tasks"`
+	}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(parsed.ActiveTasks) != 0 {
+		t.Errorf("expected 0 active tasks, got %d", len(parsed.ActiveTasks))
+	}
+}
+
+func TestBootstrapContextTokenBudget(t *testing.T) {
+	// Create enough session data that inject output would be large
+	entries := map[string]index.SessionEntry{}
+	for i := 0; i < 20; i++ {
+		id := fmt.Sprintf("s%d", i)
+		entries[id] = index.SessionEntry{
+			SessionID:   id,
+			Project:     "testproj",
+			Date:        fmt.Sprintf("2026-03-%02d", (i%28)+1),
+			Title:       fmt.Sprintf("Session %d with lots of context and detail", i),
+			Summary:     fmt.Sprintf("Did work item %d involving multiple files and complex refactoring across the codebase.", i),
+			Decisions:   []string{fmt.Sprintf("Decision %d: chose approach A over B for performance reasons", i)},
+			OpenThreads: []string{fmt.Sprintf("Thread %d: need to follow up on edge case handling", i)},
+		}
+	}
+
+	cfg := writeTestVault(t, entries, map[string]string{
+		"Projects/testproj/agentctx/workflow.md": "# Workflow",
+	})
+
+	tool := NewBootstrapContextTool(cfg)
+	// Use a small token budget to force truncation
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj","max_tokens":100}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var parsed struct {
+		Context string `json:"context"`
+	}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	// The context should be present but truncated (sections dropped)
+	if parsed.Context == "" {
+		t.Error("context should not be empty even with small budget")
+	}
+}
+
+func TestBootstrapContextPathTraversal(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+
+	tool := NewBootstrapContextTool(cfg)
+	_, err := tool.Handler(json.RawMessage(`{"project":"../etc/passwd"}`))
+	if err == nil {
+		t.Fatal("expected error for path traversal")
 	}
 }
 

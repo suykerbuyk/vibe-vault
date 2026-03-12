@@ -1053,6 +1053,7 @@ func runMcp() {
 	srv.RegisterTool(mcp.NewAppendIterationTool(cfg))
 	srv.RegisterTool(mcp.NewManageTaskTool(cfg))
 	srv.RegisterTool(mcp.NewRefreshIndexTool(cfg))
+	srv.RegisterTool(mcp.NewBootstrapContextTool(cfg))
 	srv.RegisterPrompt(mcp.NewSessionGuidelinesPrompt())
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()

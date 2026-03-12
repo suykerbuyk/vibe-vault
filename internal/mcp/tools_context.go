@@ -14,7 +14,10 @@ import (
 	"strings"
 
 	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/index"
+	"github.com/johns/vibe-vault/internal/inject"
 	"github.com/johns/vibe-vault/internal/session"
+	"github.com/johns/vibe-vault/internal/trends"
 	"github.com/johns/vibe-vault/templates"
 )
 
@@ -372,6 +375,136 @@ func NewGetTaskTool(cfg config.Config) Tool {
 			}
 
 			return "", fmt.Errorf("task %q not found in project %q", args.Task, project)
+		},
+	}
+}
+
+// NewBootstrapContextTool creates the vv_bootstrap_context tool.
+// It composes existing read operations into a single one-shot session bootstrap,
+// returning workflow, resume, active tasks, and inject context as structured JSON.
+func NewBootstrapContextTool(cfg config.Config) Tool {
+	return Tool{
+		Definition: ToolDef{
+			Name:        "vv_bootstrap_context",
+			Description: "Bootstrap full session context in one call. Returns workflow instructions, resume state, active tasks, and project context (sessions, threads, decisions, friction). Replaces the multi-file bootstrap chain with a single MCP call.",
+			InputSchema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"project": {
+						"type": "string",
+						"description": "Project name. If omitted, detected from working directory."
+					},
+					"max_tokens": {
+						"type": "integer",
+						"description": "Token budget for the context section. Default: 8000. Workflow, resume, and tasks are always included in full."
+					}
+				}
+			}`),
+		},
+		Handler: func(params json.RawMessage) (string, error) {
+			var args struct {
+				Project   string `json:"project"`
+				MaxTokens int    `json:"max_tokens"`
+			}
+			if len(params) > 0 {
+				if err := json.Unmarshal(params, &args); err != nil {
+					return "", fmt.Errorf("invalid arguments: %w", err)
+				}
+			}
+
+			project, err := resolveProject(args.Project)
+			if err != nil {
+				return "", err
+			}
+
+			if args.MaxTokens <= 0 {
+				args.MaxTokens = 8000
+			}
+
+			agentctxDir := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx")
+
+			// 1. Read workflow (with template fallback)
+			workflowPath := filepath.Join(agentctxDir, "workflow.md")
+			absWorkflow, err := vaultPrefixCheck(workflowPath, cfg.VaultPath)
+			if err != nil {
+				return "", err
+			}
+			var workflow string
+			if data, readErr := os.ReadFile(absWorkflow); readErr != nil {
+				if os.IsNotExist(readErr) {
+					tmpl, tmplErr := fs.ReadFile(templates.AgentctxFS(), "agentctx/workflow.md")
+					if tmplErr != nil {
+						return "", fmt.Errorf("read embedded workflow template: %w", tmplErr)
+					}
+					workflow = strings.ReplaceAll(string(tmpl), "{{PROJECT}}", project)
+				} else {
+					return "", fmt.Errorf("read workflow: %w", readErr)
+				}
+			} else {
+				workflow = string(data)
+			}
+
+			// 2. Read resume (allow missing)
+			resumePath := filepath.Join(agentctxDir, "resume.md")
+			absResume, err := vaultPrefixCheck(resumePath, cfg.VaultPath)
+			if err != nil {
+				return "", err
+			}
+			var resume string
+			if data, readErr := os.ReadFile(absResume); readErr == nil {
+				resume = string(data)
+			}
+
+			// 3. Scan active tasks
+			tasksDir := filepath.Join(agentctxDir, "tasks")
+			if _, pfxErr := vaultPrefixCheck(tasksDir, cfg.VaultPath); pfxErr != nil {
+				return "", pfxErr
+			}
+			var tasks []taskEntry
+			if scanErr := scanTaskDir(tasksDir, false, &tasks); scanErr != nil {
+				return "", fmt.Errorf("scan tasks: %w", scanErr)
+			}
+
+			// 4. Build inject context
+			idx, err := index.Load(cfg.StateDir())
+			if err != nil {
+				return "", fmt.Errorf("load index: %w", err)
+			}
+			trendResult := trends.Compute(idx.Entries, project, 4)
+			injectOpts := inject.Opts{
+				Project:   project,
+				Format:    "json",
+				MaxTokens: args.MaxTokens,
+			}
+			injectResult := inject.Build(idx.Entries, trendResult, injectOpts)
+			contextOutput, err := inject.Render(injectResult, injectOpts)
+			if err != nil {
+				return "", fmt.Errorf("render context: %w", err)
+			}
+
+			// 5. Compose response
+			if tasks == nil {
+				tasks = []taskEntry{}
+			}
+			response := struct {
+				Project     string      `json:"project"`
+				Workflow    string      `json:"workflow"`
+				Resume      string      `json:"resume"`
+				ActiveTasks []taskEntry `json:"active_tasks"`
+				Context     string      `json:"context"`
+			}{
+				Project:     project,
+				Workflow:    workflow,
+				Resume:      resume,
+				ActiveTasks: tasks,
+				Context:     contextOutput,
+			}
+
+			data, err := json.MarshalIndent(response, "", "  ")
+			if err != nil {
+				return "", fmt.Errorf("marshal: %w", err)
+			}
+			return string(data) + "\n", nil
 		},
 	}
 }
