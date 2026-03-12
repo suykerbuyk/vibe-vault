@@ -1,6 +1,6 @@
 # Architecture
 
-Extracted from `agentctx/resume.md` for reference.
+Module responsibilities, data flows, and system architecture.
 
 ## Data Flow
 
@@ -58,7 +58,7 @@ detect.go    │   │   │   │
             generate.go       GenerateContext() → history.md
 ```
 
-### Zed Thread Parsing Flow (Phase 1 — library only, no CLI yet)
+### Zed Integration Flow
 
 ```
 ~/.local/share/zed/threads/threads.db
@@ -80,8 +80,21 @@ convert  detect  narrative  prose
     ▼    ▼    ▼          ▼
 Transcript  Info  Narrative  Dialogue
     │
-    └──── (Phase 2: feeds into CaptureFromParsed → render → index)
+    └──── CaptureFromParsed → render → index
 ```
+
+Three capture paths:
+
+- **MCP capture (explicit):** Agent calls `vv_capture_session` →
+  `session.CaptureFromParsed()` with agent-curated summary
+- **SQLite backfill:** `vv zed backfill` → `zed.ParseDB()` → convert → capture
+  (batch processing of historical threads)
+- **Auto-capture:** MCP server background watcher (`zed.Watcher`) monitors
+  `threads.db-wal` via fsnotify → debounce → auto-capture callback
+  (`status: auto-captured`). Explicit captures take precedence.
+
+Additional commands: `vv zed list` shows parsed threads, `vv zed watch` runs
+the standalone SQLite watcher for auto-capturing outside the MCP server.
 
 ### Index Rebuild Flow (`vv index`)
 
@@ -155,6 +168,23 @@ Claude Code / AI agent
         └─── prompt: vv_session_guidelines → agent instructions for capture
 ```
 
+### Context Sync Flow (`vv context`)
+
+```
+vv context init          vv context sync          vv context diff/accept
+    │                        │                        │
+    ▼                        ▼                        ▼
+context.Init()           context.Sync()           templates.Diff()
+    │                        │                        │
+    ▼                        ▼                        ▼
+Scaffold agentctx/       Run migrations           Compare vault commands
+from templates.           (schema 0→4)            vs embedded defaults
+    │                        │                        │
+    ▼                        ▼                        ▼
+Create repo symlinks     Propagate shared          Show delta / copy
+(CLAUDE.md, .claude/)    commands to projects      updated commands
+```
+
 ## Module Responsibilities
 
 | Package | File | Responsibility |
@@ -220,6 +250,12 @@ Claude Code / AI agent
 | `zed` | `detect.go` | `DetectProject()` — builds `session.Info` from thread metadata without git subprocess (worktree path basename, snapshot branch, config-based domain) |
 | `zed` | `narrative.go` | `ExtractNarrative()` — single-segment Narrative from Zed tools, commit extraction from terminal results, tag inference |
 | `zed` | `prose.go` | `ExtractDialogue()` — Dialogue from Zed messages, mention inlining, filler filter, error markers from tool_results |
+| `zed` | `watcher.go` | `Watcher` — fsnotify on `threads.db-wal`, debounce, auto-capture callback |
+| `zed` | `batch.go` | Batch capture helpers for backfill |
+| `effectiveness` | `effectiveness.go` | Context depth vs session outcome correlation (cohort analysis, Pearson correlation) |
+| `identity` | `identity.go` | `.vibe-vault.toml` parser — explicit project name/domain/tags override |
+| `llm` | `provider.go`, `types.go`, `retry.go`, `openai.go`, `anthropic.go`, `google.go` | Multi-provider LLM abstraction: `Provider` interface, OpenAI-compatible/Anthropic/Gemini implementations, retry with backoff |
+| `templates` (internal) | `templates.go`, `diff.go`, `reset.go` | Template registry, vault-vs-embedded comparison, `vv templates` status reporting |
 | `sanitize` | `redact.go` | Regex-based XML tag stripping for Claude Code wrapper tags |
 
 ## Template System
