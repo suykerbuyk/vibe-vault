@@ -727,6 +727,176 @@ func TestUninstallMCPZed_NotInstalled(t *testing.T) {
 	}
 }
 
+// --- Unified MCP install/uninstall tests ---
+
+func TestInstallMCPAll_BothDetected(t *testing.T) {
+	home := setupHome(t)
+	// Create both editor directories
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	os.MkdirAll(filepath.Join(home, ".config", "zed"), 0o755)
+
+	if err := InstallMCPAll(false, false); err != nil {
+		t.Fatal(err)
+	}
+
+	claudePath := settingsPath(home)
+	cs := readJSON(t, claudePath)
+	if !hasMCP(cs) {
+		t.Error("Claude Code MCP server not installed")
+	}
+
+	zedPath := zedSettingsPath(home)
+	zs := readJSON(t, zedPath)
+	if !hasMCPZed(zs) {
+		t.Error("Zed MCP server not installed")
+	}
+}
+
+func TestInstallMCPAll_OnlyClaude(t *testing.T) {
+	home := setupHome(t)
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	// No Zed directory
+
+	if err := InstallMCPAll(false, false); err != nil {
+		t.Fatal(err)
+	}
+
+	claudePath := settingsPath(home)
+	cs := readJSON(t, claudePath)
+	if !hasMCP(cs) {
+		t.Error("Claude Code MCP server not installed")
+	}
+
+	zedPath := zedSettingsPath(home)
+	if _, err := os.Stat(zedPath); !os.IsNotExist(err) {
+		t.Error("Zed settings file should not exist")
+	}
+}
+
+func TestInstallMCPAll_OnlyZed(t *testing.T) {
+	home := setupHome(t)
+	os.MkdirAll(filepath.Join(home, ".config", "zed"), 0o755)
+	// No Claude directory
+
+	if err := InstallMCPAll(false, false); err != nil {
+		t.Fatal(err)
+	}
+
+	claudePath := settingsPath(home)
+	if _, err := os.Stat(claudePath); !os.IsNotExist(err) {
+		t.Error("Claude settings file should not exist")
+	}
+
+	zedPath := zedSettingsPath(home)
+	zs := readJSON(t, zedPath)
+	if !hasMCPZed(zs) {
+		t.Error("Zed MCP server not installed")
+	}
+}
+
+func TestInstallMCPAll_NeitherDetected(t *testing.T) {
+	setupHome(t)
+	// No editor directories
+
+	err := InstallMCPAll(false, false)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+func TestInstallMCPAll_ClaudeOnlyFlag(t *testing.T) {
+	home := setupHome(t)
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	os.MkdirAll(filepath.Join(home, ".config", "zed"), 0o755)
+
+	if err := InstallMCPAll(true, false); err != nil {
+		t.Fatal(err)
+	}
+
+	claudePath := settingsPath(home)
+	cs := readJSON(t, claudePath)
+	if !hasMCP(cs) {
+		t.Error("Claude Code MCP server not installed")
+	}
+
+	zedPath := zedSettingsPath(home)
+	if _, err := os.Stat(zedPath); !os.IsNotExist(err) {
+		t.Error("Zed should not be installed with --claude-only")
+	}
+}
+
+func TestInstallMCPAll_ZedOnlyFlag(t *testing.T) {
+	home := setupHome(t)
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	os.MkdirAll(filepath.Join(home, ".config", "zed"), 0o755)
+
+	if err := InstallMCPAll(false, true); err != nil {
+		t.Fatal(err)
+	}
+
+	claudePath := settingsPath(home)
+	if _, err := os.Stat(claudePath); !os.IsNotExist(err) {
+		t.Error("Claude should not be installed with --zed-only")
+	}
+
+	zedPath := zedSettingsPath(home)
+	zs := readJSON(t, zedPath)
+	if !hasMCPZed(zs) {
+		t.Error("Zed MCP server not installed")
+	}
+}
+
+func TestUninstallMCPAll_BothDetected(t *testing.T) {
+	home := setupHome(t)
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	os.MkdirAll(filepath.Join(home, ".config", "zed"), 0o755)
+
+	// Install both first
+	if err := InstallMCPAll(false, false); err != nil {
+		t.Fatal(err)
+	}
+	// Then uninstall both
+	if err := UninstallMCPAll(false, false); err != nil {
+		t.Fatal(err)
+	}
+
+	claudePath := settingsPath(home)
+	cs := readJSON(t, claudePath)
+	if hasMCP(cs) {
+		t.Error("Claude Code MCP server should be removed")
+	}
+
+	zedPath := zedSettingsPath(home)
+	zs := readJSON(t, zedPath)
+	if hasMCPZed(zs) {
+		t.Error("Zed MCP server should be removed")
+	}
+}
+
+func TestInstallMCPAll_Idempotent(t *testing.T) {
+	home := setupHome(t)
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	os.MkdirAll(filepath.Join(home, ".config", "zed"), 0o755)
+
+	if err := InstallMCPAll(false, false); err != nil {
+		t.Fatal(err)
+	}
+	// Second install should succeed without error
+	if err := InstallMCPAll(false, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify both still installed
+	cs := readJSON(t, settingsPath(home))
+	if !hasMCP(cs) {
+		t.Error("Claude Code MCP server not installed after idempotent call")
+	}
+	zs := readJSON(t, zedSettingsPath(home))
+	if !hasMCPZed(zs) {
+		t.Error("Zed MCP server not installed after idempotent call")
+	}
+}
+
 // --- JSONC stripping tests ---
 
 func TestStripJSONC_LineComments(t *testing.T) {

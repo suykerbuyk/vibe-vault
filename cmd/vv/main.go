@@ -1003,14 +1003,18 @@ func runMcp() {
 				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdMcpInstall))
 				return
 			}
+			claudeOnly := hasFlag(args[1:], "--claude-only")
+			zedOnly := hasFlag(args[1:], "--zed-only")
+			if claudeOnly && zedOnly {
+				fatal("--claude-only and --zed-only are mutually exclusive")
+			}
 			if hasFlag(args[1:], "--zed") {
-				if err := hook.InstallMCPZed(); err != nil {
-					fatal("%v", err)
-				}
-			} else {
-				if err := hook.InstallMCP(); err != nil {
-					fatal("%v", err)
-				}
+				fmt.Fprintf(os.Stderr, "note: --zed is deprecated; default now installs all detected editors\n")
+				fmt.Fprintf(os.Stderr, "      use --zed-only to install only Zed\n\n")
+				zedOnly = true
+			}
+			if err := hook.InstallMCPAll(claudeOnly, zedOnly); err != nil {
+				fatal("%v", err)
 			}
 			return
 		case "uninstall":
@@ -1018,14 +1022,18 @@ func runMcp() {
 				fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdMcpUninstall))
 				return
 			}
+			claudeOnly := hasFlag(args[1:], "--claude-only")
+			zedOnly := hasFlag(args[1:], "--zed-only")
+			if claudeOnly && zedOnly {
+				fatal("--claude-only and --zed-only are mutually exclusive")
+			}
 			if hasFlag(args[1:], "--zed") {
-				if err := hook.UninstallMCPZed(); err != nil {
-					fatal("%v", err)
-				}
-			} else {
-				if err := hook.UninstallMCP(); err != nil {
-					fatal("%v", err)
-				}
+				fmt.Fprintf(os.Stderr, "note: --zed is deprecated; default now uninstalls from all detected editors\n")
+				fmt.Fprintf(os.Stderr, "      use --zed-only to uninstall only Zed\n\n")
+				zedOnly = true
+			}
+			if err := hook.UninstallMCPAll(claudeOnly, zedOnly); err != nil {
+				fatal("%v", err)
 			}
 			return
 		}

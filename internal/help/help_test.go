@@ -338,8 +338,8 @@ var expectedTerminal = map[string]string{
 	"mcp": "vv mcp \u2014 start MCP server for AI agent integration\n" +
 		"\n" +
 		"Usage: vv mcp\n" +
-		"    vv mcp install [--zed]\n" +
-		"    vv mcp uninstall [--zed]\n" +
+		"    vv mcp install [--claude-only | --zed-only]\n" +
+		"    vv mcp uninstall [--claude-only | --zed-only]\n" +
 		"\n" +
 		"Starts a Model Context Protocol (MCP) server that exposes vibe-vault\n" +
 		"tools over JSON-RPC 2.0 on stdin/stdout. This allows AI agents like\n" +
@@ -373,13 +373,9 @@ var expectedTerminal = map[string]string{
 		"Available prompts:\n" +
 		"  vv_session_guidelines   Agent instructions for session capture\n" +
 		"\n" +
-		"Setup (Claude Code):\n" +
-		"  vv mcp install        # adds vibe-vault to ~/.claude/settings.json\n" +
-		"  (restart Claude Code)\n" +
-		"\n" +
-		"Setup (Zed):\n" +
-		"  vv mcp install --zed  # adds vibe-vault to ~/.config/zed/settings.json\n" +
-		"  (restart Zed)\n" +
+		"Setup:\n" +
+		"  vv mcp install        # installs into all detected editors\n" +
+		"  (restart your editor)\n" +
 		"\n" +
 		"Verify \u2014 after restarting your editor, ask the agent to \"list\n" +
 		"vibe-vault projects\" or \"capture this session\". The agent will\n" +

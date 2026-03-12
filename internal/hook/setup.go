@@ -5,6 +5,7 @@ package hook
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -540,6 +541,80 @@ func eventHasVVHook(hooksMap map[string]any, event string) bool {
 		}
 	}
 	return false
+}
+
+// claudeDetected returns true when the Claude Code settings directory exists.
+// Detection must precede install calls because writeSettings creates parent
+// directories via MkdirAll.
+func claudeDetected() bool {
+	p, err := SettingsPath()
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(filepath.Dir(p))
+	return err == nil && info.IsDir()
+}
+
+// zedDetected returns true when the Zed settings directory exists.
+func zedDetected() bool {
+	p, err := ZedSettingsPath()
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(filepath.Dir(p))
+	return err == nil && info.IsDir()
+}
+
+// InstallMCPAll installs the MCP server into all detected editors.
+// Pass claudeOnly or zedOnly to restrict to a single editor.
+func InstallMCPAll(claudeOnly, zedOnly bool) error {
+	var errs []error
+	if !zedOnly {
+		if claudeDetected() {
+			if err := InstallMCP(); err != nil {
+				errs = append(errs, err)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "Claude Code: skipped (~/.claude/ not found)\n")
+			fmt.Fprintf(os.Stderr, "  Run 'vv mcp install' after installing Claude Code.\n")
+		}
+	}
+	if !claudeOnly {
+		if zedDetected() {
+			if err := InstallMCPZed(); err != nil {
+				errs = append(errs, err)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "Zed: skipped (~/.config/zed/ not found)\n")
+			fmt.Fprintf(os.Stderr, "  Run 'vv mcp install' after installing Zed.\n")
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// UninstallMCPAll removes the MCP server from all detected editors.
+// Pass claudeOnly or zedOnly to restrict to a single editor.
+func UninstallMCPAll(claudeOnly, zedOnly bool) error {
+	var errs []error
+	if !zedOnly {
+		if claudeDetected() {
+			if err := UninstallMCP(); err != nil {
+				errs = append(errs, err)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "Claude Code: skipped (~/.claude/ not found)\n")
+		}
+	}
+	if !claudeOnly {
+		if zedDetected() {
+			if err := UninstallMCPZed(); err != nil {
+				errs = append(errs, err)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "Zed: skipped (~/.config/zed/ not found)\n")
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // entryContainsVVHook checks whether a single hook entry contains "vv hook".

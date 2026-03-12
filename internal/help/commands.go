@@ -408,7 +408,7 @@ var CmdMcp = Command{
 	Synopsis:   "start MCP server for AI agent integration",
 	Brief:      "Start MCP server (JSON-RPC over stdio)",
 	TableUsage: "vv mcp [install | ...]",
-	Usage:      "vv mcp\n    vv mcp install [--zed]\n    vv mcp uninstall [--zed]",
+	Usage:      "vv mcp\n    vv mcp install [--claude-only | --zed-only]\n    vv mcp uninstall [--claude-only | --zed-only]",
 	Description: `Starts a Model Context Protocol (MCP) server that exposes vibe-vault
 tools over JSON-RPC 2.0 on stdin/stdout. This allows AI agents like
 Claude Code and Zed to query project context programmatically.
@@ -441,13 +441,9 @@ Available tools:
 Available prompts:
   vv_session_guidelines   Agent instructions for session capture
 
-Setup (Claude Code):
-  vv mcp install        # adds vibe-vault to ~/.claude/settings.json
-  (restart Claude Code)
-
-Setup (Zed):
-  vv mcp install --zed  # adds vibe-vault to ~/.config/zed/settings.json
-  (restart Zed)
+Setup:
+  vv mcp install        # installs into all detected editors
+  (restart your editor)
 
 Verify — after restarting your editor, ask the agent to "list
 vibe-vault projects" or "capture this session". The agent will
@@ -461,14 +457,16 @@ var CmdMcpInstall = Command{
 	Name:     "mcp install",
 	Synopsis: "register MCP server in editor settings",
 	Brief:    "Add vibe-vault MCP server to settings.json",
-	Usage:    "vv mcp install [--zed]",
+	Usage:    "vv mcp install [--claude-only | --zed-only]",
 	Flags: []Flag{
-		{Name: "--zed", Desc: "Install into Zed settings (~/.config/zed/settings.json) instead of Claude Code"},
+		{Name: "--claude-only", Desc: "Install only into Claude Code (~/.claude/settings.json)"},
+		{Name: "--zed-only", Desc: "Install only into Zed (~/.config/zed/settings.json)"},
 	},
-	Description: `Adds a "vibe-vault" entry to the editor's MCP/context server settings.
+	Description: `Adds a "vibe-vault" entry to each detected editor's MCP/context server
+settings. By default, installs into all editors whose config directories
+exist (~/.claude/ for Claude Code, ~/.config/zed/ for Zed).
 
-Without --zed: adds to ~/.claude/settings.json (mcpServers key).
-With --zed: adds to ~/.config/zed/settings.json (context_servers key).
+Editors not detected are skipped with an advisory message.
 
 Creates the settings file and parent directory if they don't exist.
 Preserves all existing settings and MCP servers. A backup is saved to
@@ -485,15 +483,14 @@ var CmdMcpUninstall = Command{
 	Name:     "mcp uninstall",
 	Synopsis: "remove MCP server from editor settings",
 	Brief:    "Remove vibe-vault MCP server from settings.json",
-	Usage:    "vv mcp uninstall [--zed]",
+	Usage:    "vv mcp uninstall [--claude-only | --zed-only]",
 	Flags: []Flag{
-		{Name: "--zed", Desc: "Uninstall from Zed settings instead of Claude Code"},
+		{Name: "--claude-only", Desc: "Uninstall only from Claude Code (~/.claude/settings.json)"},
+		{Name: "--zed-only", Desc: "Uninstall only from Zed (~/.config/zed/settings.json)"},
 	},
-	Description: `Removes the "vibe-vault" entry from the editor's MCP/context server
-settings.
-
-Without --zed: removes from ~/.claude/settings.json (mcpServers key).
-With --zed: removes from ~/.config/zed/settings.json (context_servers key).
+	Description: `Removes the "vibe-vault" entry from each detected editor's MCP/context
+server settings. By default, removes from all editors whose config
+directories exist.
 
 Preserves all other settings and MCP servers. A backup is saved to
 settings.json.vv.bak before any modification.
