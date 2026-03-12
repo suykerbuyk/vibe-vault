@@ -31,10 +31,12 @@ Key architectural and design decisions in vibe-vault, with rationale.
    and separates session notes from project-level files (history.md,
    knowledge.md, tasks/).
 
-7. **Two dependencies (BurntSushi/toml, klauspost/compress):** Minimal
-   dependency tree for a tool that runs on every session end. Enrichment uses
-   `net/http` from stdlib -- no LLM SDKs. Zstd added in Phase 4 for transcript
-   archival (~10:1 compression on JSONL).
+7. **Three direct dependencies (BurntSushi/toml, klauspost/compress,
+   modernc.org/sqlite):** Minimal dependency tree for a tool that runs on every
+   session end. Enrichment uses `net/http` from stdlib -- no LLM SDKs. Zstd
+   added in Phase 4 for transcript archival (~10:1 compression on JSONL).
+   SQLite added in Phase 8 for Zed thread parsing and session index. fsnotify
+   is indirect (via sqlite/zed watcher).
 
 8. **Multi-provider LLM abstraction via `internal/llm/`:** The `Provider`
    interface (`ChatCompletion(ctx, Request) (*Response, error)` + `Name()`)
@@ -274,3 +276,38 @@ Key architectural and design decisions in vibe-vault, with rationale.
     before/after dataset. This makes the context pipeline self-measuring — the
     tool can quantify whether its own context injection improves AI session
     quality.
+
+37. **MCP server as stdio JSON-RPC gateway:** `vv mcp` serves 8 tools + 1
+    prompt over stdin/stdout JSON-RPC 2.0. All tool names use `vv_` prefix to
+    avoid namespace collisions. Install paths differ by editor: Claude Code
+    writes to `~/.claude/settings.json` `mcpServers`, Zed writes to
+    `~/.config/zed/settings.json` `context_servers`. The server is stateless —
+    each tool call loads the index fresh.
+
+38. **Project identity via `.vibe-vault.toml`:** A `.vibe-vault.toml` file in
+    a repo root overrides git-remote-based project detection with explicit name,
+    domain, and tags. This handles repos where `origin` doesn't exist, points at
+    a fork, or where the git-derived name is unhelpful. `identity.Detect()`
+    checks for the file first, falls back to `session.Detect()`.
+
+39. **Dynamic context injection via `vv inject`:** `inject.Build()` assembles
+    context from the session index — recent sessions, open threads, decisions,
+    friction trends — into a priority-ranked section list. `inject.Render()`
+    applies a configurable token budget, dropping lowest-priority sections first.
+    Used by `vv inject` CLI, `vv_get_project_context` MCP tool, and the
+    PreCompact hook handler (which pipes inject output to stdout for Claude Code
+    to ingest before context compaction).
+
+40. **Zed hybrid capture — explicit MCP tool + automatic SQLite watcher:**
+    `vv_capture_session` MCP tool accepts agent-curated summaries (explicit
+    path). A background goroutine in the MCP server watches `threads.db-wal` via
+    fsnotify, auto-capturing after a configurable debounce (default 5 min) when
+    agents forget to call the tool (automatic path). Explicit captures take
+    precedence; automatic captures get `status: auto-captured`. Controlled by
+    `[zed] auto_capture` config (default true).
+
+41. **Outdated command detection via content hashing:** `vv context sync`
+    compares shared command files against their vault-resident copies using
+    SHA-256 content hashes. `vv context diff` shows the delta, `vv context
+    accept` pulls updates. This catches command template drift without requiring
+    schema version bumps.
