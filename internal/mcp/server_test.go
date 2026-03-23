@@ -358,3 +358,214 @@ func TestPromptsCapabilityOmittedWhenEmpty(t *testing.T) {
 		t.Error("prompts capability should not be advertised when no prompts registered")
 	}
 }
+
+// --- Defensive protocol tests ---
+
+func TestToolsListEmptyReturnsArray(t *testing.T) {
+	logger := log.New(io.Discard, "", 0)
+	srv := NewServer(ServerInfo{Name: "empty", Version: "0.0.0"}, logger)
+	// No tools registered
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+	)
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+
+	// Marshal and check raw JSON for [] not null
+	raw, err := json.Marshal(responses[0].Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	rawStr := string(raw)
+	if strings.Contains(rawStr, `"tools":null`) {
+		t.Errorf("tools list should serialize as [] not null; got: %s", rawStr)
+	}
+	if !strings.Contains(rawStr, `"tools":[]`) {
+		t.Errorf("expected tools:[], got: %s", rawStr)
+	}
+}
+
+func TestPromptsListEmptyReturnsEmptyArray(t *testing.T) {
+	logger := log.New(io.Discard, "", 0)
+	srv := NewServer(ServerInfo{Name: "empty", Version: "0.0.0"}, logger)
+	// No prompts registered
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"prompts/list"}`,
+	)
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+
+	raw, err := json.Marshal(responses[0].Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	rawStr := string(raw)
+	if strings.Contains(rawStr, `"prompts":null`) {
+		t.Errorf("prompts list should serialize as [] not null; got: %s", rawStr)
+	}
+	if !strings.Contains(rawStr, `"prompts":[]`) {
+		t.Errorf("expected prompts:[], got: %s", rawStr)
+	}
+}
+
+func TestInitializeLogsClientInfo(t *testing.T) {
+	var logBuf strings.Builder
+	logger := log.New(&logBuf, "", 0)
+	srv := NewServer(ServerInfo{Name: "test-server", Version: "0.1.0"}, logger)
+	srv.RegisterTool(Tool{
+		Definition: ToolDef{
+			Name:        "echo",
+			Description: "echoes input",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
+		},
+		Handler: func(params json.RawMessage) (string, error) { return "ok", nil },
+	})
+
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"claude-code","version":"2.1.74"}}}`,
+	)
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+	if responses[0].Error != nil {
+		t.Fatalf("unexpected error: %v", responses[0].Error)
+	}
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "claude-code") {
+		t.Errorf("expected log to contain client name 'claude-code', got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "2.1.74") {
+		t.Errorf("expected log to contain client version '2.1.74', got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "2025-03-26") {
+		t.Errorf("expected log to contain protocol version '2025-03-26', got: %s", logOutput)
+	}
+}
+
+func TestClaudeCodeHandshake(t *testing.T) {
+	srv := testServerWithPrompt()
+	responses := sendAndReceive(t, srv,
+		// 1. initialize with 2025-03-26 + roots capability
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{"roots":{}},"clientInfo":{"name":"claude-code","version":"2.1.74"}}}`,
+		// 2. notifications/initialized (no response expected)
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		// 3. tools/list
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+		// 4. prompts/list
+		`{"jsonrpc":"2.0","id":3,"method":"prompts/list","params":{}}`,
+	)
+
+	// Should get 3 responses (initialize, tools/list, prompts/list — notification gets none)
+	if len(responses) != 3 {
+		t.Fatalf("expected 3 responses, got %d", len(responses))
+	}
+
+	// Response 1: initialize
+	if responses[0].Error != nil {
+		t.Fatalf("initialize error: %v", responses[0].Error)
+	}
+	initData, _ := json.Marshal(responses[0].Result)
+	var initResult InitializeResult
+	json.Unmarshal(initData, &initResult)
+	if initResult.ProtocolVersion != "2024-11-05" {
+		t.Errorf("protocol version = %q, want 2024-11-05", initResult.ProtocolVersion)
+	}
+	if initResult.Capabilities.Tools == nil {
+		t.Error("expected tools capability")
+	}
+
+	// Response 2: tools/list
+	if responses[1].Error != nil {
+		t.Fatalf("tools/list error: %v", responses[1].Error)
+	}
+	toolsData, _ := json.Marshal(responses[1].Result)
+	var toolsResult ToolsListResult
+	json.Unmarshal(toolsData, &toolsResult)
+	if len(toolsResult.Tools) != 1 {
+		t.Errorf("expected 1 tool, got %d", len(toolsResult.Tools))
+	}
+
+	// Response 3: prompts/list
+	if responses[2].Error != nil {
+		t.Fatalf("prompts/list error: %v", responses[2].Error)
+	}
+	promptsData, _ := json.Marshal(responses[2].Result)
+	var promptsResult PromptsListResult
+	json.Unmarshal(promptsData, &promptsResult)
+	if len(promptsResult.Prompts) != 1 {
+		t.Errorf("expected 1 prompt, got %d", len(promptsResult.Prompts))
+	}
+}
+
+func TestResponsesAreNewlineDelimitedJSON(t *testing.T) {
+	srv := testServer()
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
+	}, "\n") + "\n"
+
+	in := strings.NewReader(input)
+	var out strings.Builder
+	if err := srv.Serve(context.Background(), in, &out); err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+
+	raw := out.String()
+	lines := strings.Split(strings.TrimRight(raw, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d: %q", len(lines), raw)
+	}
+
+	for i, line := range lines {
+		if line == "" {
+			t.Errorf("line %d is empty", i)
+			continue
+		}
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			t.Errorf("line %d is not valid JSON: %v\n  line: %s", i, err, line)
+		}
+		// Verify no embedded newlines
+		if strings.ContainsAny(line, "\n\r") {
+			t.Errorf("line %d contains embedded newlines", i)
+		}
+	}
+}
+
+func TestToolSchemasHaveTypeObject(t *testing.T) {
+	srv := testServer()
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+	)
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+
+	data, _ := json.Marshal(responses[0].Result)
+	var result ToolsListResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	for _, tool := range result.Tools {
+		var schema map[string]any
+		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+			t.Errorf("tool %q: inputSchema is not valid JSON: %v", tool.Name, err)
+			continue
+		}
+		if schema["type"] != "object" {
+			t.Errorf("tool %q: inputSchema.type = %v, want 'object'", tool.Name, schema["type"])
+		}
+		props, ok := schema["properties"]
+		if !ok {
+			t.Errorf("tool %q: inputSchema missing 'properties'", tool.Name)
+			continue
+		}
+		if _, isMap := props.(map[string]any); !isMap {
+			t.Errorf("tool %q: inputSchema.properties is not an object", tool.Name)
+		}
+	}
+}

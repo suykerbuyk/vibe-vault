@@ -57,7 +57,7 @@ func (s *Server) RegisterPrompt(p Prompt) {
 // It returns on EOF or context cancellation.
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024) // 1MB max line
+	scanner.Buffer(make([]byte, 0, 10*1024*1024), 10*1024*1024) // 10MB max line
 
 	for scanner.Scan() {
 		select {
@@ -122,6 +122,15 @@ func (s *Server) dispatch(req Request) Response {
 }
 
 func (s *Server) handleInitialize(req Request) Response {
+	// Log client info for diagnostics.
+	if req.Params != nil {
+		var initParams InitializeParams
+		if err := json.Unmarshal(req.Params, &initParams); err == nil {
+			s.logger.Printf("initialize: client=%s version=%s protocolVersion=%s",
+				initParams.ClientInfo.Name, initParams.ClientInfo.Version, initParams.ProtocolVersion)
+		}
+	}
+
 	caps := Capabilities{Tools: &ToolsCap{}}
 	if len(s.prompts) > 0 {
 		caps.Prompts = &PromptsCap{}
@@ -135,7 +144,7 @@ func (s *Server) handleInitialize(req Request) Response {
 }
 
 func (s *Server) handleToolsList(req Request) Response {
-	var defs []ToolDef
+	defs := make([]ToolDef, 0, len(s.tools))
 	for _, t := range s.tools {
 		defs = append(defs, t.Definition)
 	}
@@ -189,7 +198,7 @@ func (s *Server) handleToolsCall(req Request) Response {
 }
 
 func (s *Server) handlePromptsList(req Request) Response {
-	var defs []PromptDef
+	defs := make([]PromptDef, 0, len(s.prompts))
 	for _, p := range s.prompts {
 		defs = append(defs, p.Definition)
 	}
