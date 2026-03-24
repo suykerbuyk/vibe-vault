@@ -206,8 +206,7 @@ Key architectural and design decisions in vibe-vault, with rationale.
     by `Config.SessionTags(activityTag)` which concatenates session + extra +
     activity tag. The renderer uses `SessionTags` when populated, falling back
     to hardcoded `vv-session` for backward compatibility. The noteparser skips
-    both `cortana-session` (legacy) and `vv-session` when extracting activity
-    tags from existing notes.
+    the base `vv-session` tag when extracting activity tags from existing notes.
 
 30. **Per-project config overlay via `agentctx/config.toml`:** Each project can
     override global config settings by uncommenting values in

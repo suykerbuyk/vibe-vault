@@ -112,7 +112,7 @@ func Parse(r io.Reader) (*Note, error) {
 		note.Tags = parseBracketList(tagsRaw)
 		// Extract activity tag (skip base session tags)
 		for _, t := range note.Tags {
-			if t != "cortana-session" && t != "vv-session" {
+			if t != "vv-session" {
 				note.Tag = t
 				break
 			}

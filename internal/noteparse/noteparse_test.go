@@ -20,7 +20,7 @@ tokens_in: 5000
 tokens_out: 3000
 status: completed
 commits: [abc1234, def5678]
-tags: [cortana-session, implementation]
+tags: [vv-session, implementation]
 summary: "Added index rebuild command"
 previous: "[[2026-02-24-01]]"
 ---
@@ -97,8 +97,8 @@ func TestParseBracketList(t *testing.T) {
 	if len(note.Tags) != 2 {
 		t.Fatalf("Tags len = %d, want 2", len(note.Tags))
 	}
-	if note.Tags[0] != "cortana-session" {
-		t.Errorf("Tags[0] = %q, want %q", note.Tags[0], "cortana-session")
+	if note.Tags[0] != "vv-session" {
+		t.Errorf("Tags[0] = %q, want %q", note.Tags[0], "vv-session")
 	}
 	if note.Tags[1] != "implementation" {
 		t.Errorf("Tags[1] = %q, want %q", note.Tags[1], "implementation")

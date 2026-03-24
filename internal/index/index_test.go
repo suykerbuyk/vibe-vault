@@ -401,7 +401,7 @@ domain: personal
 session_id: "rebuild-001"
 iteration: 1
 branch: feature/rebuild
-tags: [cortana-session, implementation]
+tags: [vv-session, implementation]
 summary: "Built rebuild command"
 duration_minutes: 30
 tokens_in: 5000
