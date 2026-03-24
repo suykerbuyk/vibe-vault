@@ -13,6 +13,12 @@ const (
 	CodeInternalError  = -32603
 )
 
+// MCP protocol version bounds for negotiation.
+const (
+	MinProtocolVersion = "2024-11-05"
+	MaxProtocolVersion = "2025-03-26"
+)
+
 // Request is a JSON-RPC 2.0 request.
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -54,6 +60,7 @@ type InitializeResult struct {
 	ProtocolVersion string       `json:"protocolVersion"`
 	ServerInfo      ServerInfo   `json:"serverInfo"`
 	Capabilities    Capabilities `json:"capabilities"`
+	Instructions    string       `json:"instructions,omitempty"`
 }
 
 // ServerInfo identifies the MCP server.
@@ -69,7 +76,9 @@ type Capabilities struct {
 }
 
 // ToolsCap declares tool support.
-type ToolsCap struct{}
+type ToolsCap struct {
+	ListChanged bool `json:"listChanged"`
+}
 
 // --- Tool listing ---
 
@@ -108,7 +117,9 @@ type ContentBlock struct {
 // --- Prompt listing ---
 
 // PromptsCap declares prompt support.
-type PromptsCap struct{}
+type PromptsCap struct {
+	ListChanged bool `json:"listChanged"`
+}
 
 // PromptsListResult is the response to prompts/list.
 type PromptsListResult struct {

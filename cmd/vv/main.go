@@ -1006,8 +1006,46 @@ func captureZedThreads(threads []zed.Thread, dbPath, projectFilter string, force
 	return result.Processed, result.Skipped, result.Errors
 }
 
+// registerMCPTools registers all production tools and prompts on the server.
+func registerMCPTools(srv *mcp.Server, cfg config.Config) {
+	srv.RegisterTool(mcp.NewGetProjectContextTool(cfg))
+	srv.RegisterTool(mcp.NewListProjectsTool(cfg))
+	srv.RegisterTool(mcp.NewSearchSessionsTool(cfg))
+	srv.RegisterTool(mcp.NewGetKnowledgeTool(cfg))
+	srv.RegisterTool(mcp.NewGetSessionDetailTool(cfg))
+	srv.RegisterTool(mcp.NewGetFrictionTrendsTool(cfg))
+	srv.RegisterTool(mcp.NewGetEffectivenessTool(cfg))
+	srv.RegisterTool(mcp.NewCaptureSessionTool(cfg))
+	srv.RegisterTool(mcp.NewGetWorkflowTool(cfg))
+	srv.RegisterTool(mcp.NewGetResumeTool(cfg))
+	srv.RegisterTool(mcp.NewListTasksTool(cfg))
+	srv.RegisterTool(mcp.NewGetTaskTool(cfg))
+	srv.RegisterTool(mcp.NewUpdateResumeTool(cfg))
+	srv.RegisterTool(mcp.NewAppendIterationTool(cfg))
+	srv.RegisterTool(mcp.NewManageTaskTool(cfg))
+	srv.RegisterTool(mcp.NewRefreshIndexTool(cfg))
+	srv.RegisterTool(mcp.NewBootstrapContextTool(cfg))
+	srv.RegisterPrompt(mcp.NewSessionGuidelinesPrompt())
+}
+
+const mcpInstructions = `Call vv_bootstrap_context at session start for full project context. Use vv_capture_session at the end of each work unit.`
+
 func runMcp() {
 	args := os.Args[2:]
+
+	// Parse --debug before subcommand dispatch.
+	debug := hasFlag(args, "--debug")
+	if debug {
+		// Filter --debug from args so subcommands don't see it.
+		filtered := make([]string, 0, len(args))
+		for _, a := range args {
+			if a != "--debug" {
+				filtered = append(filtered, a)
+			}
+		}
+		args = filtered
+	}
+
 	if len(args) > 0 {
 		switch args[0] {
 		case "install":
@@ -1048,6 +1086,33 @@ func runMcp() {
 				fatal("%v", err)
 			}
 			return
+		case "check":
+			if wantsHelp(args[1:]) {
+				fmt.Fprintf(os.Stderr, "Usage: vv mcp check\n\nRuns MCP protocol compliance checks against the production server.\n")
+				return
+			}
+			cfg := mustLoadConfig()
+			logger := log.New(os.Stderr, "", log.LstdFlags)
+			srv := mcp.NewServer(mcp.ServerInfo{Name: "vibe-vault", Version: help.Version}, logger)
+			registerMCPTools(srv, cfg)
+			srv.SetInstructions(mcpInstructions)
+			results := mcp.RunChecks(srv)
+			failed := false
+			for _, r := range results {
+				status := "PASS"
+				if !r.Pass {
+					status = "FAIL"
+					failed = true
+				}
+				fmt.Printf("[%s] %s\n", status, r.Name)
+				if r.Detail != "" {
+					fmt.Printf("       %s\n", r.Detail)
+				}
+			}
+			if failed {
+				os.Exit(1)
+			}
+			return
 		}
 	}
 	if wantsHelp(args) {
@@ -1057,24 +1122,11 @@ func runMcp() {
 	cfg := mustLoadConfig()
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 	srv := mcp.NewServer(mcp.ServerInfo{Name: "vibe-vault", Version: help.Version}, logger)
-	srv.RegisterTool(mcp.NewGetProjectContextTool(cfg))
-	srv.RegisterTool(mcp.NewListProjectsTool(cfg))
-	srv.RegisterTool(mcp.NewSearchSessionsTool(cfg))
-	srv.RegisterTool(mcp.NewGetKnowledgeTool(cfg))
-	srv.RegisterTool(mcp.NewGetSessionDetailTool(cfg))
-	srv.RegisterTool(mcp.NewGetFrictionTrendsTool(cfg))
-	srv.RegisterTool(mcp.NewGetEffectivenessTool(cfg))
-	srv.RegisterTool(mcp.NewCaptureSessionTool(cfg))
-	srv.RegisterTool(mcp.NewGetWorkflowTool(cfg))
-	srv.RegisterTool(mcp.NewGetResumeTool(cfg))
-	srv.RegisterTool(mcp.NewListTasksTool(cfg))
-	srv.RegisterTool(mcp.NewGetTaskTool(cfg))
-	srv.RegisterTool(mcp.NewUpdateResumeTool(cfg))
-	srv.RegisterTool(mcp.NewAppendIterationTool(cfg))
-	srv.RegisterTool(mcp.NewManageTaskTool(cfg))
-	srv.RegisterTool(mcp.NewRefreshIndexTool(cfg))
-	srv.RegisterTool(mcp.NewBootstrapContextTool(cfg))
-	srv.RegisterPrompt(mcp.NewSessionGuidelinesPrompt())
+	registerMCPTools(srv, cfg)
+	srv.SetInstructions(mcpInstructions)
+	if debug {
+		srv.SetDebug(true)
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 

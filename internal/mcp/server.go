@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"regexp"
 	"sort"
 )
 
@@ -27,10 +28,12 @@ type Prompt struct {
 
 // Server is a JSON-RPC 2.0 stdio MCP server.
 type Server struct {
-	tools   map[string]Tool
-	prompts map[string]Prompt
-	info    ServerInfo
-	logger  *log.Logger
+	tools        map[string]Tool
+	prompts      map[string]Prompt
+	info         ServerInfo
+	logger       *log.Logger
+	instructions string
+	debug        bool
 }
 
 // NewServer creates a new MCP server.
@@ -53,6 +56,16 @@ func (s *Server) RegisterPrompt(p Prompt) {
 	s.prompts[p.Definition.Name] = p
 }
 
+// SetInstructions sets the instructions string returned in the initialize response.
+func (s *Server) SetInstructions(text string) {
+	s.instructions = text
+}
+
+// SetDebug enables verbose protocol logging of all JSON-RPC messages.
+func (s *Server) SetDebug(on bool) {
+	s.debug = on
+}
+
 // Serve reads JSON-RPC requests from in and writes responses to out.
 // It returns on EOF or context cancellation.
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -71,6 +84,10 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 			continue
 		}
 
+		if s.debug {
+			s.logger.Printf("[MCP] <- %s", line)
+		}
+
 		var req Request
 		if err := json.Unmarshal(line, &req); err != nil {
 			resp := Response{
@@ -86,6 +103,9 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 
 		// Notifications (nil ID) get no response.
 		if req.ID == nil {
+			if s.debug {
+				s.logger.Printf("[MCP] (notification %s, no response)", req.Method)
+			}
 			continue
 		}
 
@@ -121,13 +141,35 @@ func (s *Server) dispatch(req Request) Response {
 	}
 }
 
+// versionDateRe matches YYYY-MM-DD format.
+var versionDateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+// negotiateVersion picks min(client, MaxProtocolVersion) with MinProtocolVersion as floor.
+func negotiateVersion(clientVersion string) string {
+	if !versionDateRe.MatchString(clientVersion) {
+		return MinProtocolVersion
+	}
+	// Date-string versions sort lexicographically.
+	v := clientVersion
+	if v > MaxProtocolVersion {
+		v = MaxProtocolVersion
+	}
+	if v < MinProtocolVersion {
+		v = MinProtocolVersion
+	}
+	return v
+}
+
 func (s *Server) handleInitialize(req Request) Response {
-	// Log client info for diagnostics.
+	negotiated := MinProtocolVersion
+
+	// Log client info for diagnostics and negotiate version.
 	if req.Params != nil {
 		var initParams InitializeParams
 		if err := json.Unmarshal(req.Params, &initParams); err == nil {
 			s.logger.Printf("initialize: client=%s version=%s protocolVersion=%s",
 				initParams.ClientInfo.Name, initParams.ClientInfo.Version, initParams.ProtocolVersion)
+			negotiated = negotiateVersion(initParams.ProtocolVersion)
 		}
 	}
 
@@ -136,9 +178,10 @@ func (s *Server) handleInitialize(req Request) Response {
 		caps.Prompts = &PromptsCap{}
 	}
 	result := InitializeResult{
-		ProtocolVersion: "2024-11-05",
+		ProtocolVersion: negotiated,
 		ServerInfo:      s.info,
 		Capabilities:    caps,
+		Instructions:    s.instructions,
 	}
 	return Response{JSONRPC: "2.0", ID: req.ID, Result: result}
 }
@@ -246,6 +289,9 @@ func (s *Server) writeResponse(out io.Writer, resp Response) {
 	if err != nil {
 		s.logger.Printf("marshal response: %v", err)
 		return
+	}
+	if s.debug {
+		s.logger.Printf("[MCP] -> %s", data)
 	}
 	data = append(data, '\n')
 	if _, err := out.Write(data); err != nil {

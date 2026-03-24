@@ -470,8 +470,8 @@ func TestClaudeCodeHandshake(t *testing.T) {
 	initData, _ := json.Marshal(responses[0].Result)
 	var initResult InitializeResult
 	json.Unmarshal(initData, &initResult)
-	if initResult.ProtocolVersion != "2024-11-05" {
-		t.Errorf("protocol version = %q, want 2024-11-05", initResult.ProtocolVersion)
+	if initResult.ProtocolVersion != "2025-03-26" {
+		t.Errorf("protocol version = %q, want 2025-03-26", initResult.ProtocolVersion)
 	}
 	if initResult.Capabilities.Tools == nil {
 		t.Error("expected tools capability")
@@ -567,5 +567,173 @@ func TestToolSchemasHaveTypeObject(t *testing.T) {
 		if _, isMap := props.(map[string]any); !isMap {
 			t.Errorf("tool %q: inputSchema.properties is not an object", tool.Name)
 		}
+	}
+}
+
+// --- Version negotiation tests ---
+
+func TestVersionNegotiationClientOlder(t *testing.T) {
+	srv := testServer()
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test"}}}`,
+	)
+	data, _ := json.Marshal(responses[0].Result)
+	var result InitializeResult
+	json.Unmarshal(data, &result)
+	if result.ProtocolVersion != "2024-11-05" {
+		t.Errorf("got %q, want 2024-11-05", result.ProtocolVersion)
+	}
+}
+
+func TestVersionNegotiationClientNewer(t *testing.T) {
+	srv := testServer()
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"test"}}}`,
+	)
+	data, _ := json.Marshal(responses[0].Result)
+	var result InitializeResult
+	json.Unmarshal(data, &result)
+	if result.ProtocolVersion != "2025-03-26" {
+		t.Errorf("got %q, want 2025-03-26", result.ProtocolVersion)
+	}
+}
+
+func TestVersionNegotiationClientMatch(t *testing.T) {
+	srv := testServer()
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"test"}}}`,
+	)
+	data, _ := json.Marshal(responses[0].Result)
+	var result InitializeResult
+	json.Unmarshal(data, &result)
+	if result.ProtocolVersion != "2025-03-26" {
+		t.Errorf("got %q, want 2025-03-26", result.ProtocolVersion)
+	}
+}
+
+func TestVersionNegotiationBadVersion(t *testing.T) {
+	srv := testServer()
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"garbage","clientInfo":{"name":"test"}}}`,
+	)
+	data, _ := json.Marshal(responses[0].Result)
+	var result InitializeResult
+	json.Unmarshal(data, &result)
+	if result.ProtocolVersion != "2024-11-05" {
+		t.Errorf("got %q, want 2024-11-05", result.ProtocolVersion)
+	}
+}
+
+// --- listChanged capability tests ---
+
+func TestCapabilitiesListChangedField(t *testing.T) {
+	srv := testServer()
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test"}}}`,
+	)
+	raw, _ := json.Marshal(responses[0].Result)
+	rawStr := string(raw)
+	if !strings.Contains(rawStr, `"listChanged":false`) {
+		t.Errorf("expected listChanged:false in capabilities, got: %s", rawStr)
+	}
+}
+
+// --- Instructions tests ---
+
+func TestInitializeHasInstructions(t *testing.T) {
+	srv := testServer()
+	srv.SetInstructions("Use bootstrap at start.")
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test"}}}`,
+	)
+	data, _ := json.Marshal(responses[0].Result)
+	var result InitializeResult
+	json.Unmarshal(data, &result)
+	if result.Instructions != "Use bootstrap at start." {
+		t.Errorf("instructions = %q, want 'Use bootstrap at start.'", result.Instructions)
+	}
+}
+
+func TestInitializeNoInstructions(t *testing.T) {
+	srv := testServer()
+	// No SetInstructions call.
+	responses := sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test"}}}`,
+	)
+	raw, _ := json.Marshal(responses[0].Result)
+	rawStr := string(raw)
+	if strings.Contains(rawStr, `"instructions"`) {
+		t.Errorf("instructions should be omitted when empty, got: %s", rawStr)
+	}
+}
+
+// --- Debug logging tests ---
+
+func TestDebugLogsRequests(t *testing.T) {
+	var logBuf strings.Builder
+	logger := log.New(&logBuf, "", 0)
+	srv := NewServer(ServerInfo{Name: "test", Version: "0.1.0"}, logger)
+	srv.RegisterTool(Tool{
+		Definition: ToolDef{
+			Name:        "echo",
+			Description: "echoes",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
+		},
+		Handler: func(params json.RawMessage) (string, error) { return "ok", nil },
+	})
+	srv.SetDebug(true)
+
+	sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+	)
+
+	if !strings.Contains(logBuf.String(), "[MCP] <-") {
+		t.Errorf("expected [MCP] <- in debug logs, got: %s", logBuf.String())
+	}
+}
+
+func TestDebugLogsResponses(t *testing.T) {
+	var logBuf strings.Builder
+	logger := log.New(&logBuf, "", 0)
+	srv := NewServer(ServerInfo{Name: "test", Version: "0.1.0"}, logger)
+	srv.RegisterTool(Tool{
+		Definition: ToolDef{
+			Name:        "echo",
+			Description: "echoes",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
+		},
+		Handler: func(params json.RawMessage) (string, error) { return "ok", nil },
+	})
+	srv.SetDebug(true)
+
+	sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+	)
+
+	if !strings.Contains(logBuf.String(), "[MCP] ->") {
+		t.Errorf("expected [MCP] -> in debug logs, got: %s", logBuf.String())
+	}
+}
+
+func TestDebugOffNoExtraLogs(t *testing.T) {
+	var logBuf strings.Builder
+	logger := log.New(&logBuf, "", 0)
+	srv := NewServer(ServerInfo{Name: "test", Version: "0.1.0"}, logger)
+	srv.RegisterTool(Tool{
+		Definition: ToolDef{
+			Name:        "echo",
+			Description: "echoes",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
+		},
+		Handler: func(params json.RawMessage) (string, error) { return "ok", nil },
+	})
+	// debug is off by default
+
+	sendAndReceive(t, srv,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+	)
+
+	if strings.Contains(logBuf.String(), "[MCP]") {
+		t.Errorf("expected no [MCP] prefixes with debug off, got: %s", logBuf.String())
 	}
 }
