@@ -8,7 +8,13 @@ import (
 	"testing"
 
 	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/plugin"
 )
+
+// pluginGenerate is a test helper that calls plugin.Generate.
+func pluginGenerate(version string) (string, error) {
+	return plugin.Generate(version)
+}
 
 func TestCheckVaultPath_Pass(t *testing.T) {
 	dir := t.TempDir()
@@ -349,7 +355,37 @@ func writeSettings(t *testing.T, dir string, content string) string {
 	return path
 }
 
-func TestCheckMCPFile_PluginOnly(t *testing.T) {
+func TestCheckMCPFile_PluginOnly_NoFiles(t *testing.T) {
+	// Plugin configured in settings but no files on disk → Warn.
+	dir := t.TempDir()
+	path := writeSettings(t, dir, `{
+		"extraKnownMarketplaces": {"vibe-vault-local": {"source": {"source": "directory"}}},
+		"enabledPlugins": {"vibe-vault@vibe-vault-local": true}
+	}`)
+
+	r := checkMCPFile(path)
+	if r.Status != Warn {
+		t.Errorf("expected Warn, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "files missing") {
+		t.Errorf("expected 'files missing' in detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckMCPFile_PluginWithFiles(t *testing.T) {
+	// Plugin configured AND files exist on disk → Pass.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", "")
+
+	// Create plugin files and cache.
+	if _, err := pluginGenerate("1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plugin.InstallToCache("1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+
 	dir := t.TempDir()
 	path := writeSettings(t, dir, `{
 		"extraKnownMarketplaces": {"vibe-vault-local": {"source": {"source": "directory"}}},
@@ -381,6 +417,19 @@ func TestCheckMCPFile_McpServersOnly(t *testing.T) {
 }
 
 func TestCheckMCPFile_Both(t *testing.T) {
+	// Plugin configured + mcpServers, with files on disk → Pass with legacy note.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", "")
+
+	// Create plugin files and cache.
+	if _, err := plugin.Generate("1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plugin.InstallToCache("1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+
 	dir := t.TempDir()
 	path := writeSettings(t, dir, `{
 		"mcpServers": {"vibe-vault": {"command": "vv"}},

@@ -63,6 +63,7 @@ func Generate(version string) (string, error) {
 		"name":        pluginName,
 		"version":     version,
 		"description": "Session capture, knowledge management, and project context for AI coding agents",
+		"author":      map[string]any{"name": "vibe-vault"},
 	}
 	if err := writeJSON(PluginManifestPath(), plugin); err != nil {
 		return "", fmt.Errorf("write plugin manifest: %w", err)

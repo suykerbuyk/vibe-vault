@@ -126,6 +126,22 @@ func TestGenerate_TwoLevelStructure(t *testing.T) {
 	}
 }
 
+func TestGenerate_PluginHasAuthor(t *testing.T) {
+	setupHome(t)
+	if _, err := Generate("1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+
+	m := readJSON(t, PluginManifestPath())
+	author, ok := m["author"].(map[string]any)
+	if !ok {
+		t.Fatal("plugin.json missing author field")
+	}
+	if name, _ := author["name"].(string); name != "vibe-vault" {
+		t.Errorf("author.name = %q, want %q", name, "vibe-vault")
+	}
+}
+
 func TestGenerate_Idempotent(t *testing.T) {
 	setupHome(t)
 	if _, err := Generate("1.0.0"); err != nil {

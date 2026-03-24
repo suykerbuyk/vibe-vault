@@ -46,6 +46,42 @@ func MCPConfigPath() string {
 	return filepath.Join(PluginDir(), ".mcp.json")
 }
 
+// ClaudePluginsDir returns the Claude Code plugins directory (~/.claude/plugins/).
+func ClaudePluginsDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "plugins")
+}
+
+// CacheInstallDir returns the cache install directory for a specific version.
+func CacheInstallDir(version string) string {
+	return filepath.Join(ClaudePluginsDir(), "cache", MarketplaceName, pluginName, version)
+}
+
+// KnownMarketplacesPath returns the path to ~/.claude/plugins/known_marketplaces.json.
+func KnownMarketplacesPath() string {
+	return filepath.Join(ClaudePluginsDir(), "known_marketplaces.json")
+}
+
+// InstalledPluginsPath returns the path to ~/.claude/plugins/installed_plugins.json.
+func InstalledPluginsPath() string {
+	return filepath.Join(ClaudePluginsDir(), "installed_plugins.json")
+}
+
+// AnyCacheInstalled returns true if any version directory exists under the cache path.
+func AnyCacheInstalled() bool {
+	cacheDir := filepath.Join(ClaudePluginsDir(), "cache", MarketplaceName, pluginName)
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
 // IsInstalled returns true when all three required files exist.
 func IsInstalled() bool {
 	for _, p := range []string{

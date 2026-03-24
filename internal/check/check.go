@@ -272,10 +272,21 @@ func checkMCPFile(path string) Result {
 	hasPlugin := strings.Contains(content, plugin.MarketplaceName) && strings.Contains(content, "extraKnownMarketplaces")
 
 	switch {
-	case hasPlugin && hasMcpServers:
-		return Result{Name: "mcp", Status: Pass, Detail: "vibe-vault MCP via plugin (legacy mcpServers also present)"}
 	case hasPlugin:
-		return Result{Name: "mcp", Status: Pass, Detail: "vibe-vault MCP via plugin"}
+		// Verify plugin files actually exist on disk.
+		filesOK := plugin.IsInstalled()
+		cacheOK := plugin.AnyCacheInstalled()
+
+		switch {
+		case filesOK && cacheOK && hasMcpServers:
+			return Result{Name: "mcp", Status: Pass, Detail: "vibe-vault MCP via plugin (legacy mcpServers also present)"}
+		case filesOK && cacheOK:
+			return Result{Name: "mcp", Status: Pass, Detail: "vibe-vault MCP via plugin"}
+		case filesOK:
+			return Result{Name: "mcp", Status: Pass, Detail: "vibe-vault MCP via plugin (cache missing — re-run `vv mcp install --claude-plugin`)"}
+		default:
+			return Result{Name: "mcp", Status: Warn, Detail: "plugin configured but files missing — re-run `vv mcp install --claude-plugin`"}
+		}
 	case hasMcpServers:
 		return Result{Name: "mcp", Status: Warn, Detail: "mcpServers configured but tools may not register — try `vv mcp install --claude-plugin`"}
 	default:

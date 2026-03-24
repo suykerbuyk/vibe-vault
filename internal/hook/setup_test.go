@@ -1054,6 +1054,22 @@ func TestInstallClaudePlugin_Fresh(t *testing.T) {
 	if !hasPluginEnabled(settings) {
 		t.Error("missing enabledPlugins entry")
 	}
+
+	// Verify cache directory was created.
+	cacheDir := filepath.Join(home, ".claude", "plugins", "cache", "vibe-vault-local", "vibe-vault")
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		t.Errorf("expected cache directory to exist: %v", err)
+	} else if len(entries) == 0 {
+		t.Error("expected at least one version directory in cache")
+	}
+
+	// Verify installed_plugins.json has our entry.
+	ipPath := filepath.Join(home, ".claude", "plugins", "installed_plugins.json")
+	ipData := readJSON(t, ipPath)
+	if _, ok := ipData["vibe-vault@vibe-vault-local"]; !ok {
+		t.Error("installed_plugins.json missing our entry")
+	}
 }
 
 func TestInstallClaudePlugin_ExistingSettings(t *testing.T) {
@@ -1208,6 +1224,54 @@ func TestUninstallClaudePlugin_RemovesAll(t *testing.T) {
 	}
 	if hasPluginEnabled(settings) {
 		t.Error("enabledPlugins entry should be removed")
+	}
+
+	// Verify cache directory was cleaned up.
+	cacheDir := filepath.Join(home, ".claude", "plugins", "cache", "vibe-vault-local")
+	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
+		t.Error("cache directory should be removed after uninstall")
+	}
+
+	// Verify installed_plugins.json entry removed.
+	ipPath := filepath.Join(home, ".claude", "plugins", "installed_plugins.json")
+	if _, err := os.Stat(ipPath); err == nil {
+		ipData := readJSON(t, ipPath)
+		if _, ok := ipData["vibe-vault@vibe-vault-local"]; ok {
+			t.Error("installed_plugins.json should not have our entry after uninstall")
+		}
+	}
+}
+
+func TestInstallClaudePlugin_CacheFailureIsNonFatal(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make ~/.claude/plugins/ unwritable so cache install fails.
+	pluginsDir := filepath.Join(home, ".claude", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(pluginsDir, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(pluginsDir, 0o755) // cleanup
+
+	// Install should still succeed (settings.json written, cache is soft failure).
+	if err := InstallClaudePlugin(); err != nil {
+		t.Fatalf("expected install to succeed despite cache failure, got: %v", err)
+	}
+
+	// Verify settings.json was written correctly.
+	path := settingsPath(home)
+	settings := readJSON(t, path)
+	if !hasPluginMarketplace(settings) {
+		t.Error("missing extraKnownMarketplaces entry")
+	}
+	if !hasPluginEnabled(settings) {
+		t.Error("missing enabledPlugins entry")
 	}
 }
 

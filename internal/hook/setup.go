@@ -660,8 +660,26 @@ func InstallClaudePlugin() error {
 		return err
 	}
 
-	fmt.Fprintf(os.Stderr, "vibe-vault plugin installed in %s\n", config.CompressHome(path))
-	fmt.Fprintf(os.Stderr, "Plugin directory: %s\n", config.CompressHome(mktDir))
+	// Direct injection into Claude Code's internal files (belt and suspenders).
+	var cacheDetail string
+	installPath, cacheErr := plugin.InstallToCache(help.Version)
+	if cacheErr != nil {
+		fmt.Fprintf(os.Stderr, "  warning: cache install: %v\n", cacheErr)
+		cacheDetail = "(cache install failed)"
+	} else {
+		if err := plugin.RegisterKnownMarketplace(mktDir); err != nil {
+			fmt.Fprintf(os.Stderr, "  warning: known_marketplaces: %v\n", err)
+		}
+		if err := plugin.RegisterInstalledPlugin(installPath, help.Version); err != nil {
+			fmt.Fprintf(os.Stderr, "  warning: installed_plugins: %v\n", err)
+		}
+		cacheDetail = config.CompressHome(installPath)
+	}
+
+	fmt.Fprintf(os.Stderr, "vibe-vault plugin installed:\n")
+	fmt.Fprintf(os.Stderr, "  Plugin files: %s\n", config.CompressHome(mktDir))
+	fmt.Fprintf(os.Stderr, "  Plugin cache: %s\n", cacheDetail)
+	fmt.Fprintf(os.Stderr, "  Settings:     %s\n", config.CompressHome(path))
 	fmt.Fprintf(os.Stderr, "Restart Claude Code to activate.\n")
 	return nil
 }
@@ -697,6 +715,11 @@ func UninstallClaudePlugin() error {
 	if err := plugin.Remove(); err != nil {
 		return fmt.Errorf("remove plugin directory: %w", err)
 	}
+
+	// Clean up Claude Code internal files (ignore errors — best effort).
+	_ = plugin.UnregisterInstalledPlugin()
+	_ = plugin.UnregisterKnownMarketplace()
+	_ = plugin.RemoveFromCache()
 
 	if !hadPlugin && !plugin.IsInstalled() {
 		fmt.Fprintf(os.Stderr, "vibe-vault plugin not found in %s\n", config.CompressHome(path))
