@@ -337,3 +337,79 @@ func TestStatus_String(t *testing.T) {
 		}
 	}
 }
+
+// --- checkMCPFile plugin-aware tests ---
+
+func writeSettings(t *testing.T, dir string, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestCheckMCPFile_PluginOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSettings(t, dir, `{
+		"extraKnownMarketplaces": {"vibe-vault-local": {"source": {"source": "directory"}}},
+		"enabledPlugins": {"vibe-vault@vibe-vault-local": true}
+	}`)
+
+	r := checkMCPFile(path)
+	if r.Status != Pass {
+		t.Errorf("expected Pass, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "plugin") {
+		t.Errorf("expected 'plugin' in detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckMCPFile_McpServersOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSettings(t, dir, `{
+		"mcpServers": {"vibe-vault": {"command": "vv", "args": ["mcp"]}}
+	}`)
+
+	r := checkMCPFile(path)
+	if r.Status != Warn {
+		t.Errorf("expected Warn, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "--claude-plugin") {
+		t.Errorf("expected '--claude-plugin' suggestion in detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckMCPFile_Both(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSettings(t, dir, `{
+		"mcpServers": {"vibe-vault": {"command": "vv"}},
+		"extraKnownMarketplaces": {"vibe-vault-local": {"source": {"source": "directory"}}},
+		"enabledPlugins": {"vibe-vault@vibe-vault-local": true}
+	}`)
+
+	r := checkMCPFile(path)
+	if r.Status != Pass {
+		t.Errorf("expected Pass, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "legacy") {
+		t.Errorf("expected 'legacy' note in detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckMCPFile_Neither(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSettings(t, dir, `{"hooks": {}}`)
+
+	r := checkMCPFile(path)
+	if r.Status != Warn {
+		t.Errorf("expected Warn, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "vv mcp install") {
+		t.Errorf("expected install suggestion, got: %s", r.Detail)
+	}
+	// Should NOT suggest --claude-plugin for fresh users.
+	if strings.Contains(r.Detail, "--claude-plugin") {
+		t.Errorf("should not suggest --claude-plugin for fresh install, got: %s", r.Detail)
+	}
+}

@@ -24,6 +24,16 @@ func ConfigDir() string {
 	return filepath.Join(home, ".config", "vibe-vault")
 }
 
+// DataDir returns the vibe-vault data directory path.
+// Uses $XDG_DATA_HOME/vibe-vault if set, otherwise ~/.local/share/vibe-vault.
+func DataDir() string {
+	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+		return filepath.Join(xdg, "vibe-vault")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "share", "vibe-vault")
+}
+
 // WriteDefault writes a default config.toml pointing to vaultPath.
 // Returns (configPath, action, error) where action is one of:
 //   - "created"   — new config file was written

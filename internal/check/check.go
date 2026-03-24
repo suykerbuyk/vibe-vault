@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/plugin"
 )
 
 // Status represents the outcome of a single check.
@@ -265,10 +266,21 @@ func checkMCPFile(path string) Result {
 	if err != nil {
 		return Result{Name: "mcp", Status: Warn, Detail: config.CompressHome(path) + " not found"}
 	}
-	if strings.Contains(string(data), `"vibe-vault"`) && strings.Contains(string(data), "mcpServers") {
-		return Result{Name: "mcp", Status: Pass, Detail: "vibe-vault MCP server found in " + config.CompressHome(path)}
+
+	content := string(data)
+	hasMcpServers := strings.Contains(content, `"vibe-vault"`) && strings.Contains(content, "mcpServers")
+	hasPlugin := strings.Contains(content, plugin.MarketplaceName) && strings.Contains(content, "extraKnownMarketplaces")
+
+	switch {
+	case hasPlugin && hasMcpServers:
+		return Result{Name: "mcp", Status: Pass, Detail: "vibe-vault MCP via plugin (legacy mcpServers also present)"}
+	case hasPlugin:
+		return Result{Name: "mcp", Status: Pass, Detail: "vibe-vault MCP via plugin"}
+	case hasMcpServers:
+		return Result{Name: "mcp", Status: Warn, Detail: "mcpServers configured but tools may not register — try `vv mcp install --claude-plugin`"}
+	default:
+		return Result{Name: "mcp", Status: Warn, Detail: "not configured — run `vv mcp install`"}
 	}
-	return Result{Name: "mcp", Status: Warn, Detail: "not configured — run `vv mcp install`"}
 }
 
 // CheckAgentctxSchema checks the agentctx schema version for a project.

@@ -43,6 +43,9 @@ Never jump to coding short-term fixes without investigation.
 - Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
 - If something goes sideways, STOP and re-plan immediately
 - Write detailed specs upfront to reduce ambiguity
+- After creating a plan in plan mode, immediately move it from `~/.claude/plans/`
+  to the project's `agentctx/tasks/` directory — plans must live in the vault,
+  not in the ephemeral Claude plans directory
 
 ### 2. Subagent Strategy
 

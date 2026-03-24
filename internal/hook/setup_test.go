@@ -1023,3 +1023,262 @@ func TestInstallMCPZed_WithJSONC(t *testing.T) {
 		t.Error("existing theme was lost")
 	}
 }
+
+// --- Claude Plugin install/uninstall tests ---
+
+func hasPluginMarketplace(settings map[string]any) bool {
+	return isPluginMarketplaceInstalled(settings)
+}
+
+func hasPluginEnabled(settings map[string]any) bool {
+	return isPluginEnabled(settings)
+}
+
+func TestInstallClaudePlugin_Fresh(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	// Create ~/.claude/ so claudeDetected() passes.
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InstallClaudePlugin(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := settingsPath(home)
+	settings := readJSON(t, path)
+	if !hasPluginMarketplace(settings) {
+		t.Error("missing extraKnownMarketplaces entry")
+	}
+	if !hasPluginEnabled(settings) {
+		t.Error("missing enabledPlugins entry")
+	}
+}
+
+func TestInstallClaudePlugin_ExistingSettings(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	path := settingsPath(home)
+	writeJSON(t, path, map[string]any{
+		"theme": "dark",
+		"hooks": map[string]any{},
+	})
+
+	if err := InstallClaudePlugin(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	if settings["theme"] != "dark" {
+		t.Error("existing settings were lost")
+	}
+	if !hasPluginMarketplace(settings) {
+		t.Error("missing extraKnownMarketplaces entry")
+	}
+}
+
+func TestInstallClaudePlugin_Idempotent(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InstallClaudePlugin(); err != nil {
+		t.Fatal(err)
+	}
+	// Second call should succeed silently.
+	if err := InstallClaudePlugin(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstallClaudePlugin_PreservesMcpServers(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	path := settingsPath(home)
+	writeJSON(t, path, map[string]any{
+		"mcpServers": map[string]any{
+			"vibe-vault": map[string]any{
+				"command": "vv",
+				"args":    []any{"mcp"},
+			},
+		},
+	})
+
+	if err := InstallClaudePlugin(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	// Per review: mcpServers should NOT be auto-removed.
+	if !isMCPInstalled(settings) {
+		t.Error("mcpServers entry was removed — should be preserved")
+	}
+	if !hasPluginMarketplace(settings) {
+		t.Error("missing extraKnownMarketplaces entry")
+	}
+}
+
+func TestInstallClaudePlugin_PreservesExistingMarketplaces(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	path := settingsPath(home)
+	writeJSON(t, path, map[string]any{
+		"extraKnownMarketplaces": map[string]any{
+			"other-marketplace": map[string]any{
+				"source": map[string]any{"source": "directory", "path": "/tmp/other"},
+			},
+		},
+	})
+
+	if err := InstallClaudePlugin(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	mkts := settings["extraKnownMarketplaces"].(map[string]any)
+	if _, ok := mkts["other-marketplace"]; !ok {
+		t.Error("existing marketplace was removed")
+	}
+	if !hasPluginMarketplace(settings) {
+		t.Error("vibe-vault marketplace not added")
+	}
+}
+
+func TestInstallClaudePlugin_PreservesExistingPlugins(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	path := settingsPath(home)
+	writeJSON(t, path, map[string]any{
+		"enabledPlugins": map[string]any{
+			"playwright@claude-plugins-official": true,
+		},
+	})
+
+	if err := InstallClaudePlugin(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	plugins := settings["enabledPlugins"].(map[string]any)
+	if _, ok := plugins["playwright@claude-plugins-official"]; !ok {
+		t.Error("existing plugin was removed")
+	}
+	if !hasPluginEnabled(settings) {
+		t.Error("vibe-vault plugin not enabled")
+	}
+}
+
+func TestInstallClaudePlugin_CreatesBackup(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	path := settingsPath(home)
+	writeJSON(t, path, map[string]any{"existing": true})
+
+	if err := InstallClaudePlugin(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(path + ".vv.bak"); err != nil {
+		t.Errorf("expected backup file, got: %v", err)
+	}
+}
+
+func TestUninstallClaudePlugin_RemovesAll(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InstallClaudePlugin(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := UninstallClaudePlugin(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := settingsPath(home)
+	settings := readJSON(t, path)
+	if hasPluginMarketplace(settings) {
+		t.Error("extraKnownMarketplaces entry should be removed")
+	}
+	if hasPluginEnabled(settings) {
+		t.Error("enabledPlugins entry should be removed")
+	}
+}
+
+func TestUninstallClaudePlugin_PreservesOtherEntries(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	path := settingsPath(home)
+	writeJSON(t, path, map[string]any{
+		"extraKnownMarketplaces": map[string]any{
+			"other-marketplace":         map[string]any{"source": "test"},
+			"vibe-vault-local": map[string]any{"source": "test"},
+		},
+		"enabledPlugins": map[string]any{
+			"playwright@claude-plugins-official": true,
+			"vibe-vault@vibe-vault-local":        true,
+		},
+	})
+
+	if err := UninstallClaudePlugin(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	mkts := settings["extraKnownMarketplaces"].(map[string]any)
+	if _, ok := mkts["other-marketplace"]; !ok {
+		t.Error("other marketplace was removed")
+	}
+	plugins := settings["enabledPlugins"].(map[string]any)
+	if _, ok := plugins["playwright@claude-plugins-official"]; !ok {
+		t.Error("other plugin was removed")
+	}
+	if hasPluginMarketplace(settings) {
+		t.Error("vibe-vault marketplace should be removed")
+	}
+	if hasPluginEnabled(settings) {
+		t.Error("vibe-vault plugin should be removed")
+	}
+}
+
+func TestUninstallClaudePlugin_NotInstalled(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := UninstallClaudePlugin(); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestUninstallClaudePlugin_CleansEmptyMaps(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InstallClaudePlugin(); err != nil {
+		t.Fatal(err)
+	}
+	if err := UninstallClaudePlugin(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := settingsPath(home)
+	settings := readJSON(t, path)
+	if _, ok := settings["extraKnownMarketplaces"]; ok {
+		t.Error("empty extraKnownMarketplaces should be removed")
+	}
+	if _, ok := settings["enabledPlugins"]; ok {
+		t.Error("empty enabledPlugins should be removed")
+	}
+}

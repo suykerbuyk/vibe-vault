@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/johns/vibe-vault/internal/config"
+	"github.com/johns/vibe-vault/internal/help"
+	"github.com/johns/vibe-vault/internal/plugin"
 )
 
 const hookCommand = "vv hook"
@@ -573,6 +575,8 @@ func InstallMCPAll(claudeOnly, zedOnly bool) error {
 		if claudeDetected() {
 			if err := InstallMCP(); err != nil {
 				errs = append(errs, err)
+			} else {
+				fmt.Fprintf(os.Stderr, "note: if Claude Code tools don't appear, try: vv mcp install --claude-plugin\n")
 			}
 		} else {
 			fmt.Fprintf(os.Stderr, "Claude Code: skipped (~/.claude/ not found)\n")
@@ -615,6 +619,169 @@ func UninstallMCPAll(claudeOnly, zedOnly bool) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// InstallClaudePlugin deploys vibe-vault as a Claude Code plugin, working
+// around the tool registration bug (#2682) in user-added MCP servers.
+// Does NOT remove existing mcpServers entries — both can coexist safely.
+func InstallClaudePlugin() error {
+	if !claudeDetected() {
+		return fmt.Errorf("Claude Code not detected (~/.claude/ not found)")
+	}
+
+	mktDir, err := plugin.Generate(help.Version)
+	if err != nil {
+		return fmt.Errorf("generate plugin: %w", err)
+	}
+
+	path, err := SettingsPath()
+	if err != nil {
+		return err
+	}
+
+	settings, err := readSettings(path)
+	if err != nil {
+		return err
+	}
+
+	if isPluginInstalled(settings) {
+		fmt.Fprintf(os.Stderr, "vibe-vault plugin already configured in %s\n", config.CompressHome(path))
+		return nil
+	}
+
+	if err := backup(path); err != nil {
+		return err
+	}
+
+	addPluginMarketplace(settings, mktDir)
+	addPluginEnabled(settings)
+
+	if err := writeSettings(path, settings); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "vibe-vault plugin installed in %s\n", config.CompressHome(path))
+	fmt.Fprintf(os.Stderr, "Plugin directory: %s\n", config.CompressHome(mktDir))
+	fmt.Fprintf(os.Stderr, "Restart Claude Code to activate.\n")
+	return nil
+}
+
+// UninstallClaudePlugin removes the vibe-vault plugin configuration and files.
+// Idempotent: returns nil when not installed.
+func UninstallClaudePlugin() error {
+	path, err := SettingsPath()
+	if err != nil {
+		return err
+	}
+
+	settings, err := readSettings(path)
+	if err != nil {
+		return err
+	}
+
+	hadPlugin := isPluginInstalled(settings)
+
+	if hadPlugin {
+		if err := backup(path); err != nil {
+			return err
+		}
+
+		removePluginMarketplace(settings)
+		removePluginEnabled(settings)
+
+		if err := writeSettings(path, settings); err != nil {
+			return err
+		}
+	}
+
+	if err := plugin.Remove(); err != nil {
+		return fmt.Errorf("remove plugin directory: %w", err)
+	}
+
+	if !hadPlugin && !plugin.IsInstalled() {
+		fmt.Fprintf(os.Stderr, "vibe-vault plugin not found in %s\n", config.CompressHome(path))
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "vibe-vault plugin removed from %s\n", config.CompressHome(path))
+	return nil
+}
+
+// isPluginInstalled returns true when both marketplace and enabledPlugins
+// entries are present.
+func isPluginInstalled(settings map[string]any) bool {
+	return isPluginMarketplaceInstalled(settings) && isPluginEnabled(settings)
+}
+
+// isPluginMarketplaceInstalled checks for our marketplace entry.
+func isPluginMarketplaceInstalled(settings map[string]any) bool {
+	mkts, ok := settings["extraKnownMarketplaces"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = mkts[plugin.MarketplaceName]
+	return ok
+}
+
+// addPluginMarketplace adds the local marketplace directory source.
+func addPluginMarketplace(settings map[string]any, marketplaceDir string) {
+	mkts, ok := settings["extraKnownMarketplaces"].(map[string]any)
+	if !ok {
+		mkts = make(map[string]any)
+		settings["extraKnownMarketplaces"] = mkts
+	}
+	mkts[plugin.MarketplaceName] = map[string]any{
+		"source": map[string]any{
+			"source": "directory",
+			"path":   marketplaceDir,
+		},
+	}
+}
+
+// removePluginMarketplace removes our marketplace entry.
+// Cleans up the extraKnownMarketplaces map if empty.
+func removePluginMarketplace(settings map[string]any) {
+	mkts, ok := settings["extraKnownMarketplaces"].(map[string]any)
+	if !ok {
+		return
+	}
+	delete(mkts, plugin.MarketplaceName)
+	if len(mkts) == 0 {
+		delete(settings, "extraKnownMarketplaces")
+	}
+}
+
+// isPluginEnabled checks for our enabledPlugins entry.
+func isPluginEnabled(settings map[string]any) bool {
+	plugins, ok := settings["enabledPlugins"].(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = plugins[plugin.QualifiedName]
+	return ok
+}
+
+// addPluginEnabled adds the plugin to enabledPlugins.
+func addPluginEnabled(settings map[string]any) {
+	plugins, ok := settings["enabledPlugins"].(map[string]any)
+	if !ok {
+		plugins = make(map[string]any)
+		settings["enabledPlugins"] = plugins
+	}
+	plugins[plugin.QualifiedName] = true
+}
+
+// removePluginEnabled removes our plugin from enabledPlugins.
+// Cleans up the enabledPlugins map if empty.
+func removePluginEnabled(settings map[string]any) {
+	plugins, ok := settings["enabledPlugins"].(map[string]any)
+	if !ok {
+		return
+	}
+	delete(plugins, plugin.QualifiedName)
+	if len(plugins) == 0 {
+		delete(settings, "enabledPlugins")
+	}
 }
 
 // entryContainsVVHook checks whether a single hook entry contains "vv hook".

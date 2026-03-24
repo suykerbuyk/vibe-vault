@@ -5,12 +5,27 @@ single call. If MCP tools are not available, run `vv inject` via Bash instead.
 
 After bootstrap, continue loading context in this order:
 
-1. `iterations.md` — iteration narratives (on demand, not required for routine work).
+1. **Sweep orphaned plans**: Check `~/.claude/plans/` for plan files from prior
+   sessions (Claude Code creates these when plan mode is used). Use the Glob
+   tool with pattern `*.md` and path set to the absolute expansion of
+   `~/.claude/plans/` — do NOT put the full path in the pattern when also
+   setting path. For each file found:
+   - Read the plan to determine if it belongs to the current project (look for
+     references to project files, directories, or the project name).
+   - If it belongs to this project, move it to the project's agentctx/tasks/
+     directory. Resolve the tasks path: read `vault_path` from
+     `~/.config/vibe-vault/config.toml`, get the project name from the first
+     line of `vv inject` output (`# Context: {name}`), then construct
+     `{vault_path}/Projects/{project}/agentctx/tasks/`. Use `mv` via Bash.
+   - If it belongs to a different project, leave it in `~/.claude/plans/`.
+   - Summarize each plan's status (moved, completed, other project).
+   Plans MUST live in agentctx/tasks/, never in `~/.claude/plans/`.
+2. `iterations.md` — iteration narratives (on demand, not required for routine work).
    Use `vv_get_project_context` or read directly if needed.
-2. Call `vv_get_project_context` for structured context (sessions, threads,
+3. Call `vv_get_project_context` for structured context (sessions, threads,
    decisions, friction trends, knowledge).
-3. `doc/*.md` — stable reference (architecture, design, testing) — read on demand when needed
-4. When a task is completed, use `vv_manage_task` with `action: retire` to move
+4. `doc/*.md` — stable reference (architecture, design, testing) — read on demand when needed
+5. When a task is completed, use `vv_manage_task` with `action: retire` to move
    it to `tasks/done/` and use `vv_append_iteration` to record a summary.
 
 After reading, briefly confirm what you loaded and note the current state:
@@ -65,6 +80,9 @@ and dependencies.
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
 - Use plan mode for verification steps, not just building
 - Write detailed specs upfront to reduce ambiguity
+- After creating a plan in plan mode, immediately move it from `~/.claude/plans/`
+  to the project's `agentctx/tasks/` directory — plans must live in the vault,
+  not in the ephemeral Claude plans directory
 
 #### 2. Subagent Strategy
 

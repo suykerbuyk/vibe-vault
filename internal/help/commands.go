@@ -457,10 +457,11 @@ var CmdMcpInstall = Command{
 	Name:     "mcp install",
 	Synopsis: "register MCP server in editor settings",
 	Brief:    "Add vibe-vault MCP server to settings.json",
-	Usage:    "vv mcp install [--claude-only | --zed-only]",
+	Usage:    "vv mcp install [--claude-only | --zed-only | --claude-plugin]",
 	Flags: []Flag{
 		{Name: "--claude-only", Desc: "Install only into Claude Code (~/.claude/settings.json)"},
 		{Name: "--zed-only", Desc: "Install only into Zed (~/.config/zed/settings.json)"},
+		{Name: "--claude-plugin", Desc: "Deploy as Claude Code plugin (fixes tool registration bug #2682)"},
 	},
 	Description: `Adds a "vibe-vault" entry to each detected editor's MCP/context server
 settings. By default, installs into all editors whose config directories
@@ -475,6 +476,11 @@ settings.json.vv.bak before any modification.
 This command is idempotent: running it when the MCP server is already
 configured prints an informational message and exits successfully.
 
+Use --claude-plugin if Claude Code does not expose vibe-vault tools after
+a standard install. This deploys vibe-vault as a local plugin, which uses
+a different (working) code path for tool registration. Both plugin and
+mcpServers entries can safely coexist.
+
 Restart the editor after running this command.`,
 	SeeAlso: []string{"vv-mcp(1)", "vv-mcp-uninstall(1)"},
 }
@@ -483,14 +489,19 @@ var CmdMcpUninstall = Command{
 	Name:     "mcp uninstall",
 	Synopsis: "remove MCP server from editor settings",
 	Brief:    "Remove vibe-vault MCP server from settings.json",
-	Usage:    "vv mcp uninstall [--claude-only | --zed-only]",
+	Usage:    "vv mcp uninstall [--claude-only | --zed-only | --claude-plugin]",
 	Flags: []Flag{
 		{Name: "--claude-only", Desc: "Uninstall only from Claude Code (~/.claude/settings.json)"},
 		{Name: "--zed-only", Desc: "Uninstall only from Zed (~/.config/zed/settings.json)"},
+		{Name: "--claude-plugin", Desc: "Remove the Claude Code plugin and its marketplace entry"},
 	},
 	Description: `Removes the "vibe-vault" entry from each detected editor's MCP/context
 server settings. By default, removes from all editors whose config
 directories exist.
+
+Use --claude-plugin to remove the plugin installed by
+"vv mcp install --claude-plugin". This removes the plugin directory,
+marketplace registration, and enabledPlugins entry.
 
 Preserves all other settings and MCP servers. A backup is saved to
 settings.json.vv.bak before any modification.

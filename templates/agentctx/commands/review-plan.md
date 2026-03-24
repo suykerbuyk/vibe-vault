@@ -6,6 +6,13 @@ identify what will actually go wrong.
 
 ## Inputs
 
+Before reviewing, check `~/.claude/plans/` for any plan files not yet moved to
+agentctx/tasks/. If found, move them to the project's agentctx/tasks/ directory
+first (resolve the tasks path: read `vault_path` from
+`~/.config/vibe-vault/config.toml`, get the project name from the first line of
+`vv inject` output, construct `{vault_path}/Projects/{project}/agentctx/tasks/`,
+then `mv` via Bash). Then proceed with the review from agentctx/tasks/.
+
 If no argument is given, use `vv_list_tasks` to find all active tasks and
 review them. If a filename is given, use `vv_get_task` to read only that task.
 
