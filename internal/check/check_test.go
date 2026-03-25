@@ -357,6 +357,11 @@ func writeSettings(t *testing.T, dir string, content string) string {
 
 func TestCheckMCPFile_PluginOnly_NoFiles(t *testing.T) {
 	// Plugin configured in settings but no files on disk → Warn.
+	// Isolate HOME so IsInstalled()/AnyCacheInstalled() don't find real files.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", "")
+
 	dir := t.TempDir()
 	path := writeSettings(t, dir, `{
 		"extraKnownMarketplaces": {"vibe-vault-local": {"source": {"source": "directory"}}},
