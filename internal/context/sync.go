@@ -559,8 +559,14 @@ func gitignoreRemove(giPath, entry string) (bool, error) {
 	return true, os.WriteFile(giPath, []byte(strings.Join(filtered, "\n")), 0o644)
 }
 
+// migrate5to6 force-updates vault templates with improved restart instructions
+// (descriptive task slugs and auto-retirement).
+func migrate5to6(ctx MigrationContext) ([]FileAction, error) {
+	return forceUpdateVaultTemplates(ctx.VaultPath), nil
+}
+
 // forceUpdateVaultTemplates overwrites vault Templates/agentctx/ with embedded
-// defaults. Used during v4→v5 migration to push MCP-first template content.
+// defaults. Used during schema migrations to push updated template content.
 func forceUpdateVaultTemplates(vaultPath string) []FileAction {
 	tmplDir := filepath.Join(vaultPath, "Templates", "agentctx")
 

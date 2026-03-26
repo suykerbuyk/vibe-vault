@@ -3,63 +3,85 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X github.com/johns/vibe-vault/internal/help.Version=$(VERSION)
 GOFLAGS := -trimpath -ldflags="$(LDFLAGS)"
 MANDIR  := man
-MANPREFIX := $(HOME)/.local/share/man
+PREFIX  ?= $(HOME)/.local
+BINDIR  ?= $(PREFIX)/bin
+MANPREFIX ?= $(PREFIX)/share/man
 
-.PHONY: all build man install uninstall test integration check vet lint coverage bench fuzz clean pre-commit hooks
+.DEFAULT_GOAL := help
 
-all: build man
+##@ General
+.PHONY: help
+help: ## Show this help
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)
+	@echo ""
+	@echo "Quick start:  make build && make test"
 
-build:
+##@ Build
+.PHONY: build man
+build: ## Build binary and man pages
 	go build $(GOFLAGS) -o $(BINARY) ./cmd/vv
-
-man:
 	go run -ldflags="-X github.com/johns/vibe-vault/internal/help.Version=$(shell git describe --tags --always 2>/dev/null || echo dev)" ./cmd/gen-man $(MANDIR)
 
-install: build man
-	cp $(BINARY) $(HOME)/.local/bin/$(BINARY)
-	install -d $(MANPREFIX)/man1
-	cp $(MANDIR)/*.1 $(MANPREFIX)/man1/
+man: ## Regenerate man pages only
+	go run -ldflags="-X github.com/johns/vibe-vault/internal/help.Version=$(shell git describe --tags --always 2>/dev/null || echo dev)" ./cmd/gen-man $(MANDIR)
 
-uninstall:
-	rm -f $(HOME)/.local/bin/$(BINARY)
-	rm -f $(MANPREFIX)/man1/vv.1 $(MANPREFIX)/man1/vv-*.1
-
-test:
+##@ Test
+.PHONY: test integration check vet lint coverage bench fuzz
+test: ## Run unit tests (-short)
 	go test -short ./...
 
-integration:
+integration: ## Run integration tests
 	go test -run TestIntegration -timeout 60s -count=1 ./test/
 
-check:
+check: ## Run vet + unit + integration tests
 	go vet ./...
 	go test -count=1 ./internal/...
 	go test -run TestIntegration -timeout 60s -count=1 ./test/
 
-vet:
+vet: ## Run go vet
 	go vet ./...
 
-pre-commit: vet test integration
-
-hooks:
-	git config core.hooksPath .githooks
-
-lint:
+lint: ## Run golangci-lint
 	golangci-lint run ./...
 
-coverage:
+coverage: ## Generate coverage report
 	go test -coverprofile=coverage.out ./internal/...
 	@echo "Coverage report: coverage.out"
 
-bench:
+bench: ## Run benchmarks
 	go test -bench=. -benchmem ./internal/...
 
-fuzz:
+fuzz: ## Run fuzz tests (30s per package)
 	@for pkg in $$(go list ./internal/... | xargs grep -rl 'func Fuzz' | sed 's|/[^/]*$$||' | sort -u); do \
 		echo "fuzzing $$pkg"; \
 		go test -fuzz=Fuzz -fuzztime=30s "$$pkg"; \
 	done
 
-clean:
+##@ Install
+.PHONY: install uninstall
+install: build ## Build and install binary + man pages to PREFIX
+	install -d $(BINDIR)
+	install -m 755 $(BINARY) $(BINDIR)/$(BINARY)
+	install -d $(MANPREFIX)/man1
+	install -m 644 $(MANDIR)/*.1 $(MANPREFIX)/man1/
+	@echo "Installed $(BINARY) to $(BINDIR)/$(BINARY)"
+	@echo "Installed man pages to $(MANPREFIX)/man1/"
+
+uninstall: ## Remove installed binary and man pages
+	rm -f $(BINDIR)/$(BINARY)
+	rm -f $(MANPREFIX)/man1/vv.1 $(MANPREFIX)/man1/vv-*.1
+	@echo "Uninstalled $(BINARY) from $(BINDIR)"
+
+##@ Workflow
+.PHONY: pre-commit hooks
+pre-commit: vet test integration ## Run vet + test + integration (pre-commit check)
+
+hooks: ## Configure git hooks path
+	git config core.hooksPath .githooks
+
+##@ Clean
+.PHONY: clean
+clean: ## Remove build artifacts
 	rm -f $(BINARY)
 	rm -f $(MANDIR)/*.1
 	rm -f coverage.out

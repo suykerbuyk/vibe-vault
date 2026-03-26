@@ -26,6 +26,48 @@ Audit or create a Makefile facade for this project's native build system.
 
 4. **Validate** by running make and confirming it only prints help (exit 0, no build side effects).
 
+## Self-documenting help target
+
+Use the `##` comment + awk pattern for self-documenting targets. Every target
+gets a `## description` comment. Use `##@` lines for section headers:
+
+```makefile
+.DEFAULT_GOAL := help
+
+##@ General
+.PHONY: help
+help: ## Show this help
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)
+	@echo ""
+	@echo "Quick start:  make build && make test"
+```
+
+Then annotate every target:
+```makefile
+##@ Build
+build: ## Build the binary
+	...
+
+##@ Test
+test: ## Run unit tests
+	...
+
+integration: ## Run integration tests
+	...
+
+##@ Install
+install: build ## Build and install to PREFIX
+	...
+
+##@ Clean
+clean: ## Remove build artifacts
+	...
+```
+
+This produces organized, colored output automatically — no manual echo
+statements to maintain. New targets are self-documenting just by adding
+`## description` to the target line.
+
 ## Adaptation patterns
 
 ### CMake
@@ -99,7 +141,3 @@ install: build
 clean:
 	rm -rf $(BUILD_DIR)
 ```
-
-## Help target template
-
-The help target should list all targets, overridable variables, and include a "Quick start" recommendation pointing the user to the most common workflow (usually make build && make test).

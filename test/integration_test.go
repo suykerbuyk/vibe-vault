@@ -809,7 +809,7 @@ func TestIntegration(t *testing.T) {
 			t.Error("vault agentctx/.version not created")
 		} else {
 			versionContent := readFile(t, filepath.Join(agentctxDir, ".version"))
-			assertContains(t, versionContent, "schema_version = 5", ".version has latest schema")
+			assertContains(t, versionContent, "schema_version = 6", ".version has latest schema")
 		}
 
 		// No agentctx symlink at repo root (v5)
@@ -954,14 +954,14 @@ func TestIntegration(t *testing.T) {
 		os.MkdirAll(filepath.Join(legacyAgentctx, "commands"), 0o755)
 		os.WriteFile(filepath.Join(legacyAgentctx, "resume.md"), []byte("# Resume"), 0o644)
 
-		// Run sync — should migrate 0→5
+		// Run sync — should migrate 0→6
 		stdout := mustRunVVInDir(t, env, syncCwd, "context", "sync", "--project", legacyProject)
 		assertContains(t, stdout, "v0", "sync shows from version")
-		assertContains(t, stdout, "v5", "sync shows to version")
+		assertContains(t, stdout, "v6", "sync shows to version")
 
 		// .version should be at latest
 		versionContent := readFile(t, filepath.Join(legacyAgentctx, ".version"))
-		assertContains(t, versionContent, "schema_version = 5", ".version at latest after sync")
+		assertContains(t, versionContent, "schema_version = 6", ".version at latest after sync")
 
 		// No agentctx symlink at repo root (v5)
 		if isSymlink(filepath.Join(syncCwd, "agentctx")) {

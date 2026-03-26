@@ -12,20 +12,54 @@ After bootstrap, continue loading context in this order:
    setting path. For each file found:
    - Read the plan to determine if it belongs to the current project (look for
      references to project files, directories, or the project name).
-   - If it belongs to this project, move it to the project's agentctx/tasks/
-     directory. Resolve the tasks path: read `vault_path` from
-     `~/.config/vibe-vault/config.toml`, get the project name from the first
-     line of `vv inject` output (`# Context: {name}`), then construct
-     `{vault_path}/Projects/{project}/agentctx/tasks/`. Use `mv` via Bash.
    - If it belongs to a different project, leave it in `~/.claude/plans/`.
-   - Summarize each plan's status (moved, completed, other project).
+   - If it belongs to this project, **create it as a task with a descriptive
+     slug** derived from the plan title:
+
+     **Slugification rules:**
+     a. Find the first markdown heading (`# ...` or `## ...`).
+     b. Strip common prefixes: "Plan:", "Task:", "Feature:", "Bug:", "Fix:",
+        "Implementation Plan:".
+     c. Lowercase the remaining text.
+     d. Replace spaces and underscores with hyphens.
+     e. Remove all characters except `a-z`, `0-9`, and `-`.
+     f. Collapse consecutive hyphens into one; trim leading/trailing hyphens.
+     g. Truncate to 60 characters (break at a hyphen boundary if possible).
+     h. Fallback: if no heading or empty after processing, use the original
+        filename without `.md`.
+
+     **Example**: `# Plan: Deprecate Agentctx Symlinks` becomes
+     `deprecate-agentctx-symlinks`.
+
+     Use `vv_manage_task` with `action: create`, `task` set to the derived
+     slug, and `content` set to the full plan file content. Then delete the
+     original file from `~/.claude/plans/` using `rm` via Bash.
+
+   - Summarize each plan's disposition (created as task, other project, etc.).
    Plans MUST live in agentctx/tasks/, never in `~/.claude/plans/`.
-2. `iterations.md` — iteration narratives (on demand, not required for routine work).
+
+2. **Auto-retire completed tasks**: List active tasks via `ls` on the tasks
+   directory (exclude `done/` and `cancelled/` subdirectories). For each task:
+   - Read its title and status line.
+   - Check `git log --oneline -20` for commits that clearly implement the
+     task's objective (matching keywords from the title).
+   - **Auto-retire if**: status already says "Done" or "Complete", OR all
+     checklist items (`- [x]`) are checked with none unchecked (`- [ ]`) AND
+     recent commits match the task's subject matter.
+   - **Never auto-retire if**: unchecked checklist items remain, status says
+     "In Progress" or "Blocked", or no matching commits are found.
+   - For each retirement: use `vv_manage_task` with `action: retire`, then
+     use `vv_append_iteration` with a brief narrative noting which commits
+     fulfilled the task.
+   - On uncertainty, report "Task {slug} may be complete — review recommended"
+     and leave it active. False negatives are far better than false positives.
+
+3. `iterations.md` — iteration narratives (on demand, not required for routine work).
    Use `vv_get_project_context` or read directly if needed.
-3. Call `vv_get_project_context` for structured context (sessions, threads,
+4. Call `vv_get_project_context` for structured context (sessions, threads,
    decisions, friction trends, knowledge).
-4. `doc/*.md` — stable reference (architecture, design, testing) — read on demand when needed
-5. When a task is completed, use `vv_manage_task` with `action: retire` to move
+5. `doc/*.md` — stable reference (architecture, design, testing) — read on demand when needed
+6. When a task is completed, use `vv_manage_task` with `action: retire` to move
    it to `tasks/done/` and use `vv_append_iteration` to record a summary.
 
 After reading, briefly confirm what you loaded and note the current state:
@@ -80,9 +114,9 @@ and dependencies.
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
 - Use plan mode for verification steps, not just building
 - Write detailed specs upfront to reduce ambiguity
-- After creating a plan in plan mode, immediately move it from `~/.claude/plans/`
-  to the project's `agentctx/tasks/` directory — plans must live in the vault,
-  not in the ephemeral Claude plans directory
+- After creating a plan in plan mode, immediately create it as a task using
+  `vv_manage_task create` with a descriptive slug (see slugification rules in
+  step 1 above). Then delete the original from `~/.claude/plans/`.
 
 #### 2. Subagent Strategy
 
