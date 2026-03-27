@@ -37,6 +37,7 @@ import (
 	"github.com/johns/vibe-vault/internal/stats"
 	"github.com/johns/vibe-vault/internal/templates"
 	"github.com/johns/vibe-vault/internal/trends"
+	"github.com/johns/vibe-vault/internal/vaultsync"
 	"github.com/johns/vibe-vault/internal/zed"
 )
 
@@ -97,6 +98,9 @@ func main() {
 
 	case "mcp":
 		runMcp()
+
+	case "vault":
+		runVault()
 
 	case "templates":
 		runTemplates()
@@ -671,6 +675,103 @@ func runExport() {
 	}
 
 	fmt.Print(output)
+}
+
+func runVault() {
+	args := os.Args[2:]
+
+	if len(args) == 0 || wantsHelp(args) {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVault))
+		return
+	}
+
+	cfg := mustLoadConfig()
+
+	switch args[0] {
+	case "status":
+		if wantsHelp(args[1:]) {
+			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVaultStatus))
+			return
+		}
+		s, err := vaultsync.GetStatus(cfg.VaultPath)
+		if err != nil {
+			fatal("vault status: %v", err)
+		}
+		fmt.Printf("branch:  %s\n", s.Branch)
+		if s.Clean {
+			fmt.Println("status:  clean")
+		} else {
+			fmt.Println("status:  dirty (uncommitted changes)")
+		}
+		if s.HasRemote {
+			fmt.Printf("remote:  %s\n", s.Remote)
+			fmt.Printf("ahead:   %d\n", s.Ahead)
+			fmt.Printf("behind:  %d\n", s.Behind)
+		} else {
+			fmt.Println("remote:  (none)")
+		}
+
+	case "pull":
+		if wantsHelp(args[1:]) {
+			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVaultPull))
+			return
+		}
+		result, err := vaultsync.Pull(cfg.VaultPath)
+		if err != nil {
+			fatal("vault pull: %v", err)
+		}
+		if !result.Updated {
+			fmt.Println("vault: already up to date")
+		} else {
+			fmt.Println("vault: pulled latest changes")
+		}
+		if result.Regenerate {
+			fmt.Println("vault: regenerating auto-generated files...")
+			idx, count, err := index.Rebuild(cfg.ProjectsDir(), cfg.StateDir())
+			if err != nil {
+				fatal("index rebuild: %v", err)
+			}
+			if err := idx.Save(); err != nil {
+				fatal("save index: %v", err)
+			}
+			if _, err := index.GenerateContext(idx, cfg.VaultPath, contextOpts(cfg)); err != nil {
+				log.Printf("warning: generate context: %v", err)
+			}
+			fmt.Printf("vault: regenerated index (%d sessions)\n", count)
+		}
+		if len(result.ManualReview) > 0 {
+			fmt.Println("vault: files accepted from upstream that may need review:")
+			for _, f := range result.ManualReview {
+				fmt.Printf("  %s\n", f)
+			}
+		}
+
+	case "push":
+		if wantsHelp(args[1:]) {
+			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVaultPush))
+			return
+		}
+		msg := flagValue(args[1:], "--message")
+		if msg == "" {
+			msg = fmt.Sprintf("vault sync %s", time.Now().Format("2006-01-02 15:04"))
+		}
+		result, err := vaultsync.CommitAndPush(cfg.VaultPath, msg)
+		if err != nil {
+			fatal("vault push: %v", err)
+		}
+		if result.CommitSHA == "" {
+			fmt.Println("vault: nothing to commit")
+		} else if result.Pushed {
+			fmt.Printf("vault: committed and pushed (%s)\n", result.CommitSHA)
+		} else {
+			fmt.Printf("vault: committed (%s) but push failed — resolve manually\n", result.CommitSHA)
+		}
+
+	default:
+		fmt.Fprintf(os.Stderr, "unknown vault command: %s\n", args[0])
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVault))
+		os.Exit(1)
+	}
 }
 
 func runTemplates() {

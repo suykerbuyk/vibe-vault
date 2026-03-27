@@ -321,3 +321,17 @@ Key architectural and design decisions in vibe-vault, with rationale.
     enables single-call session start — one invocation returns resume, workflow,
     and active tasks — replacing the multi-file bootstrap chain for MCP-capable
     agents.
+
+43. **Vault git sync with file-classification-driven conflict resolution:**
+    The vault is a git repo shared across machines. `vv vault pull` and
+    `vv vault push` automate synchronization at session boundaries. Conflict
+    resolution during rebase is driven by file classification: auto-generated
+    files (`history.md`, `session-index.json`) accept upstream and are
+    regenerated locally via `vv index`; session notes (unique per-machine
+    timestamps) have near-zero conflict risk; manual files (`knowledge.md`,
+    `resume.md`, tasks) accept upstream but are reported for human review.
+    Push commits with a hostname stamp and retries once via pull-rebase on
+    rejection. On final failure, the error is surfaced for interactive
+    resolution — the design avoids formulaic retry loops in favor of
+    collaborative human-machine debugging. vv owns the vault repo completely
+    (full git privileges) but never touches project source code repos.

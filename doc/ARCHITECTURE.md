@@ -205,7 +205,7 @@ Create repo symlinks     Propagate shared          Show delta / copy
 | `mcp` | `server.go` | Stdio transport: `Server.Serve()` reads newline-delimited JSON, dispatches initialize/tools/list/tools/call/prompts/list/prompts/get, logs tool calls to stderr |
 | `mcp` | `tools.go` | 8 tools (all `vv_`-prefixed): `vv_get_project_context`, `vv_list_projects`, `vv_search_sessions`, `vv_get_knowledge`, `vv_get_session_detail`, `vv_get_friction_trends`, `vv_get_effectiveness`, `vv_capture_session` |
 | `mcp` | `prompts.go` | `NewSessionGuidelinesPrompt()` — agent instructions for when/how to call `vv_capture_session` |
-| `help` | `commands.go` | Command/Flag/Arg structs, Version var (build-time injection via ldflags), registry of 16 subcommands + 2 hook + 3 context subcommands (init, migrate, sync), ManName() with space→hyphen |
+| `help` | `commands.go` | Command/Flag/Arg structs, Version var (build-time injection via ldflags), registry of 17 subcommands + 2 hook + 5 context + 3 vault subcommands (status, pull, push), ManName() with space→hyphen |
 | `help` | `terminal.go` | `FormatTerminal()` and `FormatUsage()` — terminal help output |
 | `help` | `roff.go` | `FormatRoff()` and `FormatRoffTopLevel()` — roff-formatted man pages |
 | `check` | `check.go` | 10 diagnostic checks (config, vault, obsidian, projects, state, index, domains, enrichment, hook, agentctx schema), `Run()` aggregator, `Report.Format()`, `CheckAgentctxSchema()` (pass/warn by version) |
@@ -256,6 +256,7 @@ Create repo symlinks     Propagate shared          Show delta / copy
 | `identity` | `identity.go` | `.vibe-vault.toml` parser — explicit project name/domain/tags override |
 | `llm` | `provider.go`, `types.go`, `retry.go`, `openai.go`, `anthropic.go`, `google.go` | Multi-provider LLM abstraction: `Provider` interface, OpenAI-compatible/Anthropic/Gemini implementations, retry with backoff |
 | `templates` (internal) | `templates.go`, `diff.go`, `reset.go` | Template registry, vault-vs-embedded comparison, `vv templates` status reporting |
+| `vaultsync` | `vaultsync.go` | `Classify()` — file classification (Regenerable/AppendOnly/Manual/ConfigFile) for conflict resolution; `GetStatus()` — vault git state (branch, clean/dirty, ahead/behind); `Pull()` — fetch + rebase with auto-stash and classification-driven conflict resolution; `CommitAndPush()` — stage all, commit with hostname stamp, push with one pull-retry; `EnsureRemote()` — verify origin exists |
 | `sanitize` | `redact.go` | Regex-based XML tag stripping for Claude Code wrapper tags |
 
 ## Template System

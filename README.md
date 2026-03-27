@@ -280,6 +280,9 @@ deterministic heuristics rather than embeddings.
 | `vv inject [--project X]` | Output session-start context payload |
 | `vv export [--format X]` | Export session data (JSON or CSV) |
 | `vv effectiveness [--project X]` | Analyze context effectiveness on outcomes |
+| `vv vault status` | Show vault git state (branch, clean/dirty, ahead/behind) |
+| `vv vault pull` | Fetch + rebase vault with automatic conflict resolution |
+| `vv vault push [--message X]` | Commit all vault changes and push to remote |
 | `vv context [init \| migrate \| sync \| diff \| accept]` | Manage vault-resident AI context files |
 | `vv mcp` | Start MCP server for AI agent integration |
 | `vv mcp install` | Register MCP server in all detected editors |
@@ -361,6 +364,28 @@ in one call), `vv_get_project_context`, `vv_list_projects`,
 `vv_capture_session`, and more. Plus 1 prompt (`vv_session_guidelines`). All
 names are prefixed with `vv_` to avoid collisions with other MCP servers. AI
 agents call these on demand instead of requiring pre-loaded context.
+
+**Synchronize vault across machines:**
+```bash
+vv vault status                                    # show vault git state
+vv vault pull                                      # fetch + rebase with auto conflict resolution
+vv vault push                                      # commit + push (auto-generated message)
+vv vault push --message "sync after refactor"      # commit + push with custom message
+```
+
+The vault is a git repository shared across machines. `vv vault pull` fetches
+upstream changes and rebases local commits, automatically resolving conflicts
+based on file type: auto-generated files (`history.md`, session index) accept
+upstream and are regenerated locally; session notes (unique timestamps per
+machine) have near-zero conflict risk; manual files (`knowledge.md`) accept
+upstream but are flagged for human review. `vv vault push` stages all changes,
+commits with a hostname-stamped message, and pushes — retrying once via
+pull-rebase if rejected. On final failure, it surfaces the error for
+interactive resolution.
+
+The `/restart` and `/wrap` AI workflow commands call `vv vault pull` and
+`vv vault push` automatically at session boundaries, keeping the vault
+synchronized without manual git operations.
 
 **Inspect and reset vault templates:**
 ```bash
@@ -671,8 +696,8 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 - **Parallel eval / stress testing** — vv is a post-hoc observer, not an agent
   orchestrator. It captures what happened; it doesn't control what runs.
-- **Multi-agent access controls** — vv is single-user, single-machine.
-  Multi-agent coordination is an orchestration concern.
+- **Multi-agent access controls** — vv is single-user (one session per machine
+  per branch). Multi-agent coordination is an orchestration concern.
 - **Real-time agent intervention** — vv captures checkpoints at natural
   boundaries (stop, compaction, clear) but does not modify agent behavior
   mid-turn.
@@ -696,7 +721,7 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 ### Test Suite
 
-**1034 tests** across 29 test packages + **1 integration test** with 22
+**1127 tests** across 31 test packages + **1 integration test** with 22
 subtests. The integration test exercises the full pipeline:
 `init` → `process` → `index` → `stats` →
 `backfill` → `archive` → `checkpoint lifecycle` → `friction` →

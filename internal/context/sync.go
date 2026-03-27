@@ -142,9 +142,11 @@ func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*P
 		psr.RepoNote = "run `vv context sync` from repo root for repo-side updates"
 	}
 
-	// Propagate shared commands from vault templates
+	// Propagate shared commands from vault templates.
+	// If migrations ran, force-update non-pinned commands directly (no .pending).
+	migrationsRan := psr.FromVersion != psr.ToVersion
 	if !opts.DryRun {
-		cmdActions := propagateSharedCommands(cfg.VaultPath, agentctxPath, false)
+		cmdActions := propagateSharedCommands(cfg.VaultPath, agentctxPath, false, migrationsRan)
 		psr.Actions = append(psr.Actions, cmdActions...)
 
 		// Deploy commands to repo (skip in --all mode)
@@ -153,7 +155,7 @@ func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*P
 			psr.Actions = append(psr.Actions, deployActions...)
 		}
 	} else {
-		cmdActions := propagateSharedCommands(cfg.VaultPath, agentctxPath, true)
+		cmdActions := propagateSharedCommands(cfg.VaultPath, agentctxPath, true, migrationsRan)
 		psr.Actions = append(psr.Actions, cmdActions...)
 	}
 
@@ -182,7 +184,7 @@ func discoverProjects(vaultPath string) []string {
 
 // propagateSharedCommands copies commands from Templates/agentctx/commands/
 // to a project's agentctx/commands/, without overwriting existing files.
-func propagateSharedCommands(vaultPath, agentctxPath string, dryRun bool) []FileAction {
+func propagateSharedCommands(vaultPath, agentctxPath string, dryRun, forceUpdate bool) []FileAction {
 	templatesDir := filepath.Join(vaultPath, "Templates", "agentctx", "commands")
 	entries, err := os.ReadDir(templatesDir)
 	if err != nil {
@@ -214,6 +216,25 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun bool) []File
 			}
 			if bytes.Equal(bytes.TrimSpace(srcData), bytes.TrimSpace(dstData)) {
 				continue // identical
+			}
+			if forceUpdate {
+				// Migration updated templates — overwrite non-pinned files directly
+				if !dryRun {
+					if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
+						actions = append(actions, FileAction{
+							Path:   "commands/" + e.Name(),
+							Action: "ERROR: " + err.Error(),
+						})
+						continue
+					}
+					os.Remove(dstPath + ".pending") // clean stale .pending
+				}
+				actions = append(actions, FileAction{
+					Path:     "commands/" + e.Name(),
+					Action:   "UPDATE",
+					Location: "vault",
+				})
+				continue
 			}
 			// Write .pending sidecar with new version
 			pendingPath := dstPath + ".pending"

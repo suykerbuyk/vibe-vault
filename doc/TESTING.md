@@ -2,7 +2,7 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**1035 tests** across 29 test packages + **1 integration test** (23 subtests). All passing.
+**1127 tests** across 31 test packages + **1 integration test** (23 subtests). All passing.
 
 Run unit tests: `make test` (or `go test -short ./...`)
 Run integration: `make integration` (or `go test -run TestIntegration -timeout 60s ./test/`)
@@ -66,6 +66,7 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 | `mcp/tools_context_write_test.go` | 28 | `UpdateResumeBasic`, `UpdateResumeSectionNotFound`, `UpdateResumeFileNotFound`, `UpdateResumePreservesOtherSections`, `UpdateResumeLastSection`, `UpdateResumePathTraversal`, `AppendIterationAutoIncrement`, `AppendIterationExplicitNumber`, `AppendIterationDuplicateNumber`, `AppendIterationCreatesFile`, `AppendIterationInvalidDate`, `AppendIterationDefaultDate`, `ManageTaskCreate`, `ManageTaskCreateAlreadyExists`, `ManageTaskCreateNoContent`, `ManageTaskUpdateStatus`, `ManageTaskUpdateStatusNoStatus`, `ManageTaskUpdateStatusNotFound`, `ManageTaskRetire`, `ManageTaskRetireNotFound`, `ManageTaskUnknownAction`, `ManageTaskPathTraversal`, `RefreshIndexBasic`, `RefreshIndexEmptyVault`, `ReplaceStatusPlainFormat`, `ReplaceStatusHeadingFormat`, `IterationHeadingRoundTrip`, `ScanIterationNumbers` |
 | `check/check_test.go` | 27 | `CheckVaultPath` (pass/fail), `CheckObsidian` (pass/warn), `CheckProjects` (pass/warn), `CheckStateDir` (pass/warn), `CheckIndex` (pass/warn/fail), `CheckDomains` (all exist/some missing/empty skipped), `CheckEnrichment` (disabled/enabled+key/enabled+no key), `checkHookFile` (pass/warn/fail), `Report.HasFailures` (true/false), `Run` integration, `Status.String`, `CheckAgentctxSchema` (current/outdated/no-agentctx) |
 | `templates/templates_test.go` | 8 | `New` (entry count=14), `DefaultContent`, `DefaultContentReturnsCopy`, `Has`, `Compare` (default/customized/missing), `Reset` (create/reset), `ResetAll` (14 actions), `ResetUnknown` |
+| `vaultsync/vaultsync_test.go` | 22 | `Classify` (15 subtests: history.md, session-index.json, session notes, templates, config, knowledge.md, resume.md, iterations.md, tasks, dashboards, README), `GetStatus_CleanRepo`, `GetStatus_DirtyRepo`, `CommitAndPush_NoRemote`, `CommitAndPush_NothingToCommit`, `Pull_NoRemote`, `EnsureRemote` |
 
 ## Integration Test
 

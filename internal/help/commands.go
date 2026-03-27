@@ -886,6 +886,64 @@ Shows thread ID, last updated time, message count, and title/summary.`,
 	SeeAlso: []string{"vv(1)", "vv-zed(1)"},
 }
 
+var CmdVault = Command{
+	Name:     "vault",
+	Synopsis: "vault git synchronization",
+	Brief:    "Vault git sync (pull, push, status)",
+	Usage:    "vv vault <command>",
+	Description: `Manages git synchronization of the vault repo across machines.
+The vault repo is owned entirely by vv — all git operations are safe.
+
+Subcommands:
+  vv vault status   Show vault git state (clean/dirty, ahead/behind)
+  vv vault pull     Fetch + rebase with automatic conflict resolution
+  vv vault push     Commit all changes and push`,
+}
+
+var CmdVaultStatus = Command{
+	Name:     "status",
+	Synopsis: "show vault git state",
+	Brief:    "Show vault git state",
+	Usage:    "vv vault status",
+	Description: `Shows the vault repository's git status: current branch,
+clean/dirty state, ahead/behind counts, and remote configuration.`,
+}
+
+var CmdVaultPull = Command{
+	Name:     "pull",
+	Synopsis: "fetch and rebase vault repo",
+	Brief:    "Fetch + rebase with auto conflict resolution",
+	Usage:    "vv vault pull",
+	Description: `Fetches from origin and rebases local commits. Conflicts are
+resolved automatically based on file type:
+  - Auto-generated files (history.md): accept upstream, flag for regeneration
+  - Session notes: accept upstream (unique timestamps = near-zero conflict risk)
+  - Manual files (knowledge.md): accept upstream, report for human review
+  - Templates/config: accept upstream
+
+If regeneration is needed, run 'vv index' afterward to rebuild.`,
+}
+
+var CmdVaultPush = Command{
+	Name:     "push",
+	Synopsis: "commit and push vault changes",
+	Brief:    "Commit all changes and push to remote",
+	Usage:    "vv vault push [--message <msg>]",
+	Flags: []Flag{
+		{"--message <msg>", "Custom commit message (default: auto-generated)"},
+	},
+	Description: `Stages all vault changes, commits with a machine-stamped message,
+and pushes to origin. If push is rejected, pulls and retries once.
+On final failure, reports the error for interactive resolution.`,
+}
+
+// VaultSubcommands is the ordered list of vault sub-subcommands.
+var VaultSubcommands = []Command{
+	CmdVaultStatus,
+	CmdVaultPull,
+	CmdVaultPush,
+}
+
 // ZedSubcommands is the ordered list of zed sub-subcommands.
 var ZedSubcommands = []Command{
 	CmdZedBackfill,
@@ -939,6 +997,7 @@ var Subcommands = []Command{
 	CmdInject,
 	CmdExport,
 	CmdEffectiveness,
+	CmdVault,
 	CmdZed,
 	CmdMcp,
 	CmdTemplates,

@@ -1,3 +1,13 @@
+## Vault Sync (multi-machine)
+
+Before loading context, sync the vault to get the latest state from other
+machines:
+
+1. Run `vv vault pull` via Bash
+2. If it reports "regenerated", also run `vv index` to rebuild auto-generated files
+3. If it reports files needing manual review, inform the user before proceeding
+4. If it fails (no remote, network error), warn and proceed — local state is still valid
+
 ## Restoring full AI thread context:
 
 Call `vv_bootstrap_context` to load resume, workflow, and active tasks in a

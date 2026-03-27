@@ -35,5 +35,10 @@ Specifically:
 
 Do not add "Co-Authored-By" lines to commit messages or source files.
 
+After staging project files, sync vault changes to the remote:
+- Run `vv vault push` via Bash to commit and push vault changes
+- If it reports a push failure, show the error and help the user resolve
+  interactively — do not retry beyond what vv already does internally
+
 Do not ask for confirmation — just do the updates, stage the files, show what
 changed, and note that the user should review before committing.
