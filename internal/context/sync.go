@@ -142,21 +142,24 @@ func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*P
 		psr.RepoNote = "run `vv context sync` from repo root for repo-side updates"
 	}
 
-	// Propagate shared commands from vault templates.
-	// If migrations ran, force-update non-pinned commands directly (no .pending).
+	// Propagate shared content from vault templates (commands, skills).
+	// If migrations ran, force-update non-pinned content directly (no .pending).
 	migrationsRan := psr.FromVersion != psr.ToVersion
-	if !opts.DryRun {
-		cmdActions := propagateSharedCommands(cfg.VaultPath, agentctxPath, false, migrationsRan)
-		psr.Actions = append(psr.Actions, cmdActions...)
+	for _, sub := range propagateDirs {
+		if !opts.DryRun {
+			subActions := propagateSharedSubdir(cfg.VaultPath, agentctxPath, sub, false, migrationsRan)
+			psr.Actions = append(psr.Actions, subActions...)
 
-		// Deploy commands to repo (skip in --all mode)
-		if repoPath != "" {
-			deployActions := deployCommandsToRepo(repoPath, agentctxPath)
-			psr.Actions = append(psr.Actions, deployActions...)
+			// Deploy to repo (skip in --all mode).
+			// NOTE: deploy functions have no dry-run support — never call during dry-run.
+			if repoPath != "" {
+				deployActions := deploySubdirToRepo(repoPath, agentctxPath, sub)
+				psr.Actions = append(psr.Actions, deployActions...)
+			}
+		} else {
+			subActions := propagateSharedSubdir(cfg.VaultPath, agentctxPath, sub, true, migrationsRan)
+			psr.Actions = append(psr.Actions, subActions...)
 		}
-	} else {
-		cmdActions := propagateSharedCommands(cfg.VaultPath, agentctxPath, true, migrationsRan)
-		psr.Actions = append(psr.Actions, cmdActions...)
 	}
 
 	return psr, nil
@@ -182,23 +185,44 @@ func discoverProjects(vaultPath string) []string {
 	return projects
 }
 
-// propagateSharedCommands copies commands from Templates/agentctx/commands/
-// to a project's agentctx/commands/, without overwriting existing files.
+// propagateDirs lists the .claude/ subdirectories that are propagated from
+// vault Templates/agentctx/ to per-project agentctx/ and then to repo .claude/.
+var propagateDirs = []string{"commands", "skills"}
+
+// propagateSharedCommands is a backward-compatible wrapper.
 func propagateSharedCommands(vaultPath, agentctxPath string, dryRun, forceUpdate bool) []FileAction {
-	templatesDir := filepath.Join(vaultPath, "Templates", "agentctx", "commands")
+	return propagateSharedSubdir(vaultPath, agentctxPath, "commands", dryRun, forceUpdate)
+}
+
+// propagateSharedSubdir copies entries from Templates/agentctx/{subdir}/
+// to a project's agentctx/{subdir}/, without overwriting existing files.
+// For "commands", only .md files are propagated (with .pending/.pinned support).
+// For other subdirs (skills, agents, rules), all non-sidecar files and
+// directories are propagated.
+func propagateSharedSubdir(vaultPath, agentctxPath, subdir string, dryRun, forceUpdate bool) []FileAction {
+	templatesDir := filepath.Join(vaultPath, "Templates", "agentctx", subdir)
 	entries, err := os.ReadDir(templatesDir)
 	if err != nil {
 		return nil // no templates dir, nothing to propagate
 	}
 
 	var actions []FileAction
-	projectCmdsDir := filepath.Join(agentctxPath, "commands")
+	projectSubDir := filepath.Join(agentctxPath, subdir)
 
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+		// Directory entries (e.g., skills/startup-analyst/)
+		if e.IsDir() {
+			actions = append(actions, propagateDir(templatesDir, projectSubDir, subdir, e.Name(), dryRun, forceUpdate)...)
 			continue
 		}
-		dstPath := filepath.Join(projectCmdsDir, e.Name())
+		// For commands: only .md files. For other subdirs: all non-sidecar files.
+		if subdir == "commands" && !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		if strings.HasSuffix(e.Name(), ".pending") || strings.HasSuffix(e.Name(), ".pinned") {
+			continue
+		}
+		dstPath := filepath.Join(projectSubDir, e.Name())
 		if _, err := os.Stat(dstPath); err == nil {
 			// Check for .pinned marker — user chose to keep their version
 			if _, pinErr := os.Stat(dstPath + ".pinned"); pinErr == nil {
@@ -222,7 +246,7 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun, forceUpdate
 				if !dryRun {
 					if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
 						actions = append(actions, FileAction{
-							Path:   "commands/" + e.Name(),
+							Path:   subdir + "/" + e.Name(),
 							Action: "ERROR: " + err.Error(),
 						})
 						continue
@@ -230,7 +254,7 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun, forceUpdate
 					os.Remove(dstPath + ".pending") // clean stale .pending
 				}
 				actions = append(actions, FileAction{
-					Path:     "commands/" + e.Name(),
+					Path:     subdir + "/" + e.Name(),
 					Action:   "UPDATE",
 					Location: "vault",
 				})
@@ -239,23 +263,23 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun, forceUpdate
 			// Write .pending sidecar with new version
 			pendingPath := dstPath + ".pending"
 			if !dryRun {
-				if err := os.MkdirAll(projectCmdsDir, 0o755); err != nil {
+				if err := os.MkdirAll(projectSubDir, 0o755); err != nil {
 					actions = append(actions, FileAction{
-						Path:   "commands/" + e.Name() + ".pending",
+						Path:   subdir + "/" + e.Name() + ".pending",
 						Action: "ERROR: " + err.Error(),
 					})
 					continue
 				}
 				if err := os.WriteFile(pendingPath, srcData, 0o644); err != nil {
 					actions = append(actions, FileAction{
-						Path:   "commands/" + e.Name() + ".pending",
+						Path:   subdir + "/" + e.Name() + ".pending",
 						Action: "ERROR: " + err.Error(),
 					})
 					continue
 				}
 			}
 			actions = append(actions, FileAction{
-				Path:     "commands/" + e.Name(),
+				Path:     subdir + "/" + e.Name(),
 				Action:   "OUTDATED",
 				Location: "vault",
 			})
@@ -264,7 +288,7 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun, forceUpdate
 
 		if dryRun {
 			actions = append(actions, FileAction{
-				Path:     "commands/" + e.Name(),
+				Path:     subdir + "/" + e.Name(),
 				Action:   "DRY-RUN",
 				Location: "vault",
 			})
@@ -275,32 +299,106 @@ func propagateSharedCommands(vaultPath, agentctxPath string, dryRun, forceUpdate
 		data, err := os.ReadFile(srcPath)
 		if err != nil {
 			actions = append(actions, FileAction{
-				Path:   "commands/" + e.Name(),
+				Path:   subdir + "/" + e.Name(),
 				Action: "ERROR: " + err.Error(),
 			})
 			continue
 		}
-		if err := os.MkdirAll(projectCmdsDir, 0o755); err != nil {
+		if err := os.MkdirAll(projectSubDir, 0o755); err != nil {
 			actions = append(actions, FileAction{
-				Path:   "commands/" + e.Name(),
+				Path:   subdir + "/" + e.Name(),
 				Action: "ERROR: " + err.Error(),
 			})
 			continue
 		}
 		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
 			actions = append(actions, FileAction{
-				Path:   "commands/" + e.Name(),
+				Path:   subdir + "/" + e.Name(),
 				Action: "ERROR: " + err.Error(),
 			})
 			continue
 		}
 		actions = append(actions, FileAction{
-			Path:     "commands/" + e.Name(),
+			Path:     subdir + "/" + e.Name(),
 			Action:   "CREATE",
 			Location: "vault",
 		})
 	}
 	return actions
+}
+
+// propagateDir handles propagation of a directory entry (e.g., a skill directory).
+// Directories use skip-or-overwrite semantics: no .pending support.
+func propagateDir(templatesDir, projectSubDir, subdir, name string, dryRun, forceUpdate bool) []FileAction {
+	srcDir := filepath.Join(templatesDir, name)
+	dstDir := filepath.Join(projectSubDir, name)
+
+	// Check for .pinned marker
+	if _, err := os.Stat(dstDir + ".pinned"); err == nil {
+		return nil
+	}
+
+	if _, err := os.Stat(dstDir); err == nil {
+		// Directory exists — only overwrite on forceUpdate
+		if !forceUpdate {
+			return nil
+		}
+		if dryRun {
+			return []FileAction{{
+				Path:     subdir + "/" + name,
+				Action:   "DRY-RUN",
+				Location: "vault",
+			}}
+		}
+		dirActions, err := copyDir(srcDir, dstDir, true)
+		if err != nil {
+			return []FileAction{{
+				Path:   subdir + "/" + name,
+				Action: "ERROR: " + err.Error(),
+			}}
+		}
+		result := []FileAction{{
+			Path:     subdir + "/" + name,
+			Action:   "UPDATE",
+			Location: "vault",
+		}}
+		return append(result, convertDirActions(dirActions, subdir+"/"+name)...)
+	}
+
+	// Directory doesn't exist — create it
+	if dryRun {
+		return []FileAction{{
+			Path:     subdir + "/" + name,
+			Action:   "DRY-RUN",
+			Location: "vault",
+		}}
+	}
+	dirActions, err := copyDir(srcDir, dstDir, false)
+	if err != nil {
+		return []FileAction{{
+			Path:   subdir + "/" + name,
+			Action: "ERROR: " + err.Error(),
+		}}
+	}
+	result := []FileAction{{
+		Path:     subdir + "/" + name,
+		Action:   "CREATE",
+		Location: "vault",
+	}}
+	return append(result, convertDirActions(dirActions, subdir+"/"+name)...)
+}
+
+// convertDirActions prefixes copyDir actions with a base path for reporting.
+func convertDirActions(actions []FileAction, base string) []FileAction {
+	var result []FileAction
+	for _, a := range actions {
+		result = append(result, FileAction{
+			Path:     base + "/" + a.Path,
+			Action:   a.Action,
+			Location: "vault",
+		})
+	}
+	return result
 }
 
 // migrate3to4 converts CLAUDE.md from a generated file to a symlink through
@@ -507,31 +605,57 @@ func readDirFiles(dir string) map[string][]byte {
 	return result
 }
 
-// deployCommandsToRepo copies vault agentctx/commands/*.md to repo .claude/commands/.
-// This overwrites repo-side commands on every sync (vault is canonical).
+// deployCommandsToRepo is a backward-compatible wrapper.
 func deployCommandsToRepo(repoPath, agentctxPath string) []FileAction {
-	vaultCmdsDir := filepath.Join(agentctxPath, "commands")
-	entries, err := os.ReadDir(vaultCmdsDir)
+	return deploySubdirToRepo(repoPath, agentctxPath, "commands")
+}
+
+// deploySubdirToRepo copies vault agentctx/{subdir}/ to repo .claude/{subdir}/.
+// This overwrites repo-side content on every sync (vault is canonical).
+// For "commands", only .md files are deployed. For other subdirs, all
+// non-sidecar files and directories are deployed.
+func deploySubdirToRepo(repoPath, agentctxPath, subdir string) []FileAction {
+	vaultSubDir := filepath.Join(agentctxPath, subdir)
+	entries, err := os.ReadDir(vaultSubDir)
 	if err != nil {
 		return nil
 	}
 
-	repoCmdsDir := filepath.Join(repoPath, ".claude", "commands")
-	if err := os.MkdirAll(repoCmdsDir, 0o755); err != nil {
+	repoSubDir := filepath.Join(repoPath, ".claude", subdir)
+	if err := os.MkdirAll(repoSubDir, 0o755); err != nil {
 		return nil
 	}
 
 	var actions []FileAction
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+		// Directory entries — recursively deploy (always overwrite, vault is canonical)
+		if e.IsDir() {
+			srcDir := filepath.Join(vaultSubDir, e.Name())
+			dstDir := filepath.Join(repoSubDir, e.Name())
+			changed := dirContentsChanged(srcDir, dstDir)
+			if !changed {
+				continue // skip — repo already has identical content
+			}
+			if _, err := copyDir(srcDir, dstDir, true); err != nil {
+				continue
+			}
+			actions = append(actions, FileAction{
+				Path:     ".claude/" + subdir + "/" + e.Name(),
+				Action:   "UPDATE",
+				Location: "repo",
+			})
+			continue
+		}
+		// For commands: only .md files. For other subdirs: all non-sidecar files.
+		if subdir == "commands" && !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
 		// Skip .pending and .pinned sidecars
 		if strings.HasSuffix(e.Name(), ".pending") || strings.HasSuffix(e.Name(), ".pinned") {
 			continue
 		}
-		srcPath := filepath.Join(vaultCmdsDir, e.Name())
-		dstPath := filepath.Join(repoCmdsDir, e.Name())
+		srcPath := filepath.Join(vaultSubDir, e.Name())
+		dstPath := filepath.Join(repoSubDir, e.Name())
 		data, err := os.ReadFile(srcPath)
 		if err != nil {
 			continue
@@ -545,7 +669,7 @@ func deployCommandsToRepo(repoPath, agentctxPath string) []FileAction {
 			continue
 		}
 		actions = append(actions, FileAction{
-			Path:     ".claude/commands/" + e.Name(),
+			Path:     ".claude/" + subdir + "/" + e.Name(),
 			Action:   "UPDATE",
 			Location: "repo",
 		})
@@ -580,10 +704,48 @@ func gitignoreRemove(giPath, entry string) (bool, error) {
 	return true, os.WriteFile(giPath, []byte(strings.Join(filtered, "\n")), 0o644)
 }
 
+// dirContentsChanged walks src and dst and returns true if any file differs
+// or is missing in dst. Used to avoid no-op UPDATE messages during deploy.
+func dirContentsChanged(src, dst string) bool {
+	changed := false
+	_ = filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			changed = true
+			return filepath.SkipAll
+		}
+		dstPath := filepath.Join(dst, rel)
+		srcData, err := os.ReadFile(path)
+		if err != nil {
+			changed = true
+			return filepath.SkipAll
+		}
+		dstData, err := os.ReadFile(dstPath)
+		if err != nil || !bytes.Equal(srcData, dstData) {
+			changed = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return changed
+}
+
 // migrate5to6 force-updates vault templates with improved restart instructions
 // (descriptive task slugs and auto-retirement).
 func migrate5to6(ctx MigrationContext) ([]FileAction, error) {
 	return forceUpdateVaultTemplates(ctx.VaultPath), nil
+}
+
+// migrate6to7 propagates skills from vault templates to all projects.
+func migrate6to7(ctx MigrationContext) ([]FileAction, error) {
+	actions := propagateSharedSubdir(ctx.VaultPath, ctx.AgentctxPath, "skills", false, true)
+	if ctx.RepoPath != "" {
+		actions = append(actions, deploySubdirToRepo(ctx.RepoPath, ctx.AgentctxPath, "skills")...)
+	}
+	return actions, nil
 }
 
 // forceUpdateVaultTemplates overwrites vault Templates/agentctx/ with embedded

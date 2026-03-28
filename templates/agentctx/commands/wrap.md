@@ -29,6 +29,8 @@ Specifically:
   and update the resume.md file inventory accordingly
 - Write commit.msg using the Write tool (it is a regular file at the repo root).
   commit.msg is NOT a repo-tracked file — do NOT stage it.
+- Ensure the commit.msg is complete and standalone in documenting all the code
+  changes, features added and bugs or warnings resolved. Don't be terse, be verbose.
 - Stage all modified and newly added project files (use git add with explicit
   file paths — never use git add -A or git add .). Only stage files that are
   inside the git repo.

@@ -1081,4 +1081,300 @@ func TestGitignoreRemove_NotPresent(t *testing.T) {
 	}
 }
 
+func TestPropagateSharedSubdir_SkillsDirectory(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "skills"), 0o755)
+
+	// Create a skill directory in templates
+	skillDir := filepath.Join(vault, "Templates", "agentctx", "skills", "my-skill")
+	os.MkdirAll(filepath.Join(skillDir, "references"), 0o755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# My Skill"), 0o644)
+	os.WriteFile(filepath.Join(skillDir, "references", "data.md"), []byte("# Data"), 0o644)
+
+	actions := propagateSharedSubdir(vault, agentctxDir, "skills", false, false)
+
+	// Should have CREATE action for the skill directory
+	found := false
+	for _, a := range actions {
+		if a.Path == "skills/my-skill" && a.Action == "CREATE" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected CREATE action for skills/my-skill, got: %v", actions)
+	}
+
+	// Verify files copied
+	data, err := os.ReadFile(filepath.Join(agentctxDir, "skills", "my-skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("SKILL.md not copied: %v", err)
+	}
+	if string(data) != "# My Skill" {
+		t.Errorf("SKILL.md content = %q", string(data))
+	}
+	data, err = os.ReadFile(filepath.Join(agentctxDir, "skills", "my-skill", "references", "data.md"))
+	if err != nil {
+		t.Fatalf("references/data.md not copied: %v", err)
+	}
+	if string(data) != "# Data" {
+		t.Errorf("references/data.md content = %q", string(data))
+	}
+}
+
+func TestPropagateSharedSubdir_SkillsExistingSkipped(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+
+	// Create existing skill in project
+	projSkillDir := filepath.Join(agentctxDir, "skills", "my-skill")
+	os.MkdirAll(projSkillDir, 0o755)
+	os.WriteFile(filepath.Join(projSkillDir, "SKILL.md"), []byte("# Custom"), 0o644)
+
+	// Create same skill in templates with different content
+	tmplSkillDir := filepath.Join(vault, "Templates", "agentctx", "skills", "my-skill")
+	os.MkdirAll(tmplSkillDir, 0o755)
+	os.WriteFile(filepath.Join(tmplSkillDir, "SKILL.md"), []byte("# Template"), 0o644)
+
+	actions := propagateSharedSubdir(vault, agentctxDir, "skills", false, false)
+
+	// No actions — existing directory is skipped
+	if len(actions) != 0 {
+		t.Errorf("expected 0 actions for existing skill, got %d: %v", len(actions), actions)
+	}
+
+	// Original content preserved
+	data, _ := os.ReadFile(filepath.Join(projSkillDir, "SKILL.md"))
+	if string(data) != "# Custom" {
+		t.Errorf("existing skill was overwritten: %q", string(data))
+	}
+}
+
+func TestPropagateSharedSubdir_SkillsPinned(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+
+	// Create existing skill with .pinned marker
+	projSkillDir := filepath.Join(agentctxDir, "skills", "my-skill")
+	os.MkdirAll(projSkillDir, 0o755)
+	os.WriteFile(filepath.Join(projSkillDir, "SKILL.md"), []byte("# Pinned"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "skills", "my-skill.pinned"), []byte("pinned\n"), 0o644)
+
+	// Create template
+	tmplSkillDir := filepath.Join(vault, "Templates", "agentctx", "skills", "my-skill")
+	os.MkdirAll(tmplSkillDir, 0o755)
+	os.WriteFile(filepath.Join(tmplSkillDir, "SKILL.md"), []byte("# Template"), 0o644)
+
+	// Even with forceUpdate, pinned should be skipped
+	actions := propagateSharedSubdir(vault, agentctxDir, "skills", false, true)
+
+	if len(actions) != 0 {
+		t.Errorf("expected 0 actions for pinned skill, got %d: %v", len(actions), actions)
+	}
+
+	// Original preserved
+	data, _ := os.ReadFile(filepath.Join(projSkillDir, "SKILL.md"))
+	if string(data) != "# Pinned" {
+		t.Errorf("pinned skill was overwritten: %q", string(data))
+	}
+}
+
+func TestPropagateSharedSubdir_SkillsForceUpdate(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+
+	// Create existing skill
+	projSkillDir := filepath.Join(agentctxDir, "skills", "my-skill")
+	os.MkdirAll(projSkillDir, 0o755)
+	os.WriteFile(filepath.Join(projSkillDir, "SKILL.md"), []byte("# Old"), 0o644)
+
+	// Create template with different content
+	tmplSkillDir := filepath.Join(vault, "Templates", "agentctx", "skills", "my-skill")
+	os.MkdirAll(tmplSkillDir, 0o755)
+	os.WriteFile(filepath.Join(tmplSkillDir, "SKILL.md"), []byte("# New"), 0o644)
+
+	actions := propagateSharedSubdir(vault, agentctxDir, "skills", false, true)
+
+	// Should have UPDATE action
+	found := false
+	for _, a := range actions {
+		if a.Path == "skills/my-skill" && a.Action == "UPDATE" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected UPDATE action for skills/my-skill, got: %v", actions)
+	}
+
+	// Content should be overwritten
+	data, _ := os.ReadFile(filepath.Join(projSkillDir, "SKILL.md"))
+	if string(data) != "# New" {
+		t.Errorf("skill not overwritten, got %q", string(data))
+	}
+}
+
+func TestPropagateSharedSubdir_SkillFile(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "skills"), 0o755)
+
+	// Create a .skill file in templates (non-.md file)
+	tmplSkills := filepath.Join(vault, "Templates", "agentctx", "skills")
+	os.MkdirAll(tmplSkills, 0o755)
+	os.WriteFile(filepath.Join(tmplSkills, "analyst.skill"), []byte("skill-data"), 0o644)
+
+	actions := propagateSharedSubdir(vault, agentctxDir, "skills", false, false)
+
+	// .skill file should be propagated (not filtered by .md)
+	found := false
+	for _, a := range actions {
+		if a.Path == "skills/analyst.skill" && a.Action == "CREATE" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected CREATE action for skills/analyst.skill, got: %v", actions)
+	}
+
+	data, err := os.ReadFile(filepath.Join(agentctxDir, "skills", "analyst.skill"))
+	if err != nil {
+		t.Fatalf("analyst.skill not copied: %v", err)
+	}
+	if string(data) != "skill-data" {
+		t.Errorf("analyst.skill content = %q", string(data))
+	}
+}
+
+func TestDeploySubdirToRepo_Skills(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+
+	// Set up vault skills
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	skillDir := filepath.Join(agentctxDir, "skills", "my-skill")
+	os.MkdirAll(skillDir, 0o755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Skill"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "skills", "analyst.skill"), []byte("skill-data"), 0o644)
+
+	// Set up repo skills dir
+	repoSkills := filepath.Join(cwd, ".claude", "skills")
+	os.MkdirAll(repoSkills, 0o755)
+
+	actions := deploySubdirToRepo(cwd, agentctxDir, "skills")
+
+	if len(actions) == 0 {
+		t.Fatal("expected actions from deploy")
+	}
+
+	// Verify skill directory deployed
+	data, err := os.ReadFile(filepath.Join(repoSkills, "my-skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("SKILL.md not deployed: %v", err)
+	}
+	if string(data) != "# Skill" {
+		t.Errorf("SKILL.md content = %q", string(data))
+	}
+
+	// Verify .skill file deployed
+	data, err = os.ReadFile(filepath.Join(repoSkills, "analyst.skill"))
+	if err != nil {
+		t.Fatalf("analyst.skill not deployed: %v", err)
+	}
+	if string(data) != "skill-data" {
+		t.Errorf("analyst.skill content = %q", string(data))
+	}
+}
+
+func TestMigrate6to7(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+
+	// Create project agentctx
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "skills"), 0o755)
+
+	// Create skill template
+	tmplSkillDir := filepath.Join(vault, "Templates", "agentctx", "skills", "test-skill")
+	os.MkdirAll(tmplSkillDir, 0o755)
+	os.WriteFile(filepath.Join(tmplSkillDir, "SKILL.md"), []byte("# Test Skill"), 0o644)
+
+	// Set up repo .claude/skills
+	os.MkdirAll(filepath.Join(cwd, ".claude", "skills"), 0o755)
+
+	ctx := MigrationContext{
+		AgentctxPath: agentctxDir,
+		RepoPath:     cwd,
+		Project:      "test",
+		VaultPath:    vault,
+	}
+	actions, err := migrate6to7(ctx)
+	if err != nil {
+		t.Fatalf("migrate6to7: %v", err)
+	}
+
+	if len(actions) == 0 {
+		t.Fatal("expected actions from migrate6to7")
+	}
+
+	// Verify skill propagated to vault project
+	data, err := os.ReadFile(filepath.Join(agentctxDir, "skills", "test-skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("skill not propagated to vault: %v", err)
+	}
+	if string(data) != "# Test Skill" {
+		t.Errorf("vault skill content = %q", string(data))
+	}
+
+	// Verify skill deployed to repo
+	data, err = os.ReadFile(filepath.Join(cwd, ".claude", "skills", "test-skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("skill not deployed to repo: %v", err)
+	}
+	if string(data) != "# Test Skill" {
+		t.Errorf("repo skill content = %q", string(data))
+	}
+}
+
+func TestInit_DeploysSkillDirectories(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	// Pre-create skill in vault Templates (as if user had added it)
+	tmplSkillDir := filepath.Join(vault, "Templates", "agentctx", "skills", "test-skill")
+	os.MkdirAll(tmplSkillDir, 0o755)
+	os.WriteFile(filepath.Join(tmplSkillDir, "SKILL.md"), []byte("# Test"), 0o644)
+
+	// Also add a .skill file
+	tmplSkills := filepath.Join(vault, "Templates", "agentctx", "skills")
+	os.WriteFile(filepath.Join(tmplSkills, "test.skill"), []byte("packed"), 0o644)
+
+	// Create .vibe-vault.toml so resolveProject works
+	os.WriteFile(filepath.Join(cwd, ".vibe-vault.toml"), []byte("project = \"skilltest\"\n"), 0o644)
+
+	// Init the project
+	_, err := Init(cfg, cwd, Opts{Project: "skilltest"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Verify skill directory deployed to repo .claude/skills/
+	data, err := os.ReadFile(filepath.Join(cwd, ".claude", "skills", "test-skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("skill dir not deployed to repo: %v", err)
+	}
+	if string(data) != "# Test" {
+		t.Errorf("skill content = %q", string(data))
+	}
+
+	// Verify .skill file deployed
+	data, err = os.ReadFile(filepath.Join(cwd, ".claude", "skills", "test.skill"))
+	if err != nil {
+		t.Fatalf(".skill file not deployed to repo: %v", err)
+	}
+	if string(data) != "packed" {
+		t.Errorf(".skill content = %q", string(data))
+	}
+}
+
 // testConfig is defined in context_test.go
