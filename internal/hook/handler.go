@@ -12,10 +12,13 @@ import (
 	"os"
 	"time"
 
+	"path/filepath"
+
 	"github.com/johns/vibe-vault/internal/config"
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/llm"
 	"github.com/johns/vibe-vault/internal/session"
+	"github.com/johns/vibe-vault/internal/synthesis"
 )
 
 // Input is the JSON object Claude Code sends to hooks via stdin.
@@ -185,6 +188,40 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 
 	if result.FrictionAlert != "" {
 		fmt.Fprintf(os.Stderr, "vv: %s\n", result.FrictionAlert)
+	}
+
+	// Session synthesis (judgment layer) — runs before context refresh
+	if cfg.Synthesis.Enabled {
+		if provider == nil {
+			fmt.Fprintf(os.Stderr, "vv: synthesis skipped — no LLM provider configured\n")
+		} else {
+			synthIdx, synthIdxErr := index.Load(cfg.StateDir())
+			if synthIdxErr != nil {
+				fmt.Fprintf(os.Stderr, "vv: synthesis skipped — index load failed: %v\n", synthIdxErr)
+			} else {
+				synthTimeout := time.Duration(cfg.Synthesis.TimeoutSeconds) * time.Second
+				if synthTimeout == 0 {
+					synthTimeout = 15 * time.Second
+				}
+				synthCtx, synthCancel := context.WithTimeout(context.Background(), synthTimeout)
+				defer synthCancel()
+
+				notePath := filepath.Join(cfg.VaultPath, result.NotePath)
+				report, synthErr := synthesis.Run(synthCtx, synthesis.RunOpts{
+					NotePath: notePath,
+					CWD:      input.CWD,
+					Project:  result.Project,
+					Provider: provider,
+					Index:    synthIdx,
+				}, cfg)
+				if synthErr != nil {
+					fmt.Fprintf(os.Stderr, "vv: synthesis warning: %v\n", synthErr)
+				} else if report != nil {
+					fmt.Fprintf(os.Stderr, "vv: synthesis — %d learnings, %d stale flagged, %d tasks updated\n",
+						report.LearningsAdded, report.StalesFlagged, report.TasksUpdated)
+				}
+			}
+		}
 	}
 
 	// Auto-refresh context documents

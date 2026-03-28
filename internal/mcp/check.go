@@ -80,8 +80,8 @@ func RunChecks(srv *Server) []CheckResult {
 	}
 
 	var initResp Response
-	if err := json.Unmarshal(initRaw, &initResp); err != nil {
-		fail("initialize response", fmt.Sprintf("invalid JSON: %v", err))
+	if unmarshalErr := json.Unmarshal(initRaw, &initResp); unmarshalErr != nil {
+		fail("initialize response", fmt.Sprintf("invalid JSON: %v", unmarshalErr))
 		clientOut.Close()
 		<-done
 		return results
@@ -89,7 +89,7 @@ func RunChecks(srv *Server) []CheckResult {
 
 	resultData, _ := json.Marshal(initResp.Result)
 	var initResult InitializeResult
-	json.Unmarshal(resultData, &initResult)
+	_ = json.Unmarshal(resultData, &initResult)
 
 	if initResult.ProtocolVersion != "" && initResult.ServerInfo.Name != "" {
 		pass("initialize has protocolVersion and serverInfo")
@@ -116,8 +116,8 @@ func RunChecks(srv *Server) []CheckResult {
 	// --- Check 4: notifications/initialized produces no response ---
 	// Send notification, then send a tools/list to confirm we can still read.
 	// If the notification generated a response, we'd get an extra line.
-	if err := sendNotification(`{"jsonrpc":"2.0","method":"notifications/initialized"}`); err != nil {
-		fail("notification produces no response", err.Error())
+	if notifErr := sendNotification(`{"jsonrpc":"2.0","method":"notifications/initialized"}`); notifErr != nil {
+		fail("notification produces no response", notifErr.Error())
 	} else {
 		pass("notification produces no response")
 	}
@@ -137,10 +137,10 @@ func RunChecks(srv *Server) []CheckResult {
 	}
 
 	var toolsResp Response
-	json.Unmarshal(toolsRaw, &toolsResp)
+	_ = json.Unmarshal(toolsRaw, &toolsResp)
 	toolsData, _ := json.Marshal(toolsResp.Result)
 	var toolsResult ToolsListResult
-	json.Unmarshal(toolsData, &toolsResult)
+	_ = json.Unmarshal(toolsData, &toolsResult)
 
 	toolCount := len(toolsResult.Tools)
 	if toolCount > 0 {
@@ -154,7 +154,7 @@ func RunChecks(srv *Server) []CheckResult {
 	var schemaDetail string
 	for _, tool := range toolsResult.Tools {
 		var schema map[string]any
-		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+		if schemaErr := json.Unmarshal(tool.InputSchema, &schema); schemaErr != nil {
 			schemaOK = false
 			schemaDetail = fmt.Sprintf("tool %q: invalid inputSchema JSON", tool.Name)
 			break
@@ -187,10 +187,10 @@ func RunChecks(srv *Server) []CheckResult {
 		}
 
 		var promptsResp Response
-		json.Unmarshal(promptsRaw, &promptsResp)
+		_ = json.Unmarshal(promptsRaw, &promptsResp)
 		promptsData, _ := json.Marshal(promptsResp.Result)
 		var promptsResult PromptsListResult
-		json.Unmarshal(promptsData, &promptsResult)
+		_ = json.Unmarshal(promptsData, &promptsResult)
 		promptCount := len(promptsResult.Prompts)
 		pass(fmt.Sprintf("prompts/list returns %d prompts", promptCount))
 	}

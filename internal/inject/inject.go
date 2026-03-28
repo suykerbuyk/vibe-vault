@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/johns/vibe-vault/internal/index"
+	"github.com/johns/vibe-vault/internal/mdutil"
 	"github.com/johns/vibe-vault/internal/trends"
 )
 
@@ -320,60 +321,19 @@ func frictionFromTrends(r trends.Result) *FrictionSummary {
 
 // isResolvedByDecisions checks if a thread has significant word overlap with any decision.
 func isResolvedByDecisions(thread string, decisions []string) bool {
-	threadWords := significantWords(thread)
+	threadWords := mdutil.SignificantWords(thread)
 	if len(threadWords) == 0 {
 		return false
 	}
 	for _, d := range decisions {
-		decisionWords := significantWords(d)
-		overlap := wordOverlap(threadWords, decisionWords)
-		if overlap >= 2 {
+		decisionWords := mdutil.SignificantWords(d)
+		if mdutil.Overlap(threadWords, decisionWords) >= 2 {
 			return true
 		}
 	}
 	return false
 }
 
-// significantWords extracts words ≥4 chars, excluding stop words.
-func significantWords(s string) []string {
-	words := strings.Fields(strings.ToLower(s))
-	var result []string
-	for _, w := range words {
-		w = strings.Trim(w, ".,;:!?\"'`()[]{}—-")
-		if len(w) >= 4 && !stopWords[w] {
-			result = append(result, w)
-		}
-	}
-	return result
-}
-
-var stopWords = map[string]bool{
-	"that": true, "this": true, "with": true, "from": true,
-	"have": true, "been": true, "were": true, "will": true,
-	"would": true, "could": true, "should": true, "what": true,
-	"when": true, "where": true, "which": true, "their": true,
-	"there": true, "these": true, "those": true, "them": true,
-	"then": true, "than": true, "some": true, "also": true,
-	"into": true, "each": true, "make": true, "like": true,
-	"just": true, "over": true, "such": true, "only": true,
-	"very": true, "more": true, "most": true, "other": true,
-	"about": true, "after": true, "before": true, "being": true,
-	"between": true, "does": true, "doing": true, "done": true,
-}
-
-func wordOverlap(a, b []string) int {
-	set := make(map[string]bool, len(a))
-	for _, w := range a {
-		set[w] = true
-	}
-	count := 0
-	for _, w := range b {
-		if set[w] {
-			count++
-		}
-	}
-	return count
-}
 
 // filterResult returns a copy of Result with only the requested sections populated.
 func filterResult(r Result, sections []string) Result {

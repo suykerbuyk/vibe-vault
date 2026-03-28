@@ -5,8 +5,8 @@ package friction
 
 import (
 	"fmt"
-	"strings"
 
+	"github.com/johns/vibe-vault/internal/mdutil"
 	"github.com/johns/vibe-vault/internal/narrative"
 	"github.com/johns/vibe-vault/internal/prose"
 	"github.com/johns/vibe-vault/internal/transcript"
@@ -15,7 +15,6 @@ import (
 // Analysis thresholds for signal detection and summary generation.
 const (
 	retryThreshold         = 3      // file modifications before counting as retry
-	wordOverlapMinLen      = 4      // minimum word length for significance
 	summaryTokensPerFile   = 20000  // tokens/file threshold for summary mention
 	summaryFileRetryPct    = 0.2    // file retry density threshold for summary mention
 	summaryErrorCyclePct   = 0.1    // error cycle density threshold for summary mention
@@ -111,9 +110,9 @@ func Analyze(
 // hasRecurringThreads checks if any prior threads appear again using Jaccard similarity.
 func hasRecurringThreads(prior, current []string) bool {
 	for _, p := range prior {
-		pWords := significantWords(p)
+		pWords := mdutil.SignificantWords(p)
 		for _, c := range current {
-			cWords := significantWords(c)
+			cWords := mdutil.SignificantWords(c)
 			if jaccardSimilarity(pWords, cWords) >= 0.5 {
 				return true
 			}
@@ -148,35 +147,6 @@ func jaccardSimilarity(a, b []string) float64 {
 		return 0
 	}
 	return float64(intersection) / float64(union)
-}
-
-// stopWords are common words filtered from thread comparison to reduce false positives.
-var stopWords = map[string]bool{
-	"that": true, "this": true, "with": true, "from": true,
-	"have": true, "been": true, "were": true, "will": true,
-	"would": true, "could": true, "should": true, "what": true,
-	"when": true, "where": true, "which": true, "their": true,
-	"there": true, "these": true, "those": true, "them": true,
-	"then": true, "than": true, "some": true, "also": true,
-	"into": true, "each": true, "make": true, "like": true,
-	"just": true, "over": true, "such": true, "only": true,
-	"very": true, "more": true, "most": true, "other": true,
-	"about": true, "after": true, "before": true, "being": true,
-	"between": true, "does": true, "doing": true, "done": true,
-}
-
-// significantWords extracts lowercase words >= 4 chars, with stop-word filtering
-// and punctuation trimming.
-func significantWords(s string) []string {
-	words := strings.Fields(strings.ToLower(s))
-	var result []string
-	for _, w := range words {
-		w = strings.Trim(w, ".,;:!?\"'`()[]{}—-")
-		if len(w) >= wordOverlapMinLen && !stopWords[w] {
-			result = append(result, w)
-		}
-	}
-	return result
 }
 
 // buildSummary generates human-readable signal descriptions.

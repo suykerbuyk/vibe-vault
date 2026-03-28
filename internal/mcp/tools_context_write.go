@@ -15,42 +15,8 @@ import (
 
 	"github.com/johns/vibe-vault/internal/config"
 	"github.com/johns/vibe-vault/internal/index"
+	"github.com/johns/vibe-vault/internal/mdutil"
 )
-
-// atomicWriteFile writes data to path via a temp file + rename for crash safety.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create directory: %w", err)
-	}
-	tmp, err := os.CreateTemp(dir, ".vv-tmp-*")
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer func() {
-		// Clean up on failure
-		if tmpPath != "" {
-			os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp file: %w", err)
-	}
-	if err := os.Chmod(tmpPath, perm); err != nil {
-		return fmt.Errorf("chmod temp file: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("rename temp file: %w", err)
-	}
-	tmpPath = "" // prevent cleanup
-	return nil
-}
 
 // NewUpdateResumeTool creates the vv_update_resume tool.
 func NewUpdateResumeTool(cfg config.Config) Tool {
@@ -113,56 +79,18 @@ func NewUpdateResumeTool(cfg config.Config) Tool {
 				return "", fmt.Errorf("read resume: %w", err)
 			}
 
-			updated, err := replaceSectionBody(string(data), args.Section, args.Content)
+			updated, err := mdutil.ReplaceSectionBody(string(data), args.Section, args.Content)
 			if err != nil {
 				return "", err
 			}
 
-			if err := atomicWriteFile(absPath, []byte(updated), 0o644); err != nil {
+			if err := mdutil.AtomicWriteFile(absPath, []byte(updated), 0o644); err != nil {
 				return "", fmt.Errorf("write resume: %w", err)
 			}
 
 			return fmt.Sprintf("Updated section %q in resume.md for project %q", args.Section, project), nil
 		},
 	}
-}
-
-// replaceSectionBody finds ## {heading} and replaces body up to next ## or EOF.
-func replaceSectionBody(doc, heading, newBody string) (string, error) {
-	lines := strings.Split(doc, "\n")
-	target := "## " + heading
-	startIdx := -1
-
-	for i, line := range lines {
-		if strings.TrimSpace(line) == target {
-			startIdx = i
-			break
-		}
-	}
-	if startIdx == -1 {
-		return "", fmt.Errorf("section %q not found in resume.md", heading)
-	}
-
-	// Find the end of this section (next ## heading or EOF)
-	endIdx := len(lines)
-	for i := startIdx + 1; i < len(lines); i++ {
-		if strings.HasPrefix(strings.TrimSpace(lines[i]), "## ") {
-			endIdx = i
-			break
-		}
-	}
-
-	// Build result: heading line + blank line + new content + blank line
-	var result []string
-	result = append(result, lines[:startIdx+1]...)
-	result = append(result, "")
-	// Trim trailing newlines from content, then add it
-	body := strings.TrimRight(newBody, "\n")
-	result = append(result, body)
-	result = append(result, "")
-	result = append(result, lines[endIdx:]...)
-
-	return strings.Join(result, "\n"), nil
 }
 
 var iterationRegexp = regexp.MustCompile(`^### Iteration (\d+)`)
@@ -300,7 +228,7 @@ func NewAppendIterationTool(cfg config.Config) Tool {
 			}
 			content += block
 
-			if err := atomicWriteFile(absPath, []byte(content), 0o644); err != nil {
+			if err := mdutil.AtomicWriteFile(absPath, []byte(content), 0o644); err != nil {
 				return "", fmt.Errorf("write iterations: %w", err)
 			}
 
@@ -378,7 +306,7 @@ func NewManageTaskTool(cfg config.Config) Tool {
 				if _, err := os.Stat(taskPath); err == nil {
 					return "", fmt.Errorf("task %q already exists", args.Task)
 				}
-				if err := atomicWriteFile(taskPath, []byte(args.Content), 0o644); err != nil {
+				if err := mdutil.AtomicWriteFile(taskPath, []byte(args.Content), 0o644); err != nil {
 					return "", fmt.Errorf("create task: %w", err)
 				}
 				return fmt.Sprintf("Created task %q in project %q", args.Task, project), nil
@@ -395,7 +323,7 @@ func NewManageTaskTool(cfg config.Config) Tool {
 					return "", fmt.Errorf("read task: %w", err)
 				}
 				updated := replaceStatus(string(data), args.Status)
-				if err := atomicWriteFile(taskPath, []byte(updated), 0o644); err != nil {
+				if err := mdutil.AtomicWriteFile(taskPath, []byte(updated), 0o644); err != nil {
 					return "", fmt.Errorf("update task: %w", err)
 				}
 				return fmt.Sprintf("Updated status of task %q to %q in project %q", args.Task, args.Status, project), nil
@@ -413,7 +341,7 @@ func NewManageTaskTool(cfg config.Config) Tool {
 				// Write to done/ directory
 				doneDir := filepath.Join(tasksDir, "done")
 				donePath := filepath.Join(doneDir, args.Task+".md")
-				if err := atomicWriteFile(donePath, []byte(updated), 0o644); err != nil {
+				if err := mdutil.AtomicWriteFile(donePath, []byte(updated), 0o644); err != nil {
 					return "", fmt.Errorf("write retired task: %w", err)
 				}
 				// Remove original
@@ -435,7 +363,7 @@ func NewManageTaskTool(cfg config.Config) Tool {
 				// Write to cancelled/ directory
 				cancelledDir := filepath.Join(tasksDir, "cancelled")
 				cancelledPath := filepath.Join(cancelledDir, args.Task+".md")
-				if err := atomicWriteFile(cancelledPath, []byte(updated), 0o644); err != nil {
+				if err := mdutil.AtomicWriteFile(cancelledPath, []byte(updated), 0o644); err != nil {
 					return "", fmt.Errorf("write cancelled task: %w", err)
 				}
 				// Remove original

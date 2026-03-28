@@ -227,6 +227,15 @@ Claude Code session ends
          ▼
    Projects/{project}/sessions/YYYY-MM-DD-NN.md
    .vibe-vault/session-index.json
+         │
+         ▼
+┌──────────────────┐     Propagate learnings, flag stale entries,
+│    Synthesis     │     update resume, retire completed tasks
+└────────┬─────────┘     (enabled by default, requires LLM provider)
+         │
+         ▼
+   Projects/{project}/knowledge.md (learnings appended)
+   Projects/{project}/agentctx/resume.md (state updated)
 ```
 
 **Transcript parsing** uses a streaming JSONL parser with a 10MB line buffer.
@@ -255,6 +264,14 @@ and assign same-day iteration numbers (`-01`, `-02`, etc.).
 previous one. SessionEnd (including `/clear`) finalizes with full enrichment and
 `status: completed`. PreCompact checkpoints preserve full context before
 compaction summarizes it away.
+
+**Session synthesis** runs after capture as an end-of-session judgment layer.
+It gathers the session note, git diff, current knowledge and resume, recent
+history, and active tasks — then asks the LLM to identify novel learnings,
+flag stale entries, update the project resume, and retire completed tasks.
+Learnings are deduplicated against existing knowledge using significant-word
+overlap. Synthesis is enabled by default but inert without an LLM provider;
+it piggybacks on the enrichment configuration.
 
 **Cross-session linking** scores related sessions across four signals — shared
 files, thread-to-resolution matching, same branch, and same activity tag — using
@@ -433,6 +450,11 @@ base_url = "https://api.x.ai/v1"
 # Transcript archival
 [archive]
 compress = true
+
+# Session synthesis (enabled by default, requires enrichment LLM)
+[synthesis]
+enabled = true
+timeout_seconds = 15
 ```
 
 **No config file is required.** Without one, `vv` uses sensible defaults:
@@ -679,6 +701,7 @@ rather than requiring explicit knowledge transfer mechanisms.
 | 8 | Analytics & trends — dashboards, metric trends, `vv trends` | Complete |
 | 9 | Portable AI memory — vault-resident context, per-project knowledge templates | Complete |
 | 10 | Cross-project intelligence — unified vault queries, cancelled plan preservation, effectiveness analysis | Complete |
+| 11 | Session synthesis — end-of-session judgment layer, knowledge propagation, stale detection, shared mdutil | Complete |
 
 ### Context as Code Connections
 
@@ -721,7 +744,7 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 ### Test Suite
 
-**1127 tests** across 31 test packages + **1 integration test** with 22
+**1184 tests** across 33 test packages + **1 integration test** with 22
 subtests. The integration test exercises the full pipeline:
 `init` → `process` → `index` → `stats` →
 `backfill` → `archive` → `checkpoint lifecycle` → `friction` →

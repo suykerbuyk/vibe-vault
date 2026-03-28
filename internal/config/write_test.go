@@ -43,6 +43,9 @@ func TestWriteDefault_CreatesConfig(t *testing.T) {
 	if !strings.Contains(content, "[archive]") {
 		t.Error("config missing [archive] section")
 	}
+	if !strings.Contains(content, "[synthesis]") {
+		t.Error("config missing [synthesis] section")
+	}
 }
 
 func TestWriteDefault_UpdatesExistingVaultPath(t *testing.T) {

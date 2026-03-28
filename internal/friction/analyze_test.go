@@ -3,6 +3,7 @@ package friction
 import (
 	"testing"
 
+	"github.com/johns/vibe-vault/internal/mdutil"
 	"github.com/johns/vibe-vault/internal/narrative"
 	"github.com/johns/vibe-vault/internal/prose"
 	"github.com/johns/vibe-vault/internal/transcript"
@@ -191,7 +192,7 @@ func TestHasRecurringThreads_NoMatch(t *testing.T) {
 }
 
 func TestSignificantWords(t *testing.T) {
-	words := significantWords("the authentication system for users")
+	words := mdutil.SignificantWords("the authentication system for users")
 	// "the" < 4 chars, "for" < 4 chars
 	// "system" is not a stop word, so should get: "authentication", "system", "users"
 	if len(words) != 3 {
@@ -200,7 +201,7 @@ func TestSignificantWords(t *testing.T) {
 }
 
 func TestSignificantWords_StopWordFiltering(t *testing.T) {
-	words := significantWords("that which should have been done before")
+	words := mdutil.SignificantWords("that which should have been done before")
 	// All words are either < 4 chars or stop words: "that", "which", "should", "have", "been", "done", "before"
 	if len(words) != 0 {
 		t.Errorf("expected 0 words (all stop words), got %d: %v", len(words), words)
@@ -208,7 +209,7 @@ func TestSignificantWords_StopWordFiltering(t *testing.T) {
 }
 
 func TestSignificantWords_PunctuationTrimming(t *testing.T) {
-	words := significantWords("authentication, system! error.")
+	words := mdutil.SignificantWords("authentication, system! error.")
 	// Should strip punctuation: "authentication", "system", "error"
 	if len(words) != 3 {
 		t.Errorf("expected 3 words, got %d: %v", len(words), words)

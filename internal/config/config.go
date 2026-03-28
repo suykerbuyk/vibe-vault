@@ -28,6 +28,28 @@ type Config struct {
 	History    HistoryConfig    `toml:"history"`
 	MCP        MCPConfig        `toml:"mcp"`
 	Zed        ZedConfig        `toml:"zed"`
+	Synthesis  SynthesisConfig  `toml:"synthesis"`
+}
+
+// SynthesisConfig controls the end-of-session synthesis agent.
+type SynthesisConfig struct {
+	Enabled        bool `toml:"enabled"`
+	TimeoutSeconds int  `toml:"timeout_seconds"`
+}
+
+// DefaultAPIKeyEnv returns the conventional environment variable name for a
+// provider's API key. Used as a fallback when api_key_env is not set in config.
+func DefaultAPIKeyEnv(provider string) string {
+	switch provider {
+	case "openai", "":
+		return "OPENAI_API_KEY"
+	case "anthropic":
+		return "ANTHROPIC_API_KEY"
+	case "google":
+		return "GOOGLE_API_KEY"
+	default:
+		return ""
+	}
 }
 
 // ZedConfig controls Zed integration behavior.
@@ -132,6 +154,10 @@ func DefaultConfig() Config {
 		Zed: ZedConfig{
 			DebounceMinutes: 5,
 			AutoCapture:     true,
+		},
+		Synthesis: SynthesisConfig{
+			Enabled:        true,
+			TimeoutSeconds: 15,
 		},
 	}
 }
@@ -279,6 +305,12 @@ func (c Config) Overlay(projectConfigPath string) Config {
 	}
 	if md.IsDefined("zed", "auto_capture") {
 		c.Zed.AutoCapture = overlay.Zed.AutoCapture
+	}
+	if md.IsDefined("synthesis", "enabled") {
+		c.Synthesis.Enabled = overlay.Synthesis.Enabled
+	}
+	if md.IsDefined("synthesis", "timeout_seconds") {
+		c.Synthesis.TimeoutSeconds = overlay.Synthesis.TimeoutSeconds
 	}
 
 	return c

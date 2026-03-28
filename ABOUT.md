@@ -35,7 +35,9 @@ So I kept building:
 
 **AI Behavioral Observability** — Every transcript logs tool usage, token consumption, and correction patterns. Aggregated across sessions, `vv friction` and `vv trends` reveal friction points, prompt gaps, and workflow bottlenecks. This is the observability layer Knox describes — built on data the tool already captures.
 
-The result: 428 tests, 44 iterations, 10 completed development phases, all built through the same AI pair-programming workflow the tool is designed to support.
+**Session Synthesis** — After every session, an LLM judgment layer analyzes what happened against the project's existing knowledge base. It propagates novel learnings to `knowledge.md`, flags stale entries, updates the project resume, and retires completed tasks — automatically closing the loop between session work and persistent project context.
+
+The result: 1184 tests, 45 iterations, 11 completed development phases, all built through the same AI pair-programming workflow the tool is designed to support.
 
 What I've learned through this journey:
 

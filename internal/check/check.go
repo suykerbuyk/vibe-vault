@@ -213,7 +213,7 @@ func CheckEnrichment(ecfg config.EnrichmentConfig) Result {
 
 	keyEnv := ecfg.APIKeyEnv
 	if keyEnv == "" {
-		keyEnv = "XAI_API_KEY"
+		keyEnv = config.DefaultAPIKeyEnv(provider)
 	}
 
 	if os.Getenv(keyEnv) != "" {
@@ -227,6 +227,48 @@ func CheckEnrichment(ecfg config.EnrichmentConfig) Result {
 		Name:   "enrichment",
 		Status: Fail,
 		Detail: fmt.Sprintf("enabled but %s not set", keyEnv),
+	}
+}
+
+// CheckSynthesis checks whether the synthesis agent is configured and has
+// access to an LLM provider (which comes from the enrichment config).
+func CheckSynthesis(scfg config.SynthesisConfig, ecfg config.EnrichmentConfig) Result {
+	if !scfg.Enabled {
+		return Result{
+			Name:   "synthesis",
+			Status: Warn,
+			Detail: "disabled (enable for end-of-session knowledge propagation)",
+		}
+	}
+
+	if !ecfg.Enabled {
+		return Result{
+			Name:   "synthesis",
+			Status: Warn,
+			Detail: "enabled but no LLM provider — configure [enrichment] with API key",
+		}
+	}
+
+	keyEnv := ecfg.APIKeyEnv
+	if keyEnv == "" {
+		keyEnv = config.DefaultAPIKeyEnv(ecfg.Provider)
+	}
+	if keyEnv == "" || os.Getenv(keyEnv) == "" {
+		return Result{
+			Name:   "synthesis",
+			Status: Warn,
+			Detail: "enabled but no LLM provider — configure [enrichment] with API key",
+		}
+	}
+
+	provider := ecfg.Provider
+	if provider == "" {
+		provider = "openai"
+	}
+	return Result{
+		Name:   "synthesis",
+		Status: Pass,
+		Detail: fmt.Sprintf("enabled (%s/%s)", provider, ecfg.Model),
 	}
 }
 
@@ -396,6 +438,7 @@ func Run(cfg config.Config) Report {
 	results = append(results, CheckIndex(cfg.StateDir()))
 	results = append(results, CheckDomains(cfg.Domains)...)
 	results = append(results, CheckEnrichment(cfg.Enrichment))
+	results = append(results, CheckSynthesis(cfg.Synthesis, cfg.Enrichment))
 	results = append(results, CheckHook())
 	results = append(results, CheckMCP())
 

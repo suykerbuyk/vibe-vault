@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/johns/vibe-vault/internal/index"
+	"github.com/johns/vibe-vault/internal/mdutil"
 	"github.com/johns/vibe-vault/internal/trends"
 )
 
@@ -297,7 +298,7 @@ func TestOpenThreadsResolution(t *testing.T) {
 }
 
 func TestSignificantWords(t *testing.T) {
-	words := significantWords("This should filter short and stop words from text!")
+	words := mdutil.SignificantWords("This should filter short and stop words from text!")
 
 	// "this" → stop word, "should" → stop word, "filter" → kept (6 chars),
 	// "short" → kept, "stop" → kept, "words" → kept, "from" → stop word,

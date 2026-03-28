@@ -335,3 +335,33 @@ Key architectural and design decisions in vibe-vault, with rationale.
     resolution — the design avoids formulaic retry loops in favor of
     collaborative human-machine debugging. vv owns the vault repo completely
     (full git privileges) but never touches project source code repos.
+
+44. **Session synthesis as end-of-session judgment layer:** After session
+    capture writes the note, `synthesis.Run()` gathers the session note, git
+    diff (8KB cap), current knowledge.md and resume.md (12KB each), recent
+    history (last 5 sessions), and active tasks — then asks the LLM to
+    identify novel learnings, stale entries, resume updates, and task
+    completions. The four-stage pipeline (gather → synthesize → apply) runs
+    before context refresh so `history.md` reflects updated knowledge.
+    `Apply()` uses significant-word overlap (≥2 matching 4+ char non-stop
+    words) to prevent duplicate learnings, a two-stage matcher (index-based +
+    fuzzy text fallback) for stale entry flagging, and heading-targeted
+    markdown editing for resume updates. Completed tasks are moved to `done/`.
+    Enabled by default but inert without an LLM provider — synthesis
+    piggybacks on the enrichment provider configuration. Disabled explicitly
+    via `[synthesis] enabled = false`. The LLM call uses temperature 0.3 with
+    JSON mode and a 15-second default timeout. Response validation filters
+    invalid section names, out-of-bounds indices, and unknown task actions
+    before any file modifications occur.
+
+45. **Shared markdown utilities via `internal/mdutil`:** Five functions
+    extracted from duplicate implementations across synthesis, MCP write
+    tools, and index context generation. `SignificantWords()` extracts 4+
+    char words with 50+ stop words filtered — used for duplicate detection
+    and fuzzy matching. `ReplaceSectionBody()` finds a `## Heading` and
+    replaces its body until the next heading or EOF. `AtomicWriteFile()`
+    writes via temp file + rename for crash safety. `Overlap()` and
+    `SetIntersection()` provide word-set operations. All MCP write tools
+    (`vv_update_resume`, `vv_append_iteration`, `vv_manage_task`) now use
+    `mdutil.AtomicWriteFile()` for safe writes and `mdutil.ReplaceSectionBody()`
+    for heading-targeted edits.

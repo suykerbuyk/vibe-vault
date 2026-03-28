@@ -2,7 +2,7 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**1127 tests** across 31 test packages + **1 integration test** (23 subtests). All passing.
+**1184 tests** across 33 test packages + **1 integration test** (23 subtests). All passing.
 
 Run unit tests: `make test` (or `go test -short ./...`)
 Run integration: `make integration` (or `go test -run TestIntegration -timeout 60s ./test/`)
@@ -67,6 +67,11 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 | `check/check_test.go` | 27 | `CheckVaultPath` (pass/fail), `CheckObsidian` (pass/warn), `CheckProjects` (pass/warn), `CheckStateDir` (pass/warn), `CheckIndex` (pass/warn/fail), `CheckDomains` (all exist/some missing/empty skipped), `CheckEnrichment` (disabled/enabled+key/enabled+no key), `checkHookFile` (pass/warn/fail), `Report.HasFailures` (true/false), `Run` integration, `Status.String`, `CheckAgentctxSchema` (current/outdated/no-agentctx) |
 | `templates/templates_test.go` | 8 | `New` (entry count=14), `DefaultContent`, `DefaultContentReturnsCopy`, `Has`, `Compare` (default/customized/missing), `Reset` (create/reset), `ResetAll` (14 actions), `ResetUnknown` |
 | `vaultsync/vaultsync_test.go` | 22 | `Classify` (15 subtests: history.md, session-index.json, session notes, templates, config, knowledge.md, resume.md, iterations.md, tasks, dashboards, README), `GetStatus_CleanRepo`, `GetStatus_DirtyRepo`, `CommitAndPush_NoRemote`, `CommitAndPush_NothingToCommit`, `Pull_NoRemote`, `EnsureRemote` |
+| `synthesis/actions_test.go` | 16 | `AppendLearnings_NewEntry`, `AppendLearnings_DuplicateSkipped`, `AppendLearnings_MissingSection`, `AppendLearnings_MissingFile_SeedsTemplate`, `AppendLearnings_EmptySection`, `FlagStaleEntries_IndexMatch`, `FlagStaleEntries_FuzzyFallback`, `FlagStaleEntries_NoMatch`, `FlagStaleEntries_AlreadyFlagged`, `UpdateResume_BothSections`, `UpdateResume_OneSection`, `UpdateResume_MissingFile`, `ApplyTaskUpdates_Complete`, `ApplyTaskUpdates_UpdateStatus`, `ApplyTaskUpdates_MissingTask`, `Apply_FullWorkflow` |
+| `synthesis/prompt_test.go` | 9 | `BuildPrompt_AllSections`, `BuildPrompt_EmptyKnowledge`, `BuildPrompt_EmptyResume`, `BuildPrompt_GitDiffTruncation`, `BuildPrompt_NoTasks`, `BuildPrompt_NoHistory`, `BuildPrompt_NumberedBullets`, `BuildPrompt_NoCommitsNoDiff`, `NumberBullets_ResetsBetweenSections` |
+| `synthesis/synthesize_test.go` | 9 | `Synthesize_FullResult`, `Synthesize_EmptyResult`, `Synthesize_NilProvider`, `Synthesize_LLMError`, `Synthesize_InvalidJSON`, `Synthesize_InvalidSection`, `Synthesize_InvalidTaskAction`, `Synthesize_InvalidStaleFile`, `Synthesize_NegativeIndex` |
+| `synthesis/run_test.go` | 5 | `Run_NilProvider`, `Run_Disabled`, `Run_EndToEnd`, `Run_LLMError`, `Run_EmptyResult` |
+| `mdutil/mdutil_test.go` | 18 | `SignificantWords_Basic`, `SignificantWords_StopWords`, `SignificantWords_PunctuationTrimming`, `SignificantWords_ShortWordsFiltered`, `IsStopWord`, `Overlap_Matching`, `Overlap_DuplicatesInB`, `Overlap_NoMatch`, `Overlap_Empty`, `SetIntersection_Basic`, `SetIntersection_NoDuplicates`, `SetIntersection_Empty`, `ReplaceSectionBody_Basic`, `ReplaceSectionBody_NotFound`, `ReplaceSectionBody_LastSection`, `ReplaceSectionBody_PreservesOtherSections`, `AtomicWriteFile_CreatesDir`, `AtomicWriteFile_OverwritesExisting` |
 
 ## Integration Test
 

@@ -81,6 +81,12 @@ base_url = "https://api.x.ai/v1"
 
 [archive]
 compress = true
+
+[synthesis]
+# Runs after each session when [enrichment] has an LLM provider configured.
+# Propagates learnings to knowledge.md, flags stale entries, updates resume.
+enabled = true
+timeout_seconds = 15
 `, portablePath)
 
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -168,6 +174,10 @@ func ProjectConfigTemplate() string {
 
 # [pricing]
 # enabled = false
+
+# [synthesis]
+# enabled = true
+# timeout_seconds = 15
 `
 }
 

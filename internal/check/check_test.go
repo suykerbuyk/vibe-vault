@@ -191,6 +191,65 @@ func TestCheckEnrichment_EnabledNoKey(t *testing.T) {
 	}
 }
 
+func TestCheckEnrichment_InferredKeyEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-123")
+	ecfg := config.EnrichmentConfig{Enabled: true, Provider: "anthropic"}
+	r := CheckEnrichment(ecfg)
+	if r.Status != Pass {
+		t.Errorf("expected Pass, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "anthropic") {
+		t.Errorf("expected 'anthropic' in detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckSynthesis_Disabled(t *testing.T) {
+	scfg := config.SynthesisConfig{Enabled: false}
+	ecfg := config.EnrichmentConfig{Enabled: true}
+	r := CheckSynthesis(scfg, ecfg)
+	if r.Status != Warn {
+		t.Errorf("expected Warn, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "disabled") {
+		t.Errorf("expected 'disabled' in detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckSynthesis_EnabledNoLLM(t *testing.T) {
+	scfg := config.SynthesisConfig{Enabled: true}
+	ecfg := config.EnrichmentConfig{Enabled: false}
+	r := CheckSynthesis(scfg, ecfg)
+	if r.Status != Warn {
+		t.Errorf("expected Warn, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "no LLM provider") {
+		t.Errorf("expected 'no LLM provider' in detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckSynthesis_EnabledLLMNoKey(t *testing.T) {
+	t.Setenv("TEST_SYNTH_KEY", "")
+	scfg := config.SynthesisConfig{Enabled: true}
+	ecfg := config.EnrichmentConfig{Enabled: true, APIKeyEnv: "TEST_SYNTH_KEY"}
+	r := CheckSynthesis(scfg, ecfg)
+	if r.Status != Warn {
+		t.Errorf("expected Warn, got %s: %s", r.Status, r.Detail)
+	}
+}
+
+func TestCheckSynthesis_Pass(t *testing.T) {
+	t.Setenv("TEST_SYNTH_KEY", "sk-test-123")
+	scfg := config.SynthesisConfig{Enabled: true}
+	ecfg := config.EnrichmentConfig{Enabled: true, Provider: "anthropic", Model: "claude-sonnet", APIKeyEnv: "TEST_SYNTH_KEY"}
+	r := CheckSynthesis(scfg, ecfg)
+	if r.Status != Pass {
+		t.Errorf("expected Pass, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "anthropic/claude-sonnet") {
+		t.Errorf("expected 'anthropic/claude-sonnet' in detail, got: %s", r.Detail)
+	}
+}
+
 func TestCheckHookFile_Pass(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")

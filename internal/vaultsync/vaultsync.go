@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -94,7 +93,7 @@ func GetStatus(vaultPath string) (*Status, error) {
 	s.Branch = branch
 
 	// Check remote
-	if _, err := gitCmd(vaultPath, 10*time.Second, "remote", "get-url", "origin"); err != nil {
+	if _, remoteErr := gitCmd(vaultPath, 10*time.Second, "remote", "get-url", "origin"); remoteErr != nil {
 		s.HasRemote = false
 		// Still check working tree status
 		porcelain, _ := gitCmd(vaultPath, 10*time.Second, "status", "--porcelain")
@@ -187,9 +186,9 @@ func Pull(vaultPath string) (*PullResult, error) {
 		resolved, err := resolveConflicts(vaultPath, result)
 		if err != nil || !resolved {
 			// Abort rebase — unresolvable
-			gitCmd(vaultPath, 10*time.Second, "rebase", "--abort")
+			_, _ = gitCmd(vaultPath, 10*time.Second, "rebase", "--abort")
 			if stashed {
-				gitCmd(vaultPath, 10*time.Second, "stash", "pop")
+				_, _ = gitCmd(vaultPath, 10*time.Second, "stash", "pop")
 			}
 			if err != nil {
 				return nil, fmt.Errorf("conflict resolution failed: %w", err)
@@ -296,11 +295,11 @@ func resolveConflicts(vaultPath string, result *PullResult) (bool, error) {
 
 		class := Classify(f)
 		// Accept upstream for all classes
-		if _, err := gitCmd(vaultPath, 10*time.Second, "checkout", "--theirs", f); err != nil {
-			return false, fmt.Errorf("checkout --theirs %s: %w", f, err)
+		if _, coErr := gitCmd(vaultPath, 10*time.Second, "checkout", "--theirs", f); coErr != nil {
+			return false, fmt.Errorf("checkout --theirs %s: %w", f, coErr)
 		}
-		if _, err := gitCmd(vaultPath, 10*time.Second, "add", f); err != nil {
-			return false, fmt.Errorf("add %s: %w", f, err)
+		if _, addErr := gitCmd(vaultPath, 10*time.Second, "add", f); addErr != nil {
+			return false, fmt.Errorf("add %s: %w", f, addErr)
 		}
 
 		switch class {
@@ -323,8 +322,6 @@ func resolveConflicts(vaultPath string, result *PullResult) (bool, error) {
 	return err == nil, err
 }
 
-// reNonFastForward matches git push rejection messages.
-var reNonFastForward = regexp.MustCompile(`(?i)(non-fast-forward|rejected|failed to push)`)
 
 // gitCmd runs a git command in the vault directory with a timeout.
 func gitCmd(dir string, timeout time.Duration, args ...string) (string, error) {

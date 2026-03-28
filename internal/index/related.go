@@ -5,7 +5,8 @@ package index
 
 import (
 	"sort"
-	"strings"
+
+	"github.com/johns/vibe-vault/internal/mdutil"
 )
 
 // RelatedSession holds a related session and its relevance score.
@@ -60,7 +61,7 @@ func computeScore(candidate, other SessionEntry) int {
 	score := 0
 
 	// Shared files changed: 3 per file, capped at 15
-	fileScore := len(setIntersection(candidate.FilesChanged, other.FilesChanged)) * 3
+	fileScore := len(mdutil.SetIntersection(candidate.FilesChanged, other.FilesChanged)) * 3
 	if fileScore > 15 {
 		fileScore = 15
 	}
@@ -89,13 +90,13 @@ func computeScore(candidate, other SessionEntry) int {
 func threadMatchScore(threads, decisions []string) int {
 	matches := 0
 	for _, thread := range threads {
-		threadWords := significantWords(thread)
+		threadWords := mdutil.SignificantWords(thread)
 		if len(threadWords) == 0 {
 			continue
 		}
 		for _, decision := range decisions {
-			decisionWords := significantWords(decision)
-			overlap := len(setIntersection(threadWords, decisionWords))
+			decisionWords := mdutil.SignificantWords(decision)
+			overlap := len(mdutil.SetIntersection(threadWords, decisionWords))
 			if overlap >= 2 {
 				matches++
 				break // count each thread at most once
@@ -105,50 +106,3 @@ func threadMatchScore(threads, decisions []string) int {
 	return matches
 }
 
-// significantWords extracts words >= 4 chars, lowercased, skipping stop words.
-func significantWords(s string) []string {
-	words := strings.Fields(strings.ToLower(s))
-	var result []string
-	for _, w := range words {
-		// Strip punctuation from edges
-		w = strings.Trim(w, ".,;:!?\"'`()[]{}—-")
-		if len(w) >= 4 && !isStopWord(w) {
-			result = append(result, w)
-		}
-	}
-	return result
-}
-
-var stopWords = map[string]bool{
-	"that": true, "this": true, "with": true, "from": true,
-	"have": true, "been": true, "were": true, "will": true,
-	"would": true, "could": true, "should": true, "what": true,
-	"when": true, "where": true, "which": true, "their": true,
-	"there": true, "these": true, "those": true, "them": true,
-	"then": true, "than": true, "some": true, "also": true,
-	"into": true, "each": true, "make": true, "like": true,
-	"just": true, "over": true, "such": true, "only": true,
-	"very": true, "more": true, "most": true, "other": true,
-	"about": true, "after": true, "before": true, "being": true,
-	"between": true, "does": true, "doing": true, "done": true,
-}
-
-func isStopWord(w string) bool {
-	return stopWords[w]
-}
-
-// setIntersection returns elements present in both slices.
-func setIntersection(a, b []string) []string {
-	set := make(map[string]bool, len(a))
-	for _, s := range a {
-		set[s] = true
-	}
-	var result []string
-	for _, s := range b {
-		if set[s] {
-			result = append(result, s)
-			delete(set, s) // avoid duplicates
-		}
-	}
-	return result
-}

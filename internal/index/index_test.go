@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/johns/vibe-vault/internal/mdutil"
 )
 
 // --- Backwards compat & enriched roundtrip ---
@@ -720,7 +722,7 @@ func TestRelatedMaxResults(t *testing.T) {
 }
 
 func TestSignificantWords(t *testing.T) {
-	words := significantWords("This is the authentication system for users")
+	words := mdutil.SignificantWords("This is the authentication system for users")
 	// "this" = stop word, "the" < 4 chars, "is" < 4 chars, "for" < 4 chars
 	// Should get: "authentication", "system", "users"
 	if len(words) != 3 {

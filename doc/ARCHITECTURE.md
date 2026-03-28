@@ -54,6 +54,18 @@ detect.go    │   │   │   │
                     index.Save()   .vibe-vault/session-index.json
                          │
                          ▼  (SessionEnd only, not Stop checkpoints)
+            synthesis/        Gather session note + git diff + knowledge + resume
+            gather.go         + recent history + active tasks
+                         │
+                         ▼
+            synthesis/        LLM call: identify learnings, stale entries,
+            synthesize.go     resume updates, task completions
+                         │
+                         ▼
+            synthesis/        Apply: append learnings to knowledge.md,
+            actions.go        flag stale entries, update resume, retire tasks
+                         │
+                         ▼
             index/            Load index
             generate.go       GenerateContext() → history.md
 ```
@@ -257,6 +269,13 @@ Create repo symlinks     Propagate shared          Show delta / copy
 | `llm` | `provider.go`, `types.go`, `retry.go`, `openai.go`, `anthropic.go`, `google.go` | Multi-provider LLM abstraction: `Provider` interface, OpenAI-compatible/Anthropic/Gemini implementations, retry with backoff |
 | `templates` (internal) | `templates.go`, `diff.go`, `reset.go` | Template registry, vault-vs-embedded comparison, `vv templates` status reporting |
 | `vaultsync` | `vaultsync.go` | `Classify()` — file classification (Regenerable/AppendOnly/Manual/ConfigFile) for conflict resolution; `GetStatus()` — vault git state (branch, clean/dirty, ahead/behind); `Pull()` — fetch + rebase with auto-stash and classification-driven conflict resolution; `CommitAndPush()` — stage all, commit with hostname stamp, push with one pull-retry; `EnsureRemote()` — verify origin exists |
+| `synthesis` | `types.go` | Data structures: `Input`, `Result`, `Learning`, `StaleEntry`, `ResumeUpdate`, `TaskUpdate`, `ActionReport` |
+| `synthesis` | `gather.go` | `GatherInput()` — collect session note, git diff (8KB cap), knowledge.md, resume.md, recent history (last 5 sessions), active tasks into `Input` struct |
+| `synthesis` | `prompt.go` | System and user prompt construction for LLM synthesis call; bullet numbering for LLM reference; structured JSON output schema |
+| `synthesis` | `synthesize.go` | `Synthesize()` — LLM invocation (temp 0.3, JSON mode) + response validation/filtering (section names, file targets, index bounds, action types) |
+| `synthesis` | `actions.go` | `Apply()` — execute synthesis result: append learnings to knowledge.md (with significant-word duplicate detection), flag stale entries (index + fuzzy fallback), update resume sections, move completed tasks to `done/` |
+| `synthesis` | `run.go` | `Run()` — top-level orchestrator: gather → synthesize → apply; short-circuits on nil provider, disabled config, or empty result |
+| `mdutil` | `mdutil.go` | Shared markdown/text utilities: `SignificantWords()` (4+ char, stop-word filtered), `Overlap()`/`SetIntersection()` (word set operations), `ReplaceSectionBody()` (heading-targeted markdown editing), `AtomicWriteFile()` (temp + rename crash safety) |
 | `sanitize` | `redact.go` | Regex-based XML tag stripping for Claude Code wrapper tags |
 
 ## Template System

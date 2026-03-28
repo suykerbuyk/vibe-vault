@@ -42,6 +42,25 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultAPIKeyEnv(t *testing.T) {
+	cases := []struct {
+		provider string
+		want     string
+	}{
+		{"openai", "OPENAI_API_KEY"},
+		{"", "OPENAI_API_KEY"},
+		{"anthropic", "ANTHROPIC_API_KEY"},
+		{"google", "GOOGLE_API_KEY"},
+		{"unknown", ""},
+	}
+	for _, tc := range cases {
+		got := DefaultAPIKeyEnv(tc.provider)
+		if got != tc.want {
+			t.Errorf("DefaultAPIKeyEnv(%q) = %q, want %q", tc.provider, got, tc.want)
+		}
+	}
+}
+
 func TestLoad_NoConfig(t *testing.T) {
 	// Point XDG to an empty dir so no config file is found
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())

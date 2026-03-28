@@ -626,7 +626,7 @@ func UninstallMCPAll(claudeOnly, zedOnly bool) error {
 // Does NOT remove existing mcpServers entries — both can coexist safely.
 func InstallClaudePlugin() error {
 	if !claudeDetected() {
-		return fmt.Errorf("Claude Code not detected (~/.claude/ not found)")
+		return fmt.Errorf("claude Code not detected (~/.claude/ not found)")
 	}
 
 	mktDir, err := plugin.Generate(help.Version)

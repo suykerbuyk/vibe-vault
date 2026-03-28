@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/johns/vibe-vault/internal/mdutil"
 )
 
 // ContextOptions controls history.md rendering and pruning behavior.
@@ -230,7 +232,7 @@ func collectDecisionsWithDecay(entries []SessionEntry, opts ContextOptions) []da
 	// Second pass: update lastSeen by checking if later sessions reference
 	// each decision (significant word overlap with summaries or decisions)
 	for i := range allDecisions {
-		dWords := significantWords(allDecisions[i].text)
+		dWords := mdutil.SignificantWords(allDecisions[i].text)
 		if len(dWords) == 0 {
 			continue
 		}
@@ -271,14 +273,14 @@ func collectDecisionsWithDecay(entries []SessionEntry, opts ContextOptions) []da
 func isReferencedIn(decisionWords []string, e SessionEntry) bool {
 	// Check against each decision in the session
 	for _, d := range e.Decisions {
-		overlap := len(setIntersection(decisionWords, significantWords(d)))
+		overlap := len(mdutil.SetIntersection(decisionWords, mdutil.SignificantWords(d)))
 		if overlap >= 2 {
 			return true
 		}
 	}
 	// Check against summary
 	if e.Summary != "" {
-		overlap := len(setIntersection(decisionWords, significantWords(e.Summary)))
+		overlap := len(mdutil.SetIntersection(decisionWords, mdutil.SignificantWords(e.Summary)))
 		if overlap >= 2 {
 			return true
 		}
@@ -328,13 +330,13 @@ func collectOpenThreads(entries []SessionEntry) []string {
 
 // isResolvedByDecisions checks if a thread has significant word overlap with any decision.
 func isResolvedByDecisions(thread string, decisions []string) bool {
-	threadWords := significantWords(thread)
+	threadWords := mdutil.SignificantWords(thread)
 	if len(threadWords) == 0 {
 		return false
 	}
 	for _, d := range decisions {
-		decisionWords := significantWords(d)
-		overlap := len(setIntersection(threadWords, decisionWords))
+		decisionWords := mdutil.SignificantWords(d)
+		overlap := len(mdutil.SetIntersection(threadWords, decisionWords))
 		if overlap >= 2 {
 			return true
 		}

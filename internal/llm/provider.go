@@ -17,7 +17,11 @@ func NewProvider(cfg config.EnrichmentConfig) (Provider, error) {
 		return nil, nil
 	}
 
-	apiKey := os.Getenv(cfg.APIKeyEnv)
+	keyEnv := cfg.APIKeyEnv
+	if keyEnv == "" {
+		keyEnv = config.DefaultAPIKeyEnv(cfg.Provider)
+	}
+	apiKey := os.Getenv(keyEnv)
 	if apiKey == "" {
 		return nil, nil
 	}
@@ -56,9 +60,16 @@ func Available(cfg config.EnrichmentConfig) (provider, model, reason string) {
 	}
 	model = cfg.Model
 
-	apiKey := os.Getenv(cfg.APIKeyEnv)
+	keyEnv := cfg.APIKeyEnv
+	if keyEnv == "" {
+		keyEnv = config.DefaultAPIKeyEnv(cfg.Provider)
+	}
+	if keyEnv == "" {
+		return provider, model, "api_key_env not configured"
+	}
+	apiKey := os.Getenv(keyEnv)
 	if apiKey == "" {
-		return provider, model, fmt.Sprintf("%s not set", cfg.APIKeyEnv)
+		return provider, model, fmt.Sprintf("%s not set", keyEnv)
 	}
 
 	return provider, model, ""
