@@ -22,6 +22,11 @@ After bootstrap, continue loading context in this order:
    setting path. For each file found:
    - Read the plan to determine if it belongs to the current project (look for
      references to project files, directories, or the project name).
+   - If it belongs to this project, move it to the project's agentctx/tasks/
+     directory. Resolve the tasks path: read `vault_path` from
+     `~/.config/vibe-vault/config.toml`, get the project name from the first
+     line of `vv inject` output (`# Context: {name}`), then construct
+     `{vault_path}/Projects/{project}/agentctx/tasks/`. Use `mv` via Bash.
    - If it belongs to a different project, leave it in `~/.claude/plans/`.
    - If it belongs to this project, **create it as a task with a descriptive
      slug** derived from the plan title:
@@ -29,14 +34,14 @@ After bootstrap, continue loading context in this order:
      **Slugification rules:**
      a. Find the first markdown heading (`# ...` or `## ...`).
      b. Strip common prefixes: "Plan:", "Task:", "Feature:", "Bug:", "Fix:",
-        "Implementation Plan:".
+     "Implementation Plan:".
      c. Lowercase the remaining text.
      d. Replace spaces and underscores with hyphens.
      e. Remove all characters except `a-z`, `0-9`, and `-`.
      f. Collapse consecutive hyphens into one; trim leading/trailing hyphens.
      g. Truncate to 60 characters (break at a hyphen boundary if possible).
      h. Fallback: if no heading or empty after processing, use the original
-        filename without `.md`.
+     filename without `.md`.
 
      **Example**: `# Plan: Deprecate Agentctx Symlinks` becomes
      `deprecate-agentctx-symlinks`.
@@ -46,7 +51,7 @@ After bootstrap, continue loading context in this order:
      original file from `~/.claude/plans/` using `rm` via Bash.
 
    - Summarize each plan's disposition (created as task, other project, etc.).
-   Plans MUST live in agentctx/tasks/, never in `~/.claude/plans/`.
+     Plans MUST live in agentctx/tasks/, never in `~/.claude/plans/`.
 
 2. **Auto-retire completed tasks**: List active tasks via `ls` on the tasks
    directory (exclude `done/` and `cancelled/` subdirectories). For each task:

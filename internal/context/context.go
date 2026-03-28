@@ -137,6 +137,12 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 		Location: "vault",
 	})
 
+	// Propagate shared content (skills, etc.) from vault Templates to project agentctx
+	for _, sub := range propagateDirs {
+		subActions := propagateSharedSubdir(cfg.VaultPath, agentctx, sub, false, false)
+		result.Actions = append(result.Actions, subActions...)
+	}
+
 	// Repo-side CLAUDE.md as regular file
 	claudeMDPath := filepath.Join(cwd, "CLAUDE.md")
 	claudeContent := resolveTemplate(cfg.VaultPath, "CLAUDE.md", vars)
@@ -164,7 +170,15 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 		vaultSubDir := filepath.Join(agentctx, sub)
 		entries, _ := os.ReadDir(vaultSubDir)
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			if e.IsDir() {
+				copyDir(filepath.Join(vaultSubDir, e.Name()), filepath.Join(subDir, e.Name()), opts.Force)
+				continue
+			}
+			// For commands: only .md files. For other subdirs: all non-sidecar files.
+			if sub == "commands" && !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			if strings.HasSuffix(e.Name(), ".pending") || strings.HasSuffix(e.Name(), ".pinned") {
 				continue
 			}
 			data, err := os.ReadFile(filepath.Join(vaultSubDir, e.Name()))
@@ -382,7 +396,15 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 		vaultSubDir := filepath.Join(agentctx, sub)
 		entries, _ := os.ReadDir(vaultSubDir)
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			if e.IsDir() {
+				copyDir(filepath.Join(vaultSubDir, e.Name()), filepath.Join(subPath, e.Name()), true)
+				continue
+			}
+			// For commands: only .md files. For other subdirs: all non-sidecar files.
+			if sub == "commands" && !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			if strings.HasSuffix(e.Name(), ".pending") || strings.HasSuffix(e.Name(), ".pinned") {
 				continue
 			}
 			data, readErr := os.ReadFile(filepath.Join(vaultSubDir, e.Name()))

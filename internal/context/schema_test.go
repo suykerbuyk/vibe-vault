@@ -93,8 +93,8 @@ func TestWriteVersion_Overwrites(t *testing.T) {
 
 func TestMigrationsFrom_Zero(t *testing.T) {
 	m := migrationsFrom(0)
-	if len(m) != 6 {
-		t.Errorf("migrationsFrom(0) = %d migrations, want 6", len(m))
+	if len(m) != 7 {
+		t.Errorf("migrationsFrom(0) = %d migrations, want 7", len(m))
 	}
 	if m[0].From != 0 || m[0].To != 1 {
 		t.Errorf("first migration: %d→%d, want 0→1", m[0].From, m[0].To)
@@ -114,12 +114,15 @@ func TestMigrationsFrom_Zero(t *testing.T) {
 	if m[5].From != 5 || m[5].To != 6 {
 		t.Errorf("sixth migration: %d→%d, want 5→6", m[5].From, m[5].To)
 	}
+	if m[6].From != 6 || m[6].To != 7 {
+		t.Errorf("seventh migration: %d→%d, want 6→7", m[6].From, m[6].To)
+	}
 }
 
 func TestMigrationsFrom_One(t *testing.T) {
 	m := migrationsFrom(1)
-	if len(m) != 5 {
-		t.Errorf("migrationsFrom(1) = %d migrations, want 5", len(m))
+	if len(m) != 6 {
+		t.Errorf("migrationsFrom(1) = %d migrations, want 6", len(m))
 	}
 	if m[0].From != 1 || m[0].To != 2 {
 		t.Errorf("first migration: %d→%d, want 1→2", m[0].From, m[0].To)
@@ -131,8 +134,8 @@ func TestMigrationsFrom_One(t *testing.T) {
 
 func TestMigrationsFrom_Two(t *testing.T) {
 	m := migrationsFrom(2)
-	if len(m) != 4 {
-		t.Errorf("migrationsFrom(2) = %d migrations, want 4", len(m))
+	if len(m) != 5 {
+		t.Errorf("migrationsFrom(2) = %d migrations, want 5", len(m))
 	}
 	if m[0].From != 2 || m[0].To != 3 {
 		t.Errorf("first migration: %d→%d, want 2→3", m[0].From, m[0].To)
@@ -141,8 +144,8 @@ func TestMigrationsFrom_Two(t *testing.T) {
 
 func TestMigrationsFrom_Three(t *testing.T) {
 	m := migrationsFrom(3)
-	if len(m) != 3 {
-		t.Errorf("migrationsFrom(3) = %d migrations, want 3", len(m))
+	if len(m) != 4 {
+		t.Errorf("migrationsFrom(3) = %d migrations, want 4", len(m))
 	}
 	if m[0].From != 3 || m[0].To != 4 {
 		t.Errorf("migration: %d→%d, want 3→4", m[0].From, m[0].To)
@@ -151,8 +154,8 @@ func TestMigrationsFrom_Three(t *testing.T) {
 
 func TestMigrationsFrom_Four(t *testing.T) {
 	m := migrationsFrom(4)
-	if len(m) != 2 {
-		t.Errorf("migrationsFrom(4) = %d migrations, want 2", len(m))
+	if len(m) != 3 {
+		t.Errorf("migrationsFrom(4) = %d migrations, want 3", len(m))
 	}
 	if m[0].From != 4 || m[0].To != 5 {
 		t.Errorf("migration: %d→%d, want 4→5", m[0].From, m[0].To)
@@ -161,11 +164,21 @@ func TestMigrationsFrom_Four(t *testing.T) {
 
 func TestMigrationsFrom_Five(t *testing.T) {
 	m := migrationsFrom(5)
-	if len(m) != 1 {
-		t.Errorf("migrationsFrom(5) = %d migrations, want 1", len(m))
+	if len(m) != 2 {
+		t.Errorf("migrationsFrom(5) = %d migrations, want 2", len(m))
 	}
 	if m[0].From != 5 || m[0].To != 6 {
 		t.Errorf("migration: %d→%d, want 5→6", m[0].From, m[0].To)
+	}
+}
+
+func TestMigrationsFrom_Six(t *testing.T) {
+	m := migrationsFrom(6)
+	if len(m) != 1 {
+		t.Errorf("migrationsFrom(6) = %d migrations, want 1", len(m))
+	}
+	if m[0].From != 6 || m[0].To != 7 {
+		t.Errorf("migration: %d→%d, want 6→7", m[0].From, m[0].To)
 	}
 }
 
