@@ -19,6 +19,7 @@ piece of focused work — not every conversational turn:
 - Any time the user says "wrap up," "save," or "capture"
 
 Call `vv_capture_session` with:
+
 - **summary** (required): 2-3 sentences on what was accomplished
 - **tag**: implementation | debugging | refactor | exploration | review | docs | planning
 - **decisions**: key technical decisions made (array)

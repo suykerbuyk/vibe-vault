@@ -14,7 +14,7 @@ Audit or create a Makefile facade for this project's native build system.
 3. **Create or update** a Makefile with these standard targets:
 
    | Target           | Purpose                          | Safety    |
-   |------------------|----------------------------------|-----------|
+   | ---------------- | -------------------------------- | --------- |
    | make             | Print help (.DEFAULT_GOAL)       | read-only |
    | make build       | Default build                    | mutates   |
    | make test        | Unit tests (builds first)        | mutates   |
@@ -43,6 +43,7 @@ help: ## Show this help
 ```
 
 Then annotate every target:
+
 ```makefile
 ##@ Build
 build: ## Build the binary
@@ -71,6 +72,7 @@ statements to maintain. New targets are self-documenting just by adding
 ## Adaptation patterns
 
 ### CMake
+
 ```makefile
 BUILD_DIR  ?= build
 BUILD_TYPE ?= Release
@@ -89,6 +91,7 @@ clean:
 ```
 
 ### Cargo
+
 ```makefile
 build:
 	cargo build --release
@@ -103,6 +106,7 @@ clean:
 ```
 
 ### Go
+
 ```makefile
 build:
 	go build ./...
@@ -117,6 +121,7 @@ clean:
 ```
 
 ### Node (npm)
+
 ```makefile
 build:
 	npm run build
@@ -129,6 +134,7 @@ clean:
 ```
 
 ### Meson
+
 ```makefile
 BUILD_DIR ?= builddir
 build:

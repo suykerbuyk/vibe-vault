@@ -915,8 +915,9 @@ var CmdVaultPull = Command{
 	Synopsis: "fetch and rebase vault repo",
 	Brief:    "Fetch + rebase with auto conflict resolution",
 	Usage:    "vv vault pull",
-	Description: `Fetches from origin and rebases local commits. Conflicts are
-resolved automatically based on file type:
+	Description: `Fetches from all configured remotes and rebases local commits on
+the tracking upstream (falls back to first remote). Conflicts are resolved
+automatically based on file type:
   - Auto-generated files (history.md): accept upstream, flag for regeneration
   - Session notes: accept upstream (unique timestamps = near-zero conflict risk)
   - Manual files (knowledge.md): accept upstream, report for human review
@@ -928,14 +929,15 @@ If regeneration is needed, run 'vv index' afterward to rebuild.`,
 var CmdVaultPush = Command{
 	Name:     "push",
 	Synopsis: "commit and push vault changes",
-	Brief:    "Commit all changes and push to remote",
+	Brief:    "Commit all changes and push to all remotes",
 	Usage:    "vv vault push [--message <msg>]",
 	Flags: []Flag{
 		{"--message <msg>", "Custom commit message (default: auto-generated)"},
 	},
 	Description: `Stages all vault changes, commits with a machine-stamped message,
-and pushes to origin. If push is rejected, pulls and retries once.
-On final failure, reports the error for interactive resolution.`,
+and pushes to all configured remotes. For each remote, if push is rejected,
+fetches and rebases from that remote and retries once. Reports per-remote
+success or failure.`,
 }
 
 // VaultSubcommands is the ordered list of vault sub-subcommands.

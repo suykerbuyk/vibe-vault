@@ -78,6 +78,47 @@ func initTestRepo(t *testing.T) string {
 	return dir
 }
 
+// initBareRemote creates a bare git repo suitable as a push/fetch target.
+func initBareRemote(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", "--bare", "-b", "main")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git init --bare: %s: %v", out, err)
+	}
+	return dir
+}
+
+// addRemote adds a named remote to a repo.
+func addRemote(t *testing.T, repoDir, name, url string) {
+	t.Helper()
+	cmd := exec.Command("git", "remote", "add", name, url)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git remote add %s: %s: %v", name, out, err)
+	}
+}
+
+// gitRun runs a git command in the given directory.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %s: %v", args, out, err)
+	}
+}
+
 func TestGetStatus_CleanRepo(t *testing.T) {
 	dir := initTestRepo(t)
 
@@ -91,7 +132,7 @@ func TestGetStatus_CleanRepo(t *testing.T) {
 	if s.Branch != "main" {
 		t.Errorf("branch = %q, want main", s.Branch)
 	}
-	if s.HasRemote {
+	if s.HasRemote() {
 		t.Error("expected no remote")
 	}
 }
@@ -107,6 +148,96 @@ func TestGetStatus_DirtyRepo(t *testing.T) {
 	}
 	if s.Clean {
 		t.Error("expected dirty repo")
+	}
+}
+
+func TestGetStatus_MultipleRemotes(t *testing.T) {
+	dir := initTestRepo(t)
+	bare1 := initBareRemote(t)
+	bare2 := initBareRemote(t)
+
+	addRemote(t, dir, "github", bare1)
+	addRemote(t, dir, "vault", bare2)
+
+	// Push to both so remote refs exist
+	gitRun(t, dir, "push", "github", "main")
+	gitRun(t, dir, "push", "vault", "main")
+
+	s, err := GetStatus(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.HasRemote() {
+		t.Fatal("expected remotes")
+	}
+	if len(s.Remotes) != 2 {
+		t.Fatalf("got %d remotes, want 2", len(s.Remotes))
+	}
+
+	names := map[string]bool{}
+	for _, r := range s.Remotes {
+		names[r.Name] = true
+		if r.Ahead != 0 || r.Behind != 0 {
+			t.Errorf("remote %s: ahead=%d behind=%d, want 0/0", r.Name, r.Ahead, r.Behind)
+		}
+	}
+	if !names["github"] || !names["vault"] {
+		t.Errorf("expected remotes github and vault, got %v", names)
+	}
+}
+
+func TestGetStatus_AheadBehind(t *testing.T) {
+	dir := initTestRepo(t)
+	bare := initBareRemote(t)
+	addRemote(t, dir, "github", bare)
+	gitRun(t, dir, "push", "github", "main")
+
+	// Create a local commit (ahead by 1)
+	os.WriteFile(filepath.Join(dir, "local.txt"), []byte("local"), 0o644)
+	gitRun(t, dir, "add", ".")
+	gitRun(t, dir, "commit", "-m", "local change")
+
+	s, err := GetStatus(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Remotes) != 1 {
+		t.Fatalf("got %d remotes, want 1", len(s.Remotes))
+	}
+	if s.Remotes[0].Ahead != 1 {
+		t.Errorf("ahead = %d, want 1", s.Remotes[0].Ahead)
+	}
+}
+
+func TestListRemotes_None(t *testing.T) {
+	dir := initTestRepo(t)
+	remotes, err := listRemotes(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remotes) != 0 {
+		t.Errorf("got %d remotes, want 0", len(remotes))
+	}
+}
+
+func TestListRemotes_Multiple(t *testing.T) {
+	dir := initTestRepo(t)
+	addRemote(t, dir, "github", "https://example.com/a.git")
+	addRemote(t, dir, "vault", "https://example.com/b.git")
+
+	remotes, err := listRemotes(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remotes) != 2 {
+		t.Fatalf("got %d remotes, want 2", len(remotes))
+	}
+	names := map[string]bool{}
+	for _, r := range remotes {
+		names[r] = true
+	}
+	if !names["github"] || !names["vault"] {
+		t.Errorf("expected github and vault, got %v", names)
 	}
 }
 
@@ -126,21 +257,52 @@ func TestCommitAndPush_NoRemote(t *testing.T) {
 
 func TestCommitAndPush_NothingToCommit(t *testing.T) {
 	dir := initTestRepo(t)
-
-	// Add a remote so EnsureRemote passes (doesn't need to be reachable for this test)
-	cmd := exec.Command("git", "remote", "add", "origin", "https://example.com/test.git")
-	cmd.Dir = dir
-	cmd.Run()
+	addRemote(t, dir, "github", "https://example.com/test.git")
 
 	result, err := CommitAndPush(dir, "empty")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Pushed {
+	if result.AnyPushed() {
 		t.Error("expected no push when nothing to commit")
 	}
 	if result.CommitSHA != "" {
 		t.Error("expected no commit SHA")
+	}
+}
+
+func TestCommitAndPush_MultipleRemotes(t *testing.T) {
+	dir := initTestRepo(t)
+	bare1 := initBareRemote(t)
+	bare2 := initBareRemote(t)
+
+	addRemote(t, dir, "github", bare1)
+	addRemote(t, dir, "vault", bare2)
+
+	// Push initial commit to both so remote refs exist
+	gitRun(t, dir, "push", "github", "main")
+	gitRun(t, dir, "push", "vault", "main")
+
+	// Create a new file to commit
+	os.WriteFile(filepath.Join(dir, "new.txt"), []byte("data"), 0o644)
+
+	result, err := CommitAndPush(dir, "multi-remote push")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CommitSHA == "" {
+		t.Error("expected a commit SHA")
+	}
+	if !result.AllPushed() {
+		t.Error("expected all remotes pushed")
+	}
+	if len(result.RemoteResults) != 2 {
+		t.Errorf("got %d remote results, want 2", len(result.RemoteResults))
+	}
+	for name, pushErr := range result.RemoteResults {
+		if pushErr != nil {
+			t.Errorf("remote %s: unexpected error: %v", name, pushErr)
+		}
 	}
 }
 
@@ -163,12 +325,73 @@ func TestEnsureRemote(t *testing.T) {
 		t.Error("expected error when no remote")
 	}
 
-	cmd := exec.Command("git", "remote", "add", "origin", "https://example.com/test.git")
-	cmd.Dir = dir
-	cmd.Run()
+	addRemote(t, dir, "github", "https://example.com/test.git")
 
 	if err := EnsureRemote(dir); err != nil {
 		t.Errorf("unexpected error after adding remote: %v", err)
+	}
+}
+
+func TestEnsureRemote_NonOriginName(t *testing.T) {
+	dir := initTestRepo(t)
+
+	// Add a remote with a non-"origin" name — should still pass
+	addRemote(t, dir, "vault", "https://example.com/test.git")
+
+	if err := EnsureRemote(dir); err != nil {
+		t.Errorf("unexpected error with non-origin remote: %v", err)
+	}
+}
+
+func TestPushResult_AllPushed(t *testing.T) {
+	r := &PushResult{
+		CommitSHA:     "abc123",
+		RemoteResults: map[string]error{"a": nil, "b": nil},
+	}
+	if !r.AllPushed() {
+		t.Error("expected AllPushed true")
+	}
+	if !r.AnyPushed() {
+		t.Error("expected AnyPushed true")
+	}
+}
+
+func TestPushResult_PartialPush(t *testing.T) {
+	r := &PushResult{
+		CommitSHA: "abc123",
+		RemoteResults: map[string]error{
+			"a": nil,
+			"b": os.ErrNotExist,
+		},
+	}
+	if r.AllPushed() {
+		t.Error("expected AllPushed false")
+	}
+	if !r.AnyPushed() {
+		t.Error("expected AnyPushed true")
+	}
+}
+
+func TestPushResult_NoPush(t *testing.T) {
+	r := &PushResult{
+		CommitSHA:     "abc123",
+		RemoteResults: map[string]error{"a": os.ErrNotExist},
+	}
+	if r.AllPushed() {
+		t.Error("expected AllPushed false")
+	}
+	if r.AnyPushed() {
+		t.Error("expected AnyPushed false")
+	}
+}
+
+func TestPushResult_Empty(t *testing.T) {
+	r := &PushResult{}
+	if r.AllPushed() {
+		t.Error("expected AllPushed false for empty results")
+	}
+	if r.AnyPushed() {
+		t.Error("expected AnyPushed false for empty results")
 	}
 }
 

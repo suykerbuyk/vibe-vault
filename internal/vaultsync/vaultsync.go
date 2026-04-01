@@ -30,15 +30,22 @@ const (
 	ConfigFile
 )
 
+// RemoteStatus reports per-remote sync state.
+type RemoteStatus struct {
+	Name   string // remote name (e.g., "github", "vault")
+	Ahead  int    // commits ahead of this remote's tracking ref
+	Behind int    // commits behind this remote's tracking ref
+}
+
 // Status reports the vault repo's git state.
 type Status struct {
-	Clean     bool   // working tree has no uncommitted changes
-	Branch    string // current branch name
-	Remote    string // remote name (typically "origin")
-	HasRemote bool   // remote is configured
-	Ahead     int    // commits ahead of remote
-	Behind    int    // commits behind remote
+	Clean   bool           // working tree has no uncommitted changes
+	Branch  string         // current branch name
+	Remotes []RemoteStatus // per-remote state (empty = no remotes configured)
 }
+
+// HasRemote returns true if at least one remote is configured.
+func (s *Status) HasRemote() bool { return len(s.Remotes) > 0 }
 
 // PullResult reports what happened during a Pull operation.
 type PullResult struct {
@@ -49,8 +56,31 @@ type PullResult struct {
 
 // PushResult reports what happened during a CommitAndPush operation.
 type PushResult struct {
-	Pushed    bool   // successfully pushed to remote
-	CommitSHA string // the commit SHA that was pushed (empty if nothing to commit)
+	CommitSHA     string           // the commit SHA that was pushed (empty if nothing to commit)
+	RemoteResults map[string]error // per-remote push result (nil = success)
+}
+
+// AllPushed returns true if all remotes were pushed successfully.
+func (r *PushResult) AllPushed() bool {
+	if len(r.RemoteResults) == 0 {
+		return false
+	}
+	for _, err := range r.RemoteResults {
+		if err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// AnyPushed returns true if at least one remote was pushed successfully.
+func (r *PushResult) AnyPushed() bool {
+	for _, err := range r.RemoteResults {
+		if err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Classify returns the FileClass for a vault-relative path, determining
@@ -81,9 +111,28 @@ func Classify(relPath string) FileClass {
 	return Manual
 }
 
+// listRemotes discovers all configured git remotes.
+func listRemotes(vaultPath string) ([]string, error) {
+	out, err := gitCmd(vaultPath, 10*time.Second, "remote")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	var remotes []string
+	for _, r := range strings.Split(out, "\n") {
+		r = strings.TrimSpace(r)
+		if r != "" {
+			remotes = append(remotes, r)
+		}
+	}
+	return remotes, nil
+}
+
 // GetStatus reports the vault repo's git state.
 func GetStatus(vaultPath string) (*Status, error) {
-	s := &Status{Remote: "origin"}
+	s := &Status{}
 
 	// Check branch name
 	branch, err := gitCmd(vaultPath, 10*time.Second, "rev-parse", "--abbrev-ref", "HEAD")
@@ -92,16 +141,6 @@ func GetStatus(vaultPath string) (*Status, error) {
 	}
 	s.Branch = branch
 
-	// Check remote
-	if _, remoteErr := gitCmd(vaultPath, 10*time.Second, "remote", "get-url", "origin"); remoteErr != nil {
-		s.HasRemote = false
-		// Still check working tree status
-		porcelain, _ := gitCmd(vaultPath, 10*time.Second, "status", "--porcelain")
-		s.Clean = porcelain == ""
-		return s, nil
-	}
-	s.HasRemote = true
-
 	// Working tree status
 	porcelain, err := gitCmd(vaultPath, 10*time.Second, "status", "--porcelain")
 	if err != nil {
@@ -109,32 +148,43 @@ func GetStatus(vaultPath string) (*Status, error) {
 	}
 	s.Clean = porcelain == ""
 
-	// Ahead/behind counts
-	revList, err := gitCmd(vaultPath, 10*time.Second, "rev-list", "--count", "--left-right", "@{u}...HEAD")
-	if err != nil {
-		// No upstream tracking — not an error, just no counts
+	// Discover remotes and compute per-remote ahead/behind
+	remotes, err := listRemotes(vaultPath)
+	if err != nil || len(remotes) == 0 {
 		return s, nil
 	}
-	parts := strings.Fields(revList)
-	if len(parts) == 2 {
-		s.Behind, _ = strconv.Atoi(parts[0])
-		s.Ahead, _ = strconv.Atoi(parts[1])
+
+	for _, remote := range remotes {
+		rs := RemoteStatus{Name: remote}
+		ref := remote + "/" + branch
+		revList, revErr := gitCmd(vaultPath, 10*time.Second, "rev-list", "--count", "--left-right", ref+"...HEAD")
+		if revErr == nil {
+			parts := strings.Fields(revList)
+			if len(parts) == 2 {
+				rs.Behind, _ = strconv.Atoi(parts[0])
+				rs.Ahead, _ = strconv.Atoi(parts[1])
+			}
+		}
+		s.Remotes = append(s.Remotes, rs)
 	}
 
 	return s, nil
 }
 
-// EnsureRemote checks that a remote named "origin" exists.
+// EnsureRemote checks that at least one git remote is configured.
 func EnsureRemote(vaultPath string) error {
-	_, err := gitCmd(vaultPath, 10*time.Second, "remote", "get-url", "origin")
+	remotes, err := listRemotes(vaultPath)
 	if err != nil {
-		return fmt.Errorf("no git remote 'origin' configured in vault %s", vaultPath)
+		return fmt.Errorf("listing remotes: %w", err)
+	}
+	if len(remotes) == 0 {
+		return fmt.Errorf("no git remotes configured in vault %s", vaultPath)
 	}
 	return nil
 }
 
-// Pull fetches from origin and rebases local commits on top. Conflicts are
-// resolved automatically based on file classification:
+// Pull fetches from all configured remotes and rebases local commits on top.
+// Conflicts are resolved automatically based on file classification:
 //   - Regenerable/ConfigFile/AppendOnly: accept upstream version
 //   - Manual: accept upstream, but report for human review
 //
@@ -143,22 +193,35 @@ func EnsureRemote(vaultPath string) error {
 func Pull(vaultPath string) (*PullResult, error) {
 	result := &PullResult{}
 
-	if err := EnsureRemote(vaultPath); err != nil {
-		return nil, err
+	remotes, err := listRemotes(vaultPath)
+	if err != nil {
+		return nil, fmt.Errorf("listing remotes: %w", err)
+	}
+	if len(remotes) == 0 {
+		return nil, fmt.Errorf("no git remotes configured in vault %s", vaultPath)
 	}
 
-	// Fetch latest
-	if _, err := gitCmd(vaultPath, 60*time.Second, "fetch", "origin"); err != nil {
-		return nil, fmt.Errorf("git fetch: %w", err)
+	// Fetch from all remotes
+	for _, remote := range remotes {
+		if _, fetchErr := gitCmd(vaultPath, 60*time.Second, "fetch", remote); fetchErr != nil {
+			// Log but continue — one unreachable remote shouldn't block others
+			fmt.Fprintf(os.Stderr, "warning: fetch %s failed: %v\n", remote, fetchErr)
+		}
 	}
 
-	// Check if we're behind
+	// Determine rebase target: tracking upstream, or first remote's branch
 	branch, _ := gitCmd(vaultPath, 10*time.Second, "rev-parse", "--abbrev-ref", "HEAD")
 	if branch == "" {
 		branch = "main"
 	}
 
-	revList, err := gitCmd(vaultPath, 10*time.Second, "rev-list", "--count", "--left-right", "@{u}...HEAD")
+	rebaseTarget, _ := gitCmd(vaultPath, 10*time.Second, "rev-parse", "--abbrev-ref", "@{u}")
+	if rebaseTarget == "" {
+		rebaseTarget = remotes[0] + "/" + branch
+	}
+
+	// Check if we're behind the rebase target
+	revList, err := gitCmd(vaultPath, 10*time.Second, "rev-list", "--count", "--left-right", rebaseTarget+"...HEAD")
 	if err == nil {
 		parts := strings.Fields(revList)
 		if len(parts) == 2 {
@@ -180,7 +243,7 @@ func Pull(vaultPath string) (*PullResult, error) {
 	}
 
 	// Attempt rebase
-	_, rebaseErr := gitCmd(vaultPath, 60*time.Second, "rebase", "origin/"+branch)
+	_, rebaseErr := gitCmd(vaultPath, 60*time.Second, "rebase", rebaseTarget)
 	if rebaseErr != nil {
 		// Resolve conflicts by file classification
 		resolved, err := resolveConflicts(vaultPath, result)
@@ -211,14 +274,18 @@ func Pull(vaultPath string) (*PullResult, error) {
 }
 
 // CommitAndPush stages all vault changes, commits with a machine-stamped
-// message, and pushes to origin. If push is rejected (non-fast-forward),
-// it pulls and retries once. Returns a descriptive error on final failure
-// for interactive resolution.
+// message, and pushes to all configured remotes. If a push is rejected
+// (non-fast-forward), it fetches and rebases from that remote and retries
+// once. Returns per-remote results.
 func CommitAndPush(vaultPath, message string) (*PushResult, error) {
 	result := &PushResult{}
 
-	if err := EnsureRemote(vaultPath); err != nil {
-		return nil, err
+	remotes, err := listRemotes(vaultPath)
+	if err != nil {
+		return nil, fmt.Errorf("listing remotes: %w", err)
+	}
+	if len(remotes) == 0 {
+		return nil, fmt.Errorf("no git remotes configured in vault %s", vaultPath)
 	}
 
 	// Stage all changes (safe — vv owns the vault)
@@ -248,29 +315,24 @@ func CommitAndPush(vaultPath, message string) (*PushResult, error) {
 	sha, _ := gitCmd(vaultPath, 10*time.Second, "rev-parse", "--short", "HEAD")
 	result.CommitSHA = sha
 
-	// Push
+	// Push to all remotes
 	branch, _ := gitCmd(vaultPath, 10*time.Second, "rev-parse", "--abbrev-ref", "HEAD")
 	if branch == "" {
 		branch = "main"
 	}
 
-	_, pushErr := gitCmd(vaultPath, 60*time.Second, "push", "origin", branch)
-	if pushErr == nil {
-		result.Pushed = true
-		return result, nil
+	result.RemoteResults = make(map[string]error, len(remotes))
+	for _, remote := range remotes {
+		_, pushErr := gitCmd(vaultPath, 60*time.Second, "push", remote, branch)
+		if pushErr != nil {
+			// Retry: fetch from this remote, rebase, push again
+			_, _ = gitCmd(vaultPath, 60*time.Second, "fetch", remote)
+			_, _ = gitCmd(vaultPath, 60*time.Second, "rebase", remote+"/"+branch)
+			_, pushErr = gitCmd(vaultPath, 60*time.Second, "push", remote, branch)
+		}
+		result.RemoteResults[remote] = pushErr
 	}
 
-	// Push rejected — pull and retry once
-	if _, err := Pull(vaultPath); err != nil {
-		return result, fmt.Errorf("push rejected and pull failed: %w\nResolve manually in %s", err, vaultPath)
-	}
-
-	_, pushErr = gitCmd(vaultPath, 60*time.Second, "push", "origin", branch)
-	if pushErr != nil {
-		return result, fmt.Errorf("push failed after pull-retry: %w\nResolve manually in %s", pushErr, vaultPath)
-	}
-
-	result.Pushed = true
 	return result, nil
 }
 

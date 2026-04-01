@@ -171,7 +171,9 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 		entries, _ := os.ReadDir(vaultSubDir)
 		for _, e := range entries {
 			if e.IsDir() {
-				copyDir(filepath.Join(vaultSubDir, e.Name()), filepath.Join(subDir, e.Name()), opts.Force)
+				if _, cpErr := copyDir(filepath.Join(vaultSubDir, e.Name()), filepath.Join(subDir, e.Name()), opts.Force); cpErr != nil {
+					return nil, fmt.Errorf("copy %s/%s to .claude: %w", sub, e.Name(), cpErr)
+				}
 				continue
 			}
 			// For commands: only .md files. For other subdirs: all non-sidecar files.
@@ -397,7 +399,9 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 		entries, _ := os.ReadDir(vaultSubDir)
 		for _, e := range entries {
 			if e.IsDir() {
-				copyDir(filepath.Join(vaultSubDir, e.Name()), filepath.Join(subPath, e.Name()), true)
+				if _, cpErr := copyDir(filepath.Join(vaultSubDir, e.Name()), filepath.Join(subPath, e.Name()), true); cpErr != nil {
+					return nil, fmt.Errorf("copy %s/%s to agentctx: %w", sub, e.Name(), cpErr)
+				}
 				continue
 			}
 			// For commands: only .md files. For other subdirs: all non-sidecar files.

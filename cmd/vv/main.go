@@ -703,10 +703,10 @@ func runVault() {
 		} else {
 			fmt.Println("status:  dirty (uncommitted changes)")
 		}
-		if s.HasRemote {
-			fmt.Printf("remote:  %s\n", s.Remote)
-			fmt.Printf("ahead:   %d\n", s.Ahead)
-			fmt.Printf("behind:  %d\n", s.Behind)
+		if s.HasRemote() {
+			for _, r := range s.Remotes {
+				fmt.Printf("remote:  %s (ahead: %d, behind: %d)\n", r.Name, r.Ahead, r.Behind)
+			}
 		} else {
 			fmt.Println("remote:  (none)")
 		}
@@ -761,10 +761,20 @@ func runVault() {
 		}
 		if result.CommitSHA == "" {
 			fmt.Println("vault: nothing to commit")
-		} else if result.Pushed {
-			fmt.Printf("vault: committed and pushed (%s)\n", result.CommitSHA)
+		} else if result.AllPushed() {
+			fmt.Printf("vault: committed and pushed to %d remote(s) (%s)\n",
+				len(result.RemoteResults), result.CommitSHA)
+		} else if result.AnyPushed() {
+			fmt.Printf("vault: committed (%s), partial push:\n", result.CommitSHA)
+			for name, pushErr := range result.RemoteResults {
+				if pushErr != nil {
+					fmt.Printf("  %s: FAILED (%v)\n", name, pushErr)
+				} else {
+					fmt.Printf("  %s: ok\n", name)
+				}
+			}
 		} else {
-			fmt.Printf("vault: committed (%s) but push failed — resolve manually\n", result.CommitSHA)
+			fmt.Printf("vault: committed (%s) but all pushes failed — resolve manually\n", result.CommitSHA)
 		}
 
 	default:
