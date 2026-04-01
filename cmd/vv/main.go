@@ -353,15 +353,15 @@ func runContext() {
 				}
 			}
 			agentctxPath := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx")
-			diffs := vvcontext.DiffProjectCommands(agentctxPath)
+			diffs := vvcontext.DiffProjectContent(agentctxPath)
 			if len(diffs) == 0 {
-				fmt.Println("No outdated commands.")
+				fmt.Println("No pending updates.")
 				return
 			}
 			for _, d := range diffs {
 				diff := templates.UnifiedDiff(
-					"a/commands/"+d.Name+" (current)",
-					"b/commands/"+d.Name+" (updated)",
+					"a/"+d.Name+" (current)",
+					"b/"+d.Name+" (updated)",
 					d.Current,
 					d.Pending,
 				)
@@ -390,7 +390,7 @@ func runContext() {
 			agentctxPath := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx")
 			file := flagValue(args[1:], "--file")
 			keepMine := hasFlag(args[1:], "--keep-mine")
-			actions, err := vvcontext.AcceptCommands(agentctxPath, file, keepMine)
+			actions, err := vvcontext.AcceptPending(agentctxPath, file, keepMine)
 			if err != nil {
 				fatal("%v", err)
 			}

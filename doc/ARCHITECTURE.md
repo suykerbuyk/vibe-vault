@@ -186,16 +186,35 @@ Claude Code / AI agent
 vv context init          vv context sync          vv context diff/accept
     │                        │                        │
     ▼                        ▼                        ▼
-context.Init()           context.Sync()           templates.Diff()
+context.Init()           context.Sync()           context.Diff/Accept()
     │                        │                        │
     ▼                        ▼                        ▼
-Scaffold agentctx/       Run migrations           Compare vault commands
-from templates.           (schema 0→4)            vs embedded defaults
+Scaffold agentctx/       Run migrations           Compare project files
+from templates.           (schema 0→7)            vs .pending sidecars
     │                        │                        │
     ▼                        ▼                        ▼
-Create repo symlinks     Propagate shared          Show delta / copy
-(CLAUDE.md, .claude/)    commands to projects      updated commands
+Create repo symlinks     Propagate shared          Show delta / accept
+(CLAUDE.md, .claude/)    content (cmds+skills)     across all subdirs
 ```
+
+### Template Cascade (three-tier, seed-once)
+
+```
+Tier 1: Embedded binary            Tier 2: Vault Templates/       Tier 3: Project agentctx/
+(templates/agentctx/**)            (Templates/agentctx/**)        (Projects/<proj>/agentctx/**)
+         │                                  │                              │
+         │ EnsureVaultTemplates()           │ propagateSharedSubdir()     │ runtime reads
+         │ safeWrite (seed only,            │ content-hash compare,       │ by AI agents
+         │ never overwrites)                │ .pending or --force         │
+         ▼                                  ▼                              ▼
+   New files appear              Edits here flow to all          .pinned = exempt
+   automatically on              projects on next sync           .pending = review needed
+   vv upgrade; edits                                             --force = overwrite
+   to existing files
+   DO NOT propagate
+```
+
+Source of truth: Tier 2 (vault) once seeded. See DESIGN.md decision #46.
 
 ## Module Responsibilities
 
@@ -203,11 +222,11 @@ Create repo symlinks     Propagate shared          Show delta / copy
 |---------|------|----------------|
 | `cmd/vv` | `main.go` | CLI arg parsing, subcommand routing (including hook sub-subcommands), help via `internal/help`, `wantsHelp()` flag guard, unknown flag rejection, `runTrends()` with `--project` and `--weeks` flags, `runInject()` with `--project`/`--format`/`--sections`/`--max-tokens` flags, `runExport()` with `--format`/`--project` flags, `runContext()` with `sync` sub-subcommand (`--project`/`--all`/`--dry-run`/`--force`), `runCheck()` agentctx schema check |
 | `cmd/gen-man` | `main.go` | Generates `man/*.1` files from help registry (Subcommands + HookSubcommands + ContextSubcommands) |
-| `templates` | `embed.go` | `//go:embed all:agentctx` — embeds 9 agentctx template `.md` files into the binary; `AgentctxFS()` returns the `embed.FS`. Templates use `{{PROJECT}}`/`{{DATE}}` placeholders resolved at runtime |
+| `templates` | `embed.go` | `//go:embed all:agentctx` — embeds 22 agentctx template files (commands, skills, settings) into the binary; `AgentctxFS()` returns the `embed.FS`. Templates use `{{PROJECT}}`/`{{DATE}}` placeholders resolved at runtime. These are Tier 1 of the three-tier template cascade (see DESIGN.md #46) |
 | `context` | `context.go` | `Init()` — scaffold vault-resident context (templates from embed.FS, repo-side CLAUDE.md symlink + .claude/{commands,rules,skills,agents} symlinks, agentctx symlink, .version); `Migrate()` — copy local files to vault + force-update repo-side; `claudeSubdirs` var defines .claude/ subdirectories; helpers: safeWrite, safeSymlink, gitignoreEnsure, copyFile/Dir |
 | `context` | `schema.go` | `VersionFile` TOML struct, `ReadVersion`/`WriteVersion`, `LatestSchemaVersion` const (4), `Migration` type + registry (0→1 writes .version, 1→2 adds symlinks/relative paths, 2→3 adds per-project config.toml, 3→4 CLAUDE.md symlink + .claude/ subdirs), `migrationsFrom()` |
 | `context` | `sync.go` | `Sync()` — run schema migrations + shared command propagation for one or all projects; `SyncOpts`/`SyncResult`/`ProjectSyncResult` types; `discoverProjects()`, `propagateSharedCommands()`, `migrate1to2()`, `migrate2to3()`, `migrate3to4()` |
-| `context` | `template.go` | `TemplateVars`, `DefaultVars()`, `resolveTemplate()` (vault Templates/agentctx/ first, fallback to `templates.AgentctxFS()`), `readEmbedded()`, `applyVars()` ({{PROJECT}}/{{DATE}}), `BuiltinTemplates()` (walks embed.FS), `EnsureVaultTemplates()` |
+| `context` | `template.go` | `TemplateVars`, `DefaultVars()`, `resolveTemplate()` (vault Templates/agentctx/ first, fallback to `templates.AgentctxFS()`), `readEmbedded()`, `applyVars()` ({{PROJECT}}/{{DATE}}), `BuiltinTemplates()` (walks embed.FS), `EnsureVaultTemplates()` (seed-once: writes new files to vault, never overwrites — Tier 1→2 in template cascade) |
 | `friction` | `types.go` | `Correction`, `Signals`, `Result`, `ProjectFriction` types |
 | `friction` | `detect.go` | `DetectCorrections()` — linguistic (negation, redirect, undo, quality, repetition) + contextual (short negation after long assistant turn) correction detection |
 | `friction` | `score.go` | `Score()` — weighted composite friction score (0-100): correction density (30), token efficiency (25), file retry (20), error cycles (15), recurring threads (10) |

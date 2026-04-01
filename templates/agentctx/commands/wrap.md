@@ -27,7 +27,9 @@ Specifically:
   the session's work and resume.md history — if a task has been implemented and
   committed, use `vv_manage_task` with `action: retire` to move it to done/,
   and update the resume.md file inventory accordingly
-- Write commit.msg using the Write tool (it is a regular file at the repo root).
+- Read commit.msg using the Read tool first (it likely exists from a prior
+  iteration), then overwrite it using the Write tool. The Read tool must be
+  called before Write will allow overwriting an existing file.
   commit.msg is NOT a repo-tracked file — do NOT stage it.
 - Ensure the commit.msg is complete and standalone in documenting all the code
   changes, features added and bugs or warnings resolved. Don't be terse, be verbose.
@@ -37,10 +39,20 @@ Specifically:
 
 Do not add "Co-Authored-By" lines to commit messages or source files.
 
-After staging project files, sync vault changes to the remote:
-- Run `vv vault push` via Bash to commit and push vault changes
-- If it reports a push failure, show the error and help the user resolve
-  interactively — do not retry beyond what vv already does internally
+After staging project files, sync vault changes to all remotes:
+
+1. **Discover remotes**: Run `git remote` in the vault directory (read
+   `vault_path` from `~/.config/vibe-vault/config.toml`) to dynamically
+   discover all configured remotes. Do NOT assume any particular remote name
+   (e.g., "origin") — vaults typically use names like `github`, `vault`, etc.
+2. **Commit vault changes**: Run `git -C <vault_path> add -A` then
+   `git -C <vault_path> commit -m "<short summary>"`. If nothing to commit,
+   skip.
+3. **Push to each remote**: For each discovered remote, run
+   `git -C <vault_path> push <remote> main`. If a push fails, show the error
+   and continue to the next remote — do not abort the entire wrap.
+4. If all pushes fail (no remote, network error), warn and proceed — local
+   state is still valid.
 
 Do not ask for confirmation — just do the updates, stage the files, show what
 changed, and note that the user should review before committing.

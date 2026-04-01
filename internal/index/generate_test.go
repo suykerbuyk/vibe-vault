@@ -28,7 +28,9 @@ func TestGenerateContext_WritesHistoryMd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := GenerateContext(idx, vaultPath, ContextOptions{})
+	// Pin Now so the 30-day timeline window always includes the test entry.
+	pinned := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	result, err := GenerateContext(idx, vaultPath, ContextOptions{Now: pinned})
 	if err != nil {
 		t.Fatalf("GenerateContext: %v", err)
 	}

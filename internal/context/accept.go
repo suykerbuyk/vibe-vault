@@ -9,35 +9,74 @@ import (
 	"strings"
 )
 
-// AcceptCommands processes pending command updates in agentctxPath/commands/.
-// If keepMine is true, it writes a .pinned marker and removes .pending (keeping
-// the current version). Otherwise it copies .pending over the original and
-// removes .pending.
-// If file is non-empty, only that file is processed; otherwise all .pending files.
-func AcceptCommands(agentctxPath, file string, keepMine bool) ([]FileAction, error) {
-	cmdsDir := filepath.Join(agentctxPath, "commands")
-
+// AcceptPending processes pending updates across all propagated subdirectories
+// (commands, skills). If keepMine is true, it writes a .pinned marker and
+// removes .pending (keeping the current version). Otherwise it copies .pending
+// over the original and removes .pending.
+// If file is non-empty (e.g. "commands/wrap.md"), only that file is processed;
+// otherwise all .pending files across all subdirs.
+func AcceptPending(agentctxPath, file string, keepMine bool) ([]FileAction, error) {
 	if file != "" {
-		action, err := acceptOne(cmdsDir, file, keepMine)
+		// Parse subdir from qualified path (e.g. "commands/wrap.md").
+		// Fall back to commands/ for bare filenames (backward compat).
+		subdir := "commands"
+		name := file
+		if i := strings.IndexByte(file, '/'); i >= 0 {
+			subdir = file[:i]
+			name = file[i+1:]
+		}
+		dir := filepath.Join(agentctxPath, subdir)
+		action, err := acceptOne(dir, subdir, name, keepMine)
 		if err != nil {
 			return nil, err
 		}
 		return []FileAction{action}, nil
 	}
 
-	// Process all .pending files
-	entries, err := os.ReadDir(cmdsDir)
+	var actions []FileAction
+	for _, sub := range propagateDirs {
+		subActions, err := acceptSubdir(agentctxPath, sub, keepMine)
+		if err != nil {
+			return nil, err
+		}
+		actions = append(actions, subActions...)
+	}
+	return actions, nil
+}
+
+// AcceptCommands processes pending command updates in agentctxPath/commands/.
+// Deprecated: use AcceptPending for multi-subdir processing.
+func AcceptCommands(agentctxPath, file string, keepMine bool) ([]FileAction, error) {
+	cmdsDir := filepath.Join(agentctxPath, "commands")
+
+	if file != "" {
+		action, err := acceptOne(cmdsDir, "commands", file, keepMine)
+		if err != nil {
+			return nil, err
+		}
+		return []FileAction{action}, nil
+	}
+
+	return acceptSubdir(agentctxPath, "commands", keepMine)
+}
+
+func acceptSubdir(agentctxPath, subdir string, keepMine bool) ([]FileAction, error) {
+	dir := filepath.Join(agentctxPath, subdir)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 
 	var actions []FileAction
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md.pending") {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".pending") {
 			continue
 		}
 		baseName := strings.TrimSuffix(e.Name(), ".pending")
-		action, err := acceptOne(cmdsDir, baseName, keepMine)
+		action, err := acceptOne(dir, subdir, baseName, keepMine)
 		if err != nil {
 			return nil, err
 		}
@@ -46,25 +85,23 @@ func AcceptCommands(agentctxPath, file string, keepMine bool) ([]FileAction, err
 	return actions, nil
 }
 
-func acceptOne(cmdsDir, name string, keepMine bool) (FileAction, error) {
-	pendingPath := filepath.Join(cmdsDir, name+".pending")
-	originalPath := filepath.Join(cmdsDir, name)
+func acceptOne(dir, subdir, name string, keepMine bool) (FileAction, error) {
+	pendingPath := filepath.Join(dir, name+".pending")
+	originalPath := filepath.Join(dir, name)
 
 	if keepMine {
-		// Write .pinned marker and remove .pending
-		pinnedPath := filepath.Join(cmdsDir, name+".pinned")
+		pinnedPath := filepath.Join(dir, name+".pinned")
 		if err := os.WriteFile(pinnedPath, []byte("pinned\n"), 0o644); err != nil {
 			return FileAction{}, err
 		}
 		os.Remove(pendingPath)
 		return FileAction{
-			Path:     "commands/" + name,
+			Path:     subdir + "/" + name,
 			Action:   "SKIP",
 			Location: "vault",
 		}, nil
 	}
 
-	// Accept: copy .pending over original, remove .pending
 	data, err := os.ReadFile(pendingPath)
 	if err != nil {
 		return FileAction{}, err
@@ -74,7 +111,7 @@ func acceptOne(cmdsDir, name string, keepMine bool) (FileAction, error) {
 	}
 	os.Remove(pendingPath)
 	return FileAction{
-		Path:     "commands/" + name,
+		Path:     subdir + "/" + name,
 		Action:   "UPDATE",
 		Location: "vault",
 	}, nil

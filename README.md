@@ -359,11 +359,12 @@ vv inject --max-tokens 500                   # compact output
 vv context init                       # scaffold context from current directory
 vv context init --project myproject   # specify project name
 vv context migrate                    # copy existing RESUME.md/HISTORY.md/tasks/commands to vault
-vv context sync                       # run schema migrations + deploy commands to repo
+vv context sync                       # run schema migrations + deploy templates to repo
 vv context sync --all                 # sync all projects (vault-only operations)
 vv context sync --dry-run             # preview changes without modifying files
-vv context diff                       # review pending command updates
-vv context accept                     # accept or pin outdated commands
+vv context sync --force               # force overwrite non-pinned files from vault templates
+vv context diff                       # review pending template updates (commands + skills)
+vv context accept                     # accept or pin pending template updates
 ```
 
 **MCP server for AI agent integration:**

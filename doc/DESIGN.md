@@ -305,11 +305,12 @@ Key architectural and design decisions in vibe-vault, with rationale.
     precedence; automatic captures get `status: auto-captured`. Controlled by
     `[zed] auto_capture` config (default true).
 
-41. **Outdated command detection via content hashing:** `vv context sync`
-    compares shared command files against their vault-resident copies using
-    SHA-256 content hashes. `vv context diff` shows the delta, `vv context
-    accept` pulls updates. This catches command template drift without requiring
-    schema version bumps.
+41. **Outdated template detection via content hashing:** `vv context sync`
+    compares shared files (commands, skills) against their vault-resident copies
+    using SHA-256 content hashes. Without `--force`, changed files get `.pending`
+    sidecars; `vv context diff` shows the delta, `vv context accept` pulls
+    updates. With `--force`, non-pinned files are overwritten directly. `.pinned`
+    markers are always respected.
 
 42. **MCP context gateway — read/write/bootstrap tools for agent-managed
     context.** 9 new tools added across three phases: read tools
@@ -365,3 +366,31 @@ Key architectural and design decisions in vibe-vault, with rationale.
     (`vv_update_resume`, `vv_append_iteration`, `vv_manage_task`) now use
     `mdutil.AtomicWriteFile()` for safe writes and `mdutil.ReplaceSectionBody()`
     for heading-targeted edits.
+
+46. **Three-tier template cascade with seed-once semantics:** Template
+    content flows through three tiers during `vv context sync`:
+
+    **Tier 1 — Embedded binary** (`templates/agentctx/**`, compiled into `vv`
+    via `//go:embed`): The upstream source. `EnsureVaultTemplates()` seeds
+    these into Tier 2 using `safeWrite`, which **never overwrites** existing
+    files. New files added to the binary appear in the vault automatically;
+    edits to existing embedded templates do not propagate — the vault copy
+    takes precedence once seeded. This is intentional: it allows users to
+    customize vault templates without upgrades clobbering their changes.
+
+    **Tier 2 — Vault `Templates/agentctx/`**: The operational source of truth
+    for project propagation. `propagateSharedSubdir()` reads from here and
+    compares against per-project copies using content hashing. Manual edits
+    here flow to all projects on next sync (via `.pending` sidecars or
+    `--force` direct overwrite). This is the correct place to make template
+    changes that should affect all projects.
+
+    **Tier 3 — `Projects/<project>/agentctx/`**: Per-project deployed copies.
+    Divergence from Tier 2 produces `.pending` sidecars resolved via
+    `vv context diff`/`accept`. Files with `.pinned` markers are exempt from
+    propagation. This tier is what agents actually read at runtime.
+
+    Consequence: after upgrading `vv`, new template files appear automatically
+    but updated content in existing templates requires manually editing the
+    vault's `Templates/agentctx/` copy — or deleting it so
+    `EnsureVaultTemplates` re-seeds from the binary.

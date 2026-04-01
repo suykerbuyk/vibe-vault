@@ -143,11 +143,11 @@ func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*P
 	}
 
 	// Propagate shared content from vault templates (commands, skills).
-	// If migrations ran, force-update non-pinned content directly (no .pending).
-	migrationsRan := psr.FromVersion != psr.ToVersion
+	// Force-update when migrations ran OR --force flag is set.
+	forceUpdate := psr.FromVersion != psr.ToVersion || opts.Force
 	for _, sub := range propagateDirs {
 		if !opts.DryRun {
-			subActions := propagateSharedSubdir(cfg.VaultPath, agentctxPath, sub, false, migrationsRan)
+			subActions := propagateSharedSubdir(cfg.VaultPath, agentctxPath, sub, false, forceUpdate)
 			psr.Actions = append(psr.Actions, subActions...)
 
 			// Deploy to repo (skip in --all mode).
@@ -157,7 +157,7 @@ func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*P
 				psr.Actions = append(psr.Actions, deployActions...)
 			}
 		} else {
-			subActions := propagateSharedSubdir(cfg.VaultPath, agentctxPath, sub, true, migrationsRan)
+			subActions := propagateSharedSubdir(cfg.VaultPath, agentctxPath, sub, true, forceUpdate)
 			psr.Actions = append(psr.Actions, subActions...)
 		}
 	}

@@ -1377,4 +1377,108 @@ func TestInit_DeploysSkillDirectories(t *testing.T) {
 	}
 }
 
+func TestSync_ForceWithoutMigration(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	// Create project at latest schema — no migration will run.
+	agentctxDir := filepath.Join(vault, "Projects", "forcetest", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+	vf := newVersionFile(LatestSchemaVersion)
+	WriteVersion(agentctxDir, vf)
+
+	// Create vault template with newer content.
+	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
+	os.MkdirAll(tmplCmds, 0o755)
+	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte("# Updated Template"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# Old Content"), 0o644)
+
+	// Sync WITHOUT --force: should create .pending sidecar.
+	result, err := Sync(cfg, cwd, SyncOpts{Project: "forcetest"})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	var foundOutdated bool
+	for _, psr := range result.Projects {
+		for _, a := range psr.Actions {
+			if a.Path == "commands/wrap.md" && a.Action == "OUTDATED" {
+				foundOutdated = true
+			}
+		}
+	}
+	if !foundOutdated {
+		t.Error("expected OUTDATED action without --force")
+	}
+	pendingPath := filepath.Join(agentctxDir, "commands", "wrap.md.pending")
+	if _, statErr := os.Stat(pendingPath); os.IsNotExist(statErr) {
+		t.Fatal(".pending sidecar should exist without --force")
+	}
+
+	// Sync WITH --force: should overwrite directly, remove .pending.
+	result, err = Sync(cfg, cwd, SyncOpts{Project: "forcetest", Force: true})
+	if err != nil {
+		t.Fatalf("Sync --force: %v", err)
+	}
+	var foundUpdate bool
+	for _, psr := range result.Projects {
+		for _, a := range psr.Actions {
+			if a.Path == "commands/wrap.md" && a.Action == "UPDATE" {
+				foundUpdate = true
+			}
+		}
+	}
+	if !foundUpdate {
+		t.Error("expected UPDATE action with --force")
+	}
+
+	// Project file should have new content.
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "commands", "wrap.md"))
+	if string(data) != "# Updated Template" {
+		t.Errorf("project file = %q, want '# Updated Template'", string(data))
+	}
+
+	// .pending should be cleaned up.
+	if _, err := os.Stat(pendingPath); !os.IsNotExist(err) {
+		t.Error(".pending should be removed with --force")
+	}
+}
+
+func TestSync_ForceRespectsPin(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	agentctxDir := filepath.Join(vault, "Projects", "pintest", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+	vf := newVersionFile(LatestSchemaVersion)
+	WriteVersion(agentctxDir, vf)
+
+	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
+	os.MkdirAll(tmplCmds, 0o755)
+	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte("# New"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# Custom"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md.pinned"), []byte("pinned\n"), 0o644)
+
+	result, err := Sync(cfg, cwd, SyncOpts{Project: "pintest", Force: true})
+	if err != nil {
+		t.Fatalf("Sync --force: %v", err)
+	}
+
+	// Pinned file should produce no actions.
+	for _, psr := range result.Projects {
+		for _, a := range psr.Actions {
+			if a.Path == "commands/wrap.md" {
+				t.Errorf("pinned file should not have any action, got %q", a.Action)
+			}
+		}
+	}
+
+	// Content should be preserved.
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "commands", "wrap.md"))
+	if string(data) != "# Custom" {
+		t.Errorf("pinned file was overwritten: %q", string(data))
+	}
+}
+
 // testConfig is defined in context_test.go
