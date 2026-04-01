@@ -312,8 +312,7 @@ Sync brings them up to date, propagates any new shared commands from
 vv context sync                    # sync current project
 vv context sync --all              # sync all projects (vault-only)
 vv context sync --dry-run          # preview changes
-vv context diff                    # review pending command updates
-vv context accept                  # accept or pin outdated commands
+vv context sync --force            # overwrite conflicts
 ```
 
 ### How it works after setup
@@ -389,8 +388,7 @@ vv reprocess --project myproject   # one project only
 | Init project context | `vv context init` |
 | Migrate local context | `vv context migrate` |
 | Sync schema/commands | `vv context sync` |
-| Review command updates | `vv context diff` |
-| Accept command updates | `vv context accept` |
+| Override conflicts | `vv context sync --force` |
 | Process one file | `vv process path/to/transcript.jsonl` |
 | Per-command help | `vv <command> --help` |
 | Man pages | `man vv` or `man vv-<command>` |

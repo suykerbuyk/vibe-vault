@@ -305,12 +305,12 @@ Key architectural and design decisions in vibe-vault, with rationale.
     precedence; automatic captures get `status: auto-captured`. Controlled by
     `[zed] auto_capture` config (default true).
 
-41. **Outdated template detection via content hashing:** `vv context sync`
-    compares shared files (commands, skills) against their vault-resident copies
-    using SHA-256 content hashes. Without `--force`, changed files get `.pending`
-    sidecars; `vv context diff` shows the delta, `vv context accept` pulls
-    updates. With `--force`, non-pinned files are overwritten directly. `.pinned`
-    markers are always respected.
+41. **Three-way baseline template sync:** `vv context sync` uses `.baseline`
+    files to track what was last synced to each project. Three-way comparison
+    (template vs baseline vs project file) distinguishes user customizations
+    from stale templates. Unchanged files auto-update; user edits are preserved
+    unless `--force` overrides conflicts. `.pinned` markers are always respected.
+    Vault templates are refreshed from Go embeds on every sync (schema v8).
 
 42. **MCP context gateway — read/write/bootstrap tools for agent-managed
     context.** 9 new tools added across three phases: read tools
@@ -371,26 +371,74 @@ Key architectural and design decisions in vibe-vault, with rationale.
     content flows through three tiers during `vv context sync`:
 
     **Tier 1 — Embedded binary** (`templates/agentctx/**`, compiled into `vv`
-    via `//go:embed`): The upstream source. `EnsureVaultTemplates()` seeds
-    these into Tier 2 using `safeWrite`, which **never overwrites** existing
-    files. New files added to the binary appear in the vault automatically;
-    edits to existing embedded templates do not propagate — the vault copy
-    takes precedence once seeded. This is intentional: it allows users to
-    customize vault templates without upgrades clobbering their changes.
+    via `//go:embed`): The single source of truth. `forceUpdateVaultTemplates()`
+    overwrites Tier 2 on every `vv context sync`, ensuring vault templates
+    always match the current binary. `EnsureVaultTemplates()` (safeWrite,
+    seed-only) is still used by `Init()` for first-time project setup.
 
-    **Tier 2 — Vault `Templates/agentctx/`**: The operational source of truth
-    for project propagation. `propagateSharedSubdir()` reads from here and
-    compares against per-project copies using content hashing. Manual edits
-    here flow to all projects on next sync (via `.pending` sidecars or
-    `--force` direct overwrite). This is the correct place to make template
-    changes that should affect all projects.
+    **Tier 2 — Vault `Templates/agentctx/`**: Refreshed from Go embeds on
+    every `vv context sync`. `propagateSharedSubdir()` reads from here and
+    uses three-way baseline comparison against per-project copies. Template
+    changes auto-propagate to untouched files; user-customized files are
+    preserved unless `--force` overrides conflicts.
 
-    **Tier 3 — `Projects/<project>/agentctx/`**: Per-project deployed copies.
-    Divergence from Tier 2 produces `.pending` sidecars resolved via
-    `vv context diff`/`accept`. Files with `.pinned` markers are exempt from
+    **Tier 3 — `Projects/<project>/agentctx/`**: Per-project deployed copies
+    with `.baseline` tracking. Files with `.pinned` markers are exempt from
     propagation. This tier is what agents actually read at runtime.
 
-    Consequence: after upgrading `vv`, new template files appear automatically
-    but updated content in existing templates requires manually editing the
-    vault's `Templates/agentctx/` copy — or deleting it so
-    `EnsureVaultTemplates` re-seeds from the binary.
+    Consequence: after upgrading `vv`, `vv context sync` auto-updates all
+    template-derived files that haven't been manually edited. Customized
+    files are preserved (CUSTOMIZED or CONFLICT action) unless `--force` is
+    used. `.pinned` markers permanently opt out of propagation.
+
+47. **Future direction: vault Templates layer reassessment.** With schema v8,
+    the vault `Templates/agentctx/` directory serves primarily as a
+    pass-through cache: Go embeds overwrite it on every sync, then
+    `propagateSharedSubdir()` reads from it to propagate to projects. The
+    three-way `.baseline` tracking at the project level now handles the core
+    problem the vault layer was designed for — distinguishing user edits from
+    stale templates.
+
+    **Two competing workflows drive the current three-tier design:**
+
+    *Developer workflow (build from source):* Embeds are edited directly in
+    `templates/agentctx/`, compiled into the binary, and should flow outward
+    immediately. The vault Templates copy is always stale the moment source
+    templates change. For this workflow, vault Templates are pure overhead.
+
+    *End-user workflow (binary release):* Embeds are frozen at install time.
+    Vault Templates are the only place to customize what propagates to all
+    projects — e.g., adding a team-specific `/deploy` command or editing
+    `/wrap` for a different git workflow. Without this layer, per-project
+    customization (via `.baseline` conflict detection) still works, but
+    there's no "customize once, propagate everywhere" mechanism.
+
+    **The remaining unique capability of vault Templates** is user-created
+    files that don't exist in Go embeds. `forceUpdateVaultTemplates()` only
+    writes files present in the embed filesystem — it never deletes user
+    additions. A custom `Templates/agentctx/commands/deploy.md` would persist
+    across upgrades and propagate to all projects on sync.
+
+    **Possible future simplifications:**
+
+    - *Two-tier model:* Propagate directly from embeds to project agentctx,
+      eliminating the vault Templates directory entirely. Simplest, but loses
+      the "custom templates for all projects" capability. `.baseline` tracking
+      at the project level still handles upgrade conflicts correctly.
+
+    - *Custom overlay directory:* Introduce `Templates/agentctx/custom/` (or
+      similar) for user-created templates that `vv` never overwrites. The rest
+      of `Templates/agentctx/` becomes a true cache with no user-facing role.
+      Cleanly separates vv-managed content from user-managed content.
+
+    - *Status quo:* Keep three tiers. Low-cost overhead (one extra directory
+      write per sync). The vault is under git, so the Templates directory has
+      full history and three-way merge capability via the vault's own source
+      control. No urgency to simplify until real-world usage patterns clarify
+      whether anyone uses vault-level template customization.
+
+    **Current recommendation:** Leave as-is. Document that vault Templates
+    exist as a propagation cache plus optional customization overlay, but Go
+    embeds are the source of truth for vv-shipped content. Revisit if users
+    report confusion about the three-tier model or request better custom
+    template support.

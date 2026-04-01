@@ -220,7 +220,7 @@ var expectedTerminal = map[string]string{
 
 	"context": "vv context \u2014 manage vault-resident AI context files\n" +
 		"\n" +
-		"Usage: vv context [init | migrate | sync | diff | accept]\n" +
+		"Usage: vv context [init | migrate | sync]\n" +
 		"\n" +
 		"Manages AI workflow context files (resume, iterations, tasks) that live\n" +
 		"in the Obsidian vault rather than as untracked repo-local files. This\n" +
@@ -229,8 +229,11 @@ var expectedTerminal = map[string]string{
 		"Typical workflow:\n" +
 		"  1. vv context init     First-time setup for a new project\n" +
 		"  2. vv context sync     Run after updating vv to get new features\n" +
-		"  3. vv context diff     Review pending command updates\n" +
-		"  4. vv context accept   Accept or pin outdated commands\n" +
+		"\n" +
+		"Sync uses three-way comparison (template vs baseline vs project file)\n" +
+		"to auto-update untouched files and preserve user customizations. Use\n" +
+		"--force to override conflicts. Use .pinned markers to permanently\n" +
+		"opt out of updates for specific files.\n" +
 		"\n" +
 		"Use \"migrate\" only if you have an older project with local RESUME.md\n" +
 		"or HISTORY.md files that predate vault-resident context.\n" +
@@ -238,9 +241,7 @@ var expectedTerminal = map[string]string{
 		"Subcommands:\n" +
 		"  vv context init      First-time setup: create context files + repo bootstrap\n" +
 		"  vv context migrate   One-time: move legacy local files into vault\n" +
-		"  vv context sync      Ongoing: apply schema upgrades + deploy commands\n" +
-		"  vv context diff      Show pending command diffs\n" +
-		"  vv context accept    Accept or pin outdated command updates\n",
+		"  vv context sync      Ongoing: apply schema upgrades + deploy commands\n",
 
 	"inject": "vv inject \u2014 output session-start context payload\n" +
 		"\n" +

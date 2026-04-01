@@ -76,8 +76,9 @@ func Sync(cfg config.Config, cwd string, opts SyncOpts) (*SyncResult, error) {
 func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*ProjectSyncResult, error) {
 	agentctxPath := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx")
 
-	// Ensure vault templates are seeded (idempotent — safeWrite never overwrites)
-	EnsureVaultTemplates(cfg.VaultPath)
+	// Refresh vault templates from Go embeds (always overwrite — embeds are
+	// the source of truth, vault templates are a propagation cache).
+	forceUpdateVaultTemplates(cfg.VaultPath)
 
 	// Read current version
 	vf, err := ReadVersion(agentctxPath)
@@ -143,11 +144,11 @@ func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*P
 	}
 
 	// Propagate shared content from vault templates (commands, skills).
-	// Force-update when migrations ran OR --force flag is set.
-	forceUpdate := psr.FromVersion != psr.ToVersion || opts.Force
+	// Force when migrations ran OR --force flag is set.
+	force := psr.FromVersion != psr.ToVersion || opts.Force
 	for _, sub := range propagateDirs {
 		if !opts.DryRun {
-			subActions := propagateSharedSubdir(cfg.VaultPath, agentctxPath, sub, false, forceUpdate)
+			subActions := propagateSharedSubdir(cfg.VaultPath, agentctxPath, sub, false, force)
 			psr.Actions = append(psr.Actions, subActions...)
 
 			// Deploy to repo (skip in --all mode).
@@ -157,7 +158,7 @@ func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*P
 				psr.Actions = append(psr.Actions, deployActions...)
 			}
 		} else {
-			subActions := propagateSharedSubdir(cfg.VaultPath, agentctxPath, sub, true, forceUpdate)
+			subActions := propagateSharedSubdir(cfg.VaultPath, agentctxPath, sub, true, force)
 			psr.Actions = append(psr.Actions, subActions...)
 		}
 	}
@@ -190,16 +191,26 @@ func discoverProjects(vaultPath string) []string {
 var propagateDirs = []string{"commands", "skills"}
 
 // propagateSharedCommands is a backward-compatible wrapper.
-func propagateSharedCommands(vaultPath, agentctxPath string, dryRun, forceUpdate bool) []FileAction {
-	return propagateSharedSubdir(vaultPath, agentctxPath, "commands", dryRun, forceUpdate)
+func propagateSharedCommands(vaultPath, agentctxPath string, dryRun, force bool) []FileAction {
+	return propagateSharedSubdir(vaultPath, agentctxPath, "commands", dryRun, force)
 }
 
-// propagateSharedSubdir copies entries from Templates/agentctx/{subdir}/
-// to a project's agentctx/{subdir}/, without overwriting existing files.
-// For "commands", only .md files are propagated (with .pending/.pinned support).
+// propagateSharedSubdir propagates entries from Templates/agentctx/{subdir}/
+// to a project's agentctx/{subdir}/ using three-way baseline comparison.
+//
+// For each file, the logic compares template (source of truth), project file,
+// and .baseline (record of last sync). This distinguishes user customizations
+// from stale templates:
+//   - Template unchanged since last sync → nothing to do
+//   - Template changed, user didn't touch → auto-update
+//   - Template changed, user also changed → CONFLICT (skip unless force)
+//   - No baseline (legacy) + identical → backfill baseline
+//   - No baseline (legacy) + different → treat as user-customized
+//
+// For "commands", only .md files are propagated.
 // For other subdirs (skills, agents, rules), all non-sidecar files and
 // directories are propagated.
-func propagateSharedSubdir(vaultPath, agentctxPath, subdir string, dryRun, forceUpdate bool) []FileAction {
+func propagateSharedSubdir(vaultPath, agentctxPath, subdir string, dryRun, force bool) []FileAction {
 	templatesDir := filepath.Join(vaultPath, "Templates", "agentctx", subdir)
 	entries, err := os.ReadDir(templatesDir)
 	if err != nil {
@@ -212,124 +223,167 @@ func propagateSharedSubdir(vaultPath, agentctxPath, subdir string, dryRun, force
 	for _, e := range entries {
 		// Directory entries (e.g., skills/startup-analyst/)
 		if e.IsDir() {
-			actions = append(actions, propagateDir(templatesDir, projectSubDir, subdir, e.Name(), dryRun, forceUpdate)...)
+			actions = append(actions, propagateDir(templatesDir, projectSubDir, subdir, e.Name(), dryRun)...)
 			continue
 		}
 		// For commands: only .md files. For other subdirs: all non-sidecar files.
 		if subdir == "commands" && !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		if strings.HasSuffix(e.Name(), ".pending") || strings.HasSuffix(e.Name(), ".pinned") {
-			continue
-		}
-		dstPath := filepath.Join(projectSubDir, e.Name())
-		if _, err := os.Stat(dstPath); err == nil {
-			// Check for .pinned marker — user chose to keep their version
-			if _, pinErr := os.Stat(dstPath + ".pinned"); pinErr == nil {
-				continue
-			}
-			// Compare contents
-			srcPath := filepath.Join(templatesDir, e.Name())
-			srcData, err := os.ReadFile(srcPath)
-			if err != nil {
-				continue
-			}
-			dstData, err := os.ReadFile(dstPath)
-			if err != nil {
-				continue
-			}
-			if bytes.Equal(bytes.TrimSpace(srcData), bytes.TrimSpace(dstData)) {
-				continue // identical
-			}
-			if forceUpdate {
-				// Migration updated templates — overwrite non-pinned files directly
-				if !dryRun {
-					if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
-						actions = append(actions, FileAction{
-							Path:   subdir + "/" + e.Name(),
-							Action: "ERROR: " + err.Error(),
-						})
-						continue
-					}
-					os.Remove(dstPath + ".pending") // clean stale .pending
-				}
-				actions = append(actions, FileAction{
-					Path:     subdir + "/" + e.Name(),
-					Action:   "UPDATE",
-					Location: "vault",
-				})
-				continue
-			}
-			// Write .pending sidecar with new version
-			pendingPath := dstPath + ".pending"
-			if !dryRun {
-				if err := os.MkdirAll(projectSubDir, 0o755); err != nil {
-					actions = append(actions, FileAction{
-						Path:   subdir + "/" + e.Name() + ".pending",
-						Action: "ERROR: " + err.Error(),
-					})
-					continue
-				}
-				if err := os.WriteFile(pendingPath, srcData, 0o644); err != nil {
-					actions = append(actions, FileAction{
-						Path:   subdir + "/" + e.Name() + ".pending",
-						Action: "ERROR: " + err.Error(),
-					})
-					continue
-				}
-			}
-			actions = append(actions, FileAction{
-				Path:     subdir + "/" + e.Name(),
-				Action:   "OUTDATED",
-				Location: "vault",
-			})
-			continue
-		}
-
-		if dryRun {
-			actions = append(actions, FileAction{
-				Path:     subdir + "/" + e.Name(),
-				Action:   "DRY-RUN",
-				Location: "vault",
-			})
+		if isSidecar(e.Name()) {
 			continue
 		}
 
 		srcPath := filepath.Join(templatesDir, e.Name())
-		data, err := os.ReadFile(srcPath)
+		dstPath := filepath.Join(projectSubDir, e.Name())
+		qualPath := subdir + "/" + e.Name()
+
+		srcData, err := os.ReadFile(srcPath)
 		if err != nil {
-			actions = append(actions, FileAction{
-				Path:   subdir + "/" + e.Name(),
-				Action: "ERROR: " + err.Error(),
-			})
 			continue
 		}
-		if err := os.MkdirAll(projectSubDir, 0o755); err != nil {
-			actions = append(actions, FileAction{
-				Path:   subdir + "/" + e.Name(),
-				Action: "ERROR: " + err.Error(),
-			})
+
+		// File doesn't exist in project → CREATE + write .baseline
+		if _, statErr := os.Stat(dstPath); statErr != nil {
+			if dryRun {
+				actions = append(actions, FileAction{Path: qualPath, Action: "DRY-RUN", Location: "vault"})
+				continue
+			}
+			if mkErr := os.MkdirAll(projectSubDir, 0o755); mkErr != nil {
+				actions = append(actions, FileAction{Path: qualPath, Action: "ERROR: " + mkErr.Error()})
+				continue
+			}
+			if wErr := os.WriteFile(dstPath, srcData, 0o644); wErr != nil {
+				actions = append(actions, FileAction{Path: qualPath, Action: "ERROR: " + wErr.Error()})
+				continue
+			}
+			writeBaseline(dstPath, srcData)
+			cleanPending(dstPath)
+			actions = append(actions, FileAction{Path: qualPath, Action: "CREATE", Location: "vault"})
 			continue
 		}
-		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
-			actions = append(actions, FileAction{
-				Path:   subdir + "/" + e.Name(),
-				Action: "ERROR: " + err.Error(),
-			})
+
+		// .pinned → always skip
+		if _, pinErr := os.Stat(dstPath + ".pinned"); pinErr == nil {
 			continue
 		}
-		actions = append(actions, FileAction{
-			Path:     subdir + "/" + e.Name(),
-			Action:   "CREATE",
-			Location: "vault",
-		})
+
+		dstData, err := os.ReadFile(dstPath)
+		if err != nil {
+			continue
+		}
+		baselineData, hasBaseline := readBaseline(dstPath)
+
+		tmpl := bytes.TrimSpace(srcData)
+		proj := bytes.TrimSpace(dstData)
+		base := bytes.TrimSpace(baselineData)
+
+		if !hasBaseline {
+			// Legacy file from before baseline tracking.
+			if bytes.Equal(tmpl, proj) {
+				// Identical — backfill .baseline silently
+				if !dryRun {
+					writeBaseline(dstPath, srcData)
+					cleanPending(dstPath)
+				}
+				continue
+			}
+			// Different and no baseline — treat as user-customized.
+			// With --force, overwrite anyway.
+			if force {
+				if !dryRun {
+					if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
+						actions = append(actions, FileAction{Path: qualPath, Action: "ERROR: " + err.Error()})
+						continue
+					}
+					writeBaseline(dstPath, srcData)
+					cleanPending(dstPath)
+				}
+				actions = append(actions, FileAction{Path: qualPath, Action: "UPDATE", Location: "vault"})
+				continue
+			}
+			actions = append(actions, FileAction{Path: qualPath, Action: "CUSTOMIZED", Location: "vault"})
+			continue
+		}
+
+		// Three-way comparison with baseline.
+		if bytes.Equal(tmpl, base) {
+			// Template unchanged since last sync — nothing to do.
+			// (User may have customized, but template hasn't changed.)
+			if !dryRun {
+				cleanPending(dstPath)
+			}
+			continue
+		}
+
+		// Template changed since last sync.
+		if bytes.Equal(proj, base) {
+			// User hasn't touched the file → safe to auto-update.
+			if dryRun {
+				actions = append(actions, FileAction{Path: qualPath, Action: "DRY-RUN", Location: "vault"})
+				continue
+			}
+			if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
+				actions = append(actions, FileAction{Path: qualPath, Action: "ERROR: " + err.Error()})
+				continue
+			}
+			writeBaseline(dstPath, srcData)
+			cleanPending(dstPath)
+			actions = append(actions, FileAction{Path: qualPath, Action: "UPDATE", Location: "vault"})
+			continue
+		}
+
+		// Both template and user changed → conflict.
+		if force {
+			if !dryRun {
+				if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
+					actions = append(actions, FileAction{Path: qualPath, Action: "ERROR: " + err.Error()})
+					continue
+				}
+				writeBaseline(dstPath, srcData)
+				cleanPending(dstPath)
+			}
+			actions = append(actions, FileAction{Path: qualPath, Action: "UPDATE", Location: "vault"})
+			continue
+		}
+		if !dryRun {
+			cleanPending(dstPath)
+		}
+		actions = append(actions, FileAction{Path: qualPath, Action: "CONFLICT", Location: "vault"})
 	}
 	return actions
 }
 
+// isSidecar returns true for .pending, .pinned, and .baseline sidecar files.
+func isSidecar(name string) bool {
+	return strings.HasSuffix(name, ".pending") ||
+		strings.HasSuffix(name, ".pinned") ||
+		strings.HasSuffix(name, ".baseline")
+}
+
+// writeBaseline writes a .baseline sidecar with TrimSpace-normalized content.
+func writeBaseline(dstPath string, data []byte) {
+	_ = os.WriteFile(dstPath+".baseline", bytes.TrimSpace(data), 0o644)
+}
+
+// readBaseline reads the .baseline sidecar for a file.
+// Returns the content and true if the baseline exists, nil and false otherwise.
+func readBaseline(dstPath string) ([]byte, bool) {
+	data, err := os.ReadFile(dstPath + ".baseline")
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// cleanPending removes a legacy .pending sidecar if it exists.
+func cleanPending(dstPath string) {
+	os.Remove(dstPath + ".pending")
+}
+
 // propagateDir handles propagation of a directory entry (e.g., a skill directory).
-// Directories use skip-or-overwrite semantics: no .pending support.
-func propagateDir(templatesDir, projectSubDir, subdir, name string, dryRun, forceUpdate bool) []FileAction {
+// Directories use content-change detection: update only if template differs.
+func propagateDir(templatesDir, projectSubDir, subdir, name string, dryRun bool) []FileAction {
 	srcDir := filepath.Join(templatesDir, name)
 	dstDir := filepath.Join(projectSubDir, name)
 
@@ -339,8 +393,8 @@ func propagateDir(templatesDir, projectSubDir, subdir, name string, dryRun, forc
 	}
 
 	if _, err := os.Stat(dstDir); err == nil {
-		// Directory exists — only overwrite on forceUpdate
-		if !forceUpdate {
+		// Directory exists — update only if template content differs
+		if !dirContentsChanged(srcDir, dstDir) {
 			return nil
 		}
 		if dryRun {
@@ -650,8 +704,8 @@ func deploySubdirToRepo(repoPath, agentctxPath, subdir string) []FileAction {
 		if subdir == "commands" && !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		// Skip .pending and .pinned sidecars
-		if strings.HasSuffix(e.Name(), ".pending") || strings.HasSuffix(e.Name(), ".pinned") {
+		// Skip sidecar files (.pending, .pinned, .baseline)
+		if isSidecar(e.Name()) {
 			continue
 		}
 		srcPath := filepath.Join(vaultSubDir, e.Name())
@@ -741,9 +795,26 @@ func migrate5to6(ctx MigrationContext) ([]FileAction, error) {
 
 // migrate6to7 propagates skills from vault templates to all projects.
 func migrate6to7(ctx MigrationContext) ([]FileAction, error) {
-	actions := propagateSharedSubdir(ctx.VaultPath, ctx.AgentctxPath, "skills", false, true)
+	actions := propagateSharedSubdir(ctx.VaultPath, ctx.AgentctxPath, "skills", false, true) // force=true
 	if ctx.RepoPath != "" {
 		actions = append(actions, deploySubdirToRepo(ctx.RepoPath, ctx.AgentctxPath, "skills")...)
+	}
+	return actions, nil
+}
+
+// migrate7to8 level-sets all projects: force-updates vault templates from Go
+// embeds and overwrites all non-pinned project files with baselines.
+// This establishes the .baseline tracking needed for three-way sync.
+func migrate7to8(ctx MigrationContext) ([]FileAction, error) {
+	// Vault templates were already refreshed at the top of syncProject.
+	// Force-propagate to this project and write .baseline files.
+	var actions []FileAction
+	for _, sub := range propagateDirs {
+		subActions := propagateSharedSubdir(ctx.VaultPath, ctx.AgentctxPath, sub, false, true) // force=true
+		actions = append(actions, subActions...)
+		if ctx.RepoPath != "" {
+			actions = append(actions, deploySubdirToRepo(ctx.RepoPath, ctx.AgentctxPath, sub)...)
+		}
 	}
 	return actions, nil
 }

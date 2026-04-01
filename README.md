@@ -300,7 +300,7 @@ deterministic heuristics rather than embeddings.
 | `vv vault status` | Show vault git state (branch, clean/dirty, ahead/behind) |
 | `vv vault pull` | Fetch + rebase vault with automatic conflict resolution |
 | `vv vault push [--message X]` | Commit all vault changes and push to remote |
-| `vv context [init \| migrate \| sync \| diff \| accept]` | Manage vault-resident AI context files |
+| `vv context [init \| migrate \| sync]` | Manage vault-resident AI context files |
 | `vv mcp` | Start MCP server for AI agent integration |
 | `vv mcp install` | Register MCP server in all detected editors |
 | `vv mcp uninstall` | Remove MCP server from all detected editors |
@@ -362,9 +362,7 @@ vv context migrate                    # copy existing RESUME.md/HISTORY.md/tasks
 vv context sync                       # run schema migrations + deploy templates to repo
 vv context sync --all                 # sync all projects (vault-only operations)
 vv context sync --dry-run             # preview changes without modifying files
-vv context sync --force               # force overwrite non-pinned files from vault templates
-vv context diff                       # review pending template updates (commands + skills)
-vv context accept                     # accept or pin pending template updates
+vv context sync --force               # overwrite user-customized files (resolve conflicts)
 ```
 
 **MCP server for AI agent integration:**
@@ -745,7 +743,7 @@ Knox's thesis maps directly onto vibe-vault's roadmap:
 
 ### Test Suite
 
-**1184 tests** across 33 test packages + **1 integration test** with 22
+**1187 tests** across 33 test packages + **1 integration test** with 22
 subtests. The integration test exercises the full pipeline:
 `init` → `process` → `index` → `stats` →
 `backfill` → `archive` → `checkpoint lifecycle` → `friction` →
@@ -760,10 +758,11 @@ make check         # everything: vet + unit + integration
 
 ### Stack
 
-- Go 1.25, two dependencies: [BurntSushi/toml](https://github.com/BurntSushi/toml),
-  [klauspost/compress](https://github.com/klauspost/compress)
+- Go 1.25, three direct dependencies: [BurntSushi/toml](https://github.com/BurntSushi/toml),
+  [klauspost/compress](https://github.com/klauspost/compress),
+  [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) (for Zed thread parsing)
 - No LLM SDKs — enrichment uses `net/http` from stdlib
-- No CGO — cross-compiles cleanly
+- No CGO — cross-compiles cleanly (pure-Go SQLite)
 
 ## License
 

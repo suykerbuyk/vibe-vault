@@ -556,7 +556,7 @@ var CmdContext = Command{
 	Name:     "context",
 	Synopsis: "manage vault-resident AI context files",
 	Brief:    "Manage vault-resident AI context",
-	Usage:      "vv context [init | migrate | sync | diff | accept]",
+	Usage:      "vv context [init | migrate | sync]",
 	TableUsage: "vv context [init | ...]",
 	Description: `Manages AI workflow context files (resume, iterations, tasks) that live
 in the Obsidian vault rather than as untracked repo-local files. This
@@ -565,8 +565,11 @@ makes context portable, searchable, and visible to Obsidian.
 Typical workflow:
   1. vv context init     First-time setup for a new project
   2. vv context sync     Run after updating vv to get new features
-  3. vv context diff     Review pending command updates
-  4. vv context accept   Accept or pin outdated commands
+
+Sync uses three-way comparison (template vs baseline vs project file)
+to auto-update untouched files and preserve user customizations. Use
+--force to override conflicts. Use .pinned markers to permanently
+opt out of updates for specific files.
 
 Use "migrate" only if you have an older project with local RESUME.md
 or HISTORY.md files that predate vault-resident context.
@@ -574,10 +577,8 @@ or HISTORY.md files that predate vault-resident context.
 Subcommands:
   vv context init      First-time setup: create context files + repo bootstrap
   vv context migrate   One-time: move legacy local files into vault
-  vv context sync      Ongoing: apply schema upgrades + deploy commands
-  vv context diff      Show pending command diffs
-  vv context accept    Accept or pin outdated command updates`,
-	SeeAlso: []string{"vv(1)", "vv-context-init(1)", "vv-context-migrate(1)", "vv-context-sync(1)", "vv-context-diff(1)", "vv-context-accept(1)"},
+  vv context sync      Ongoing: apply schema upgrades + deploy commands`,
+	SeeAlso: []string{"vv(1)", "vv-context-init(1)", "vv-context-migrate(1)", "vv-context-sync(1)"},
 }
 
 var CmdContextInit = Command{
@@ -657,21 +658,26 @@ var CmdContextSync = Command{
 		{Name: "--project <name>", Desc: "Override auto-detected project name"},
 		{Name: "--all", Desc: "Sync all projects (vault-only, skip repo deployment)"},
 		{Name: "--dry-run", Desc: "Report changes without modifying any files"},
-		{Name: "--force", Desc: "Force overwrite non-pinned files from vault templates (skips .pending workflow)"},
+		{Name: "--force", Desc: "Overwrite user-customized files (resolve conflicts)"},
 	},
 	Description: `Run this from your repo root after upgrading vv to pick up new features.
 
 What sync does:
-  1. Schema migrations — upgrades the vault-side agentctx directory and
+  1. Refreshes vault templates from the Go-embedded defaults
+  2. Schema migrations — upgrades the vault-side agentctx directory and
      repo-side files (CLAUDE.md, .claude/commands/) to the latest version
-  2. Template propagation — copies commands and skills from vault templates
-     into the project's agentctx/ and deploys to repo .claude/
+  3. Template propagation — uses three-way comparison (template vs baseline
+     vs project file) to update commands and skills
 
-Without --force, changed templates create .pending sidecars (use
-"vv context diff" to review, "vv context accept" to apply). With --force,
-non-pinned files are overwritten directly from vault templates.
+Three-way sync behavior:
+  - Template unchanged → nothing to do
+  - Template changed, you didn't edit → auto-update (UPDATE)
+  - Template changed, you also edited → skip (CONFLICT)
+  - New file in template → create (CREATE)
+  - You edited, template unchanged → preserved (no action)
 
-Pinned files (.pinned marker) are always preserved, even with --force.
+Use --force to overwrite CONFLICT files. Use .pinned markers to
+permanently opt out of updates for specific files.
 
 In --all mode, only vault-side operations are performed (no repo-side
 deployment). Run from each repo root without --all for repo-side updates.`,
@@ -679,57 +685,9 @@ deployment). Run from each repo root without --all for repo-side updates.`,
 		"vv context sync                       Sync current project",
 		"vv context sync --dry-run             Preview changes",
 		"vv context sync --all                 Sync all projects (vault-only)",
-		"vv context sync --project myproject   Sync a specific project",
+		"vv context sync --force               Override conflicts",
 	},
 	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-templates(1)"},
-}
-
-var CmdContextDiff = Command{
-	Name:     "context diff",
-	Synopsis: "show diffs for pending template updates",
-	Brief:    "Diff pending template updates",
-	Usage:    "vv context diff [--project <name>]",
-	Flags: []Flag{
-		{Name: "--project <name>", Desc: "Override auto-detected project name"},
-	},
-	Description: `Shows unified diffs for project files that have pending template updates.
-
-When "vv context sync" detects that a vault template has changed since the
-project file was deployed, it writes a .pending sidecar and reports OUTDATED.
-This command shows what changed across commands/ and skills/ so you can decide
-whether to accept the update or keep your version.`,
-	Examples: []string{
-		"vv context diff                       Diff current project",
-		"vv context diff --project myproject   Diff a specific project",
-	},
-	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-context-sync(1)", "vv-context-accept(1)"},
-}
-
-var CmdContextAccept = Command{
-	Name:     "context accept",
-	Synopsis: "accept or pin pending template updates",
-	Brief:    "Accept or pin template updates",
-	Usage:    "vv context accept [--project <name>] [--file <name>] [--keep-mine]",
-	Flags: []Flag{
-		{Name: "--project <name>", Desc: "Override auto-detected project name"},
-		{Name: "--file <name>", Desc: "Accept only this file (e.g. commands/wrap.md)"},
-		{Name: "--keep-mine", Desc: "Pin current version instead of accepting the update"},
-	},
-	Description: `Resolves pending template updates from "vv context sync".
-
-Processes .pending files across commands/ and skills/ subdirectories.
-
-Without --keep-mine, the pending template update replaces the current file.
-With --keep-mine, a .pinned marker is written so future syncs skip the file.
-
-Without --file, all pending updates are processed.`,
-	Examples: []string{
-		"vv context accept                                         Accept all pending updates",
-		"vv context accept --file commands/wrap.md                 Accept one update",
-		"vv context accept --file commands/wrap.md --keep-mine     Pin your version",
-		"vv context accept --project myproject --keep-mine         Pin all for a project",
-	},
-	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-context-sync(1)", "vv-context-diff(1)"},
 }
 
 var CmdTemplates = Command{
@@ -973,8 +931,6 @@ var ContextSubcommands = []Command{
 	CmdContextInit,
 	CmdContextMigrate,
 	CmdContextSync,
-	CmdContextDiff,
-	CmdContextAccept,
 }
 
 // McpSubcommands is the ordered list of mcp sub-subcommands.

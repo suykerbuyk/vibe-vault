@@ -180,7 +180,7 @@ func Init(cfg config.Config, cwd string, opts Opts) (*InitResult, error) {
 			if sub == "commands" && !strings.HasSuffix(e.Name(), ".md") {
 				continue
 			}
-			if strings.HasSuffix(e.Name(), ".pending") || strings.HasSuffix(e.Name(), ".pinned") {
+			if isSidecar(e.Name()) {
 				continue
 			}
 			data, err := os.ReadFile(filepath.Join(vaultSubDir, e.Name()))
@@ -408,7 +408,7 @@ func Migrate(cfg config.Config, cwd string, opts Opts) (*MigrateResult, error) {
 			if sub == "commands" && !strings.HasSuffix(e.Name(), ".md") {
 				continue
 			}
-			if strings.HasSuffix(e.Name(), ".pending") || strings.HasSuffix(e.Name(), ".pinned") {
+			if isSidecar(e.Name()) {
 				continue
 			}
 			data, readErr := os.ReadFile(filepath.Join(vaultSubDir, e.Name()))

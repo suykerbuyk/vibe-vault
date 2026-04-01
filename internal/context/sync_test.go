@@ -454,42 +454,46 @@ func TestPropagateSharedCommands(t *testing.T) {
 	os.WriteFile(filepath.Join(tmplCmds, "new-cmd.md"), []byte("# New"), 0o644)
 	os.WriteFile(filepath.Join(tmplCmds, "existing.md"), []byte("# Template"), 0o644)
 
-	// Create existing project command
+	// Create existing project command (no baseline → legacy)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "existing.md"), []byte("# Project"), 0o644)
 
 	actions := propagateSharedCommands(vault, agentctxDir, false, false)
 
-	// Should have CREATE for new-cmd and OUTDATED for existing
+	// Should have CREATE for new-cmd and CUSTOMIZED for existing (legacy, no baseline)
 	if len(actions) != 2 {
 		t.Fatalf("expected 2 actions, got %d: %v", len(actions), actions)
 	}
 
-	createFound, outdatedFound := false, false
+	createFound, customizedFound := false, false
 	for _, a := range actions {
 		if a.Path == "commands/new-cmd.md" && a.Action == "CREATE" {
 			createFound = true
 		}
-		if a.Path == "commands/existing.md" && a.Action == "OUTDATED" {
-			outdatedFound = true
+		if a.Path == "commands/existing.md" && a.Action == "CUSTOMIZED" {
+			customizedFound = true
 		}
 	}
 	if !createFound {
 		t.Error("expected CREATE action for new-cmd.md")
 	}
-	if !outdatedFound {
-		t.Error("expected OUTDATED action for existing.md")
+	if !customizedFound {
+		t.Error("expected CUSTOMIZED action for existing.md")
 	}
 
-	// existing.md should keep project content
+	// existing.md should keep project content (not overwritten)
 	data, _ := os.ReadFile(filepath.Join(agentctxDir, "commands", "existing.md"))
 	if string(data) != "# Project" {
 		t.Errorf("existing command was overwritten: %q", string(data))
 	}
 
-	// new-cmd.md should exist
+	// new-cmd.md should exist with .baseline
 	data, _ = os.ReadFile(filepath.Join(agentctxDir, "commands", "new-cmd.md"))
 	if string(data) != "# New" {
 		t.Errorf("new command content = %q", string(data))
+	}
+	baseline, _ := os.ReadFile(filepath.Join(agentctxDir, "commands", "new-cmd.md.baseline"))
+	if string(baseline) != "# New" {
+		t.Errorf("baseline not written for new-cmd.md")
 	}
 }
 
@@ -576,12 +580,12 @@ func TestPropagateSharedCommands_ErrorSurfaced(t *testing.T) {
 	}
 }
 
-func TestPropagateSharedCommands_OutdatedDetected(t *testing.T) {
+func TestPropagateSharedCommands_CustomizedDetected(t *testing.T) {
 	vault := t.TempDir()
 	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
 	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
 
-	// Create template and project command with different content
+	// Create template and project command with different content (no baseline → legacy)
 	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
 	os.MkdirAll(tmplCmds, 0o755)
 	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte("# New Template Version"), 0o644)
@@ -589,29 +593,135 @@ func TestPropagateSharedCommands_OutdatedDetected(t *testing.T) {
 
 	actions := propagateSharedCommands(vault, agentctxDir, false, false)
 
-	// Should have OUTDATED action
+	// Should have CUSTOMIZED action (legacy file, no baseline, content differs)
 	if len(actions) != 1 {
 		t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
 	}
-	if actions[0].Action != "OUTDATED" {
-		t.Errorf("action = %q, want OUTDATED", actions[0].Action)
-	}
-	if actions[0].Path != "commands/wrap.md" {
-		t.Errorf("path = %q, want commands/wrap.md", actions[0].Path)
+	if actions[0].Action != "CUSTOMIZED" {
+		t.Errorf("action = %q, want CUSTOMIZED", actions[0].Action)
 	}
 
-	// .pending file should be written
-	pendingPath := filepath.Join(agentctxDir, "commands", "wrap.md.pending")
-	data, err := os.ReadFile(pendingPath)
-	if err != nil {
-		t.Fatalf("pending file not written: %v", err)
-	}
-	if string(data) != "# New Template Version" {
-		t.Errorf("pending content = %q", string(data))
+	// Project file should NOT be overwritten
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "commands", "wrap.md"))
+	if string(data) != "# Old Project Version" {
+		t.Errorf("project file was overwritten: %q", string(data))
 	}
 }
 
-func TestPropagateSharedCommands_IdenticalSkipped(t *testing.T) {
+func TestPropagateSharedCommands_BaselineAutoUpdate(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+
+	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
+	os.MkdirAll(tmplCmds, 0o755)
+
+	// Template changed, project matches baseline → auto-update
+	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte("# New Template"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# Old Template"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md.baseline"), []byte("# Old Template"), 0o644)
+
+	actions := propagateSharedCommands(vault, agentctxDir, false, false)
+
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
+	}
+	if actions[0].Action != "UPDATE" {
+		t.Errorf("action = %q, want UPDATE", actions[0].Action)
+	}
+
+	// Project file should be updated
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "commands", "wrap.md"))
+	if string(data) != "# New Template" {
+		t.Errorf("project file = %q, want # New Template", string(data))
+	}
+
+	// Baseline should be updated
+	baseline, _ := os.ReadFile(filepath.Join(agentctxDir, "commands", "wrap.md.baseline"))
+	if string(baseline) != "# New Template" {
+		t.Errorf("baseline = %q, want # New Template", string(baseline))
+	}
+}
+
+func TestPropagateSharedCommands_BaselineConflict(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+
+	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
+	os.MkdirAll(tmplCmds, 0o755)
+
+	// Template changed AND user edited → conflict
+	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte("# New Template"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# User Edit"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md.baseline"), []byte("# Original"), 0o644)
+
+	actions := propagateSharedCommands(vault, agentctxDir, false, false)
+
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
+	}
+	if actions[0].Action != "CONFLICT" {
+		t.Errorf("action = %q, want CONFLICT", actions[0].Action)
+	}
+
+	// Project file should NOT be overwritten
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "commands", "wrap.md"))
+	if string(data) != "# User Edit" {
+		t.Errorf("project file was overwritten: %q", string(data))
+	}
+}
+
+func TestPropagateSharedCommands_BaselineConflictForce(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+
+	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
+	os.MkdirAll(tmplCmds, 0o755)
+
+	// Template changed AND user edited, but --force
+	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte("# New Template"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# User Edit"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md.baseline"), []byte("# Original"), 0o644)
+
+	actions := propagateSharedCommands(vault, agentctxDir, false, true) // force=true
+
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
+	}
+	if actions[0].Action != "UPDATE" {
+		t.Errorf("action = %q, want UPDATE", actions[0].Action)
+	}
+
+	// Project file SHOULD be overwritten
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "commands", "wrap.md"))
+	if string(data) != "# New Template" {
+		t.Errorf("project file = %q, want # New Template", string(data))
+	}
+}
+
+func TestPropagateSharedCommands_TemplateUnchanged(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
+
+	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
+	os.MkdirAll(tmplCmds, 0o755)
+
+	// Template matches baseline — no action even if project is customized
+	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte("# Original"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# User Customized"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md.baseline"), []byte("# Original"), 0o644)
+
+	actions := propagateSharedCommands(vault, agentctxDir, false, false)
+
+	if len(actions) != 0 {
+		t.Errorf("expected 0 actions (template unchanged), got %d: %v", len(actions), actions)
+	}
+}
+
+func TestPropagateSharedCommands_IdenticalBackfillsBaseline(t *testing.T) {
 	vault := t.TempDir()
 	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
 	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
@@ -624,15 +734,18 @@ func TestPropagateSharedCommands_IdenticalSkipped(t *testing.T) {
 
 	actions := propagateSharedCommands(vault, agentctxDir, false, false)
 
-	// No actions — content is identical
+	// No actions — content is identical (baseline backfilled silently)
 	if len(actions) != 0 {
 		t.Errorf("expected 0 actions for identical content, got %d: %v", len(actions), actions)
 	}
 
-	// No .pending file
-	pendingPath := filepath.Join(agentctxDir, "commands", "wrap.md.pending")
-	if _, err := os.Stat(pendingPath); !os.IsNotExist(err) {
-		t.Error("pending file should not exist for identical content")
+	// .baseline should be backfilled
+	baseline, err := os.ReadFile(filepath.Join(agentctxDir, "commands", "wrap.md.baseline"))
+	if err != nil {
+		t.Fatal("baseline should be backfilled for identical content")
+	}
+	if string(baseline) != content {
+		t.Errorf("baseline = %q, want %q", string(baseline), content)
 	}
 }
 
@@ -662,7 +775,7 @@ func TestPropagateSharedCommands_PinnedSkipped(t *testing.T) {
 	}
 }
 
-func TestPropagateSharedCommands_ForceUpdateOverwrites(t *testing.T) {
+func TestPropagateSharedCommands_ForceOverwritesLegacy(t *testing.T) {
 	vault := t.TempDir()
 	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
 	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
@@ -672,7 +785,7 @@ func TestPropagateSharedCommands_ForceUpdateOverwrites(t *testing.T) {
 	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte("# New Template"), 0o644)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# Old Template"), 0o644)
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, true)
+	actions := propagateSharedCommands(vault, agentctxDir, false, true) // force
 
 	if len(actions) != 1 {
 		t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
@@ -682,17 +795,15 @@ func TestPropagateSharedCommands_ForceUpdateOverwrites(t *testing.T) {
 	}
 
 	// Project file should be overwritten
-	data, err := os.ReadFile(filepath.Join(agentctxDir, "commands", "wrap.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "commands", "wrap.md"))
 	if string(data) != "# New Template" {
 		t.Errorf("project file not overwritten, got %q", string(data))
 	}
 
-	// No .pending file
-	if _, err := os.Stat(filepath.Join(agentctxDir, "commands", "wrap.md.pending")); !os.IsNotExist(err) {
-		t.Error("pending file should not exist with forceUpdate")
+	// .baseline should be written
+	baseline, _ := os.ReadFile(filepath.Join(agentctxDir, "commands", "wrap.md.baseline"))
+	if string(baseline) != "# New Template" {
+		t.Errorf("baseline not written on force update")
 	}
 }
 
@@ -847,7 +958,7 @@ func TestSync_PropagatesThroughSymlink(t *testing.T) {
 	}
 }
 
-func TestPropagateSharedCommands_PendingErrorSurfaced(t *testing.T) {
+func TestPropagateSharedCommands_CreateErrorSurfaced(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("test requires non-root to trigger permission errors")
 	}
@@ -857,20 +968,19 @@ func TestPropagateSharedCommands_PendingErrorSurfaced(t *testing.T) {
 	cmdsDir := filepath.Join(agentctxDir, "commands")
 	os.MkdirAll(cmdsDir, 0o755)
 
-	// Create template and project command with different content (triggers OUTDATED)
+	// Template has a file that doesn't exist in project → CREATE path
 	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
 	os.MkdirAll(tmplCmds, 0o755)
-	os.WriteFile(filepath.Join(tmplCmds, "cmd.md"), []byte("# New Version"), 0o644)
-	os.WriteFile(filepath.Join(cmdsDir, "cmd.md"), []byte("# Old Version"), 0o644)
+	os.WriteFile(filepath.Join(tmplCmds, "newcmd.md"), []byte("# New"), 0o644)
 
-	// Make commands dir read-only so .pending write fails
+	// Make commands dir read-only so create fails
 	os.Chmod(cmdsDir, 0o555)
 	t.Cleanup(func() { os.Chmod(cmdsDir, 0o755) })
 
 	actions := propagateSharedCommands(vault, agentctxDir, false, false)
 
 	if len(actions) == 0 {
-		t.Fatal("expected ERROR action for .pending write, got empty slice")
+		t.Fatal("expected ERROR action for write failure, got empty slice")
 	}
 	if !strings.HasPrefix(actions[0].Action, "ERROR:") {
 		t.Errorf("action = %q, want ERROR: prefix", actions[0].Action)
@@ -1122,7 +1232,7 @@ func TestPropagateSharedSubdir_SkillsDirectory(t *testing.T) {
 	}
 }
 
-func TestPropagateSharedSubdir_SkillsExistingSkipped(t *testing.T) {
+func TestPropagateSharedSubdir_SkillsExistingUpdatedIfDifferent(t *testing.T) {
 	vault := t.TempDir()
 	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
 
@@ -1138,15 +1248,42 @@ func TestPropagateSharedSubdir_SkillsExistingSkipped(t *testing.T) {
 
 	actions := propagateSharedSubdir(vault, agentctxDir, "skills", false, false)
 
-	// No actions — existing directory is skipped
-	if len(actions) != 0 {
-		t.Errorf("expected 0 actions for existing skill, got %d: %v", len(actions), actions)
+	// Should update — content differs and not pinned
+	updateFound := false
+	for _, a := range actions {
+		if a.Path == "skills/my-skill" && a.Action == "UPDATE" {
+			updateFound = true
+		}
+	}
+	if !updateFound {
+		t.Errorf("expected UPDATE action for changed skill dir, got %v", actions)
 	}
 
-	// Original content preserved
+	// Content should be updated from template
 	data, _ := os.ReadFile(filepath.Join(projSkillDir, "SKILL.md"))
-	if string(data) != "# Custom" {
-		t.Errorf("existing skill was overwritten: %q", string(data))
+	if string(data) != "# Template" {
+		t.Errorf("skill file not updated: %q", string(data))
+	}
+}
+
+func TestPropagateSharedSubdir_SkillsExistingIdenticalSkipped(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+
+	// Create existing skill matching template
+	projSkillDir := filepath.Join(agentctxDir, "skills", "my-skill")
+	os.MkdirAll(projSkillDir, 0o755)
+	os.WriteFile(filepath.Join(projSkillDir, "SKILL.md"), []byte("# Same"), 0o644)
+
+	tmplSkillDir := filepath.Join(vault, "Templates", "agentctx", "skills", "my-skill")
+	os.MkdirAll(tmplSkillDir, 0o755)
+	os.WriteFile(filepath.Join(tmplSkillDir, "SKILL.md"), []byte("# Same"), 0o644)
+
+	actions := propagateSharedSubdir(vault, agentctxDir, "skills", false, false)
+
+	// No actions — identical content
+	if len(actions) != 0 {
+		t.Errorf("expected 0 actions for identical skill, got %d: %v", len(actions), actions)
 	}
 }
 
@@ -1377,53 +1514,100 @@ func TestInit_DeploysSkillDirectories(t *testing.T) {
 	}
 }
 
-func TestSync_ForceWithoutMigration(t *testing.T) {
+func TestSync_ThreeWayBaseline(t *testing.T) {
 	vault := t.TempDir()
 	cwd := t.TempDir()
 	cfg := testConfig(vault)
 
 	// Create project at latest schema — no migration will run.
-	agentctxDir := filepath.Join(vault, "Projects", "forcetest", "agentctx")
+	agentctxDir := filepath.Join(vault, "Projects", "baselinetest", "agentctx")
 	os.MkdirAll(filepath.Join(agentctxDir, "commands"), 0o755)
 	vf := newVersionFile(LatestSchemaVersion)
 	WriteVersion(agentctxDir, vf)
 
-	// Create vault template with newer content.
+	// Use a custom command name that won't be overwritten by forceUpdateVaultTemplates
+	// (which writes Go-embedded templates like wrap.md, restart.md, etc.)
 	tmplCmds := filepath.Join(vault, "Templates", "agentctx", "commands")
 	os.MkdirAll(tmplCmds, 0o755)
-	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte("# Updated Template"), 0o644)
-	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# Old Content"), 0o644)
+	os.WriteFile(filepath.Join(tmplCmds, "custom-test.md"), []byte("# Original"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "custom-test.md"), []byte("# Original"), 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "custom-test.md.baseline"), []byte("# Original"), 0o644)
 
-	// Sync WITHOUT --force: should create .pending sidecar.
-	result, err := Sync(cfg, cwd, SyncOpts{Project: "forcetest"})
+	// First sync: template unchanged → no action for our custom file.
+	result, err := Sync(cfg, cwd, SyncOpts{Project: "baselinetest"})
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
-	var foundOutdated bool
 	for _, psr := range result.Projects {
 		for _, a := range psr.Actions {
-			if a.Path == "commands/wrap.md" && a.Action == "OUTDATED" {
-				foundOutdated = true
+			if a.Path == "commands/custom-test.md" {
+				t.Errorf("unexpected action for unchanged template: %v", a)
 			}
 		}
 	}
-	if !foundOutdated {
-		t.Error("expected OUTDATED action without --force")
-	}
-	pendingPath := filepath.Join(agentctxDir, "commands", "wrap.md.pending")
-	if _, statErr := os.Stat(pendingPath); os.IsNotExist(statErr) {
-		t.Fatal(".pending sidecar should exist without --force")
-	}
 
-	// Sync WITH --force: should overwrite directly, remove .pending.
-	result, err = Sync(cfg, cwd, SyncOpts{Project: "forcetest", Force: true})
+	// Update the template AFTER the sync (so forceUpdateVaultTemplates won't clobber it).
+	os.WriteFile(filepath.Join(tmplCmds, "custom-test.md"), []byte("# Updated Template"), 0o644)
+
+	// Second sync: template changed, project untouched → auto UPDATE.
+	result, err = Sync(cfg, cwd, SyncOpts{Project: "baselinetest"})
 	if err != nil {
-		t.Fatalf("Sync --force: %v", err)
+		t.Fatalf("Sync: %v", err)
 	}
 	var foundUpdate bool
 	for _, psr := range result.Projects {
 		for _, a := range psr.Actions {
-			if a.Path == "commands/wrap.md" && a.Action == "UPDATE" {
+			if a.Path == "commands/custom-test.md" && a.Action == "UPDATE" {
+				foundUpdate = true
+			}
+		}
+	}
+	if !foundUpdate {
+		t.Error("expected UPDATE action for changed template + untouched project")
+	}
+
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "commands", "custom-test.md"))
+	if string(data) != "# Updated Template" {
+		t.Errorf("project file = %q, want '# Updated Template'", string(data))
+	}
+
+	// Now user customizes the file AND template changes again.
+	os.WriteFile(filepath.Join(agentctxDir, "commands", "custom-test.md"), []byte("# User Edit"), 0o644)
+	os.WriteFile(filepath.Join(tmplCmds, "custom-test.md"), []byte("# Even Newer Template"), 0o644)
+
+	// Third sync: both changed → CONFLICT.
+	result, err = Sync(cfg, cwd, SyncOpts{Project: "baselinetest"})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	var foundConflict bool
+	for _, psr := range result.Projects {
+		for _, a := range psr.Actions {
+			if a.Path == "commands/custom-test.md" && a.Action == "CONFLICT" {
+				foundConflict = true
+			}
+		}
+	}
+	if !foundConflict {
+		t.Error("expected CONFLICT action for both-changed case")
+	}
+
+	// Project should still have user's content.
+	data, _ = os.ReadFile(filepath.Join(agentctxDir, "commands", "custom-test.md"))
+	if string(data) != "# User Edit" {
+		t.Errorf("project file should not be overwritten on conflict: %q", string(data))
+	}
+
+	// Fourth sync with --force: override conflict.
+	os.WriteFile(filepath.Join(tmplCmds, "custom-test.md"), []byte("# Even Newer Template"), 0o644)
+	result, err = Sync(cfg, cwd, SyncOpts{Project: "baselinetest", Force: true})
+	if err != nil {
+		t.Fatalf("Sync --force: %v", err)
+	}
+	foundUpdate = false
+	for _, psr := range result.Projects {
+		for _, a := range psr.Actions {
+			if a.Path == "commands/custom-test.md" && a.Action == "UPDATE" {
 				foundUpdate = true
 			}
 		}
@@ -1431,16 +1615,9 @@ func TestSync_ForceWithoutMigration(t *testing.T) {
 	if !foundUpdate {
 		t.Error("expected UPDATE action with --force")
 	}
-
-	// Project file should have new content.
-	data, _ := os.ReadFile(filepath.Join(agentctxDir, "commands", "wrap.md"))
-	if string(data) != "# Updated Template" {
-		t.Errorf("project file = %q, want '# Updated Template'", string(data))
-	}
-
-	// .pending should be cleaned up.
-	if _, err := os.Stat(pendingPath); !os.IsNotExist(err) {
-		t.Error(".pending should be removed with --force")
+	data, _ = os.ReadFile(filepath.Join(agentctxDir, "commands", "custom-test.md"))
+	if string(data) != "# Even Newer Template" {
+		t.Errorf("project file = %q, want '# Even Newer Template'", string(data))
 	}
 }
 
