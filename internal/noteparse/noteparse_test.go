@@ -136,6 +136,34 @@ func TestExtractOpenThreads(t *testing.T) {
 	}
 }
 
+func TestCheckedThreadsSkipped(t *testing.T) {
+	input := `---
+date: 2026-03-01
+type: session
+project: test
+---
+
+## Open Threads
+
+- [ ] Still open
+- [x] Already resolved
+- [ ] Also open
+`
+	note, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(note.OpenThreads) != 2 {
+		t.Fatalf("OpenThreads len = %d, want 2", len(note.OpenThreads))
+	}
+	if note.OpenThreads[0] != "Still open" {
+		t.Errorf("OpenThreads[0] = %q, want %q", note.OpenThreads[0], "Still open")
+	}
+	if note.OpenThreads[1] != "Also open" {
+		t.Errorf("OpenThreads[1] = %q, want %q", note.OpenThreads[1], "Also open")
+	}
+}
+
 func TestExtractFilesChanged(t *testing.T) {
 	note, err := Parse(strings.NewReader(sampleNote))
 	if err != nil {

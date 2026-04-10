@@ -160,16 +160,15 @@ func extractBulletSection(lines []string, heading string) []string {
 	})
 }
 
-// extractCheckboxSection extracts checkbox items from a markdown section.
+// extractCheckboxSection extracts unchecked checkbox items from a markdown section.
+// Checked items (- [x]) are treated as resolved and skipped.
 func extractCheckboxSection(lines []string, heading string) []string {
 	return extractSection(lines, heading, func(line string) (string, bool) {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "- [ ] ") {
 			return strings.TrimSpace(trimmed[6:]), true
 		}
-		if strings.HasPrefix(trimmed, "- [x] ") {
-			return strings.TrimSpace(trimmed[6:]), true
-		}
+		// Skip resolved/checked items.
 		return "", false
 	})
 }
