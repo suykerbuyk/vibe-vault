@@ -1,10 +1,22 @@
-To the degree possible, I would like you to sequentially dispatch a subagent to complete each phase or task (your choice depending upon size), and for you to verify the deliverable matches the plan in form, fit, and intent.
+Dispatch one subagent per phase (or per task, if a phase is large) in sequence. Verify each deliverable against the plan in form, fit, and intent before moving on. Your job is context hygiene (stay under 200K tokens) — subagents implement, you verify.
 
-This workflow is intended to preserve AI thread context for you, the orchestrating agent to run this epic all the way through to the finish line while still remaining within a sane boundary for your thread token context (200K tokens). Let sub agents do the work, you verify their work and the conformance to the planned deliverables.
+## Orchestration
 
-If you encounter an issue during the subagent task completion review that might affect form, fit, function of the deliverable, pause and inform the human.  Explain the situation and offer options as to how to resolve it.  Do things right - don't guess, don't create "slop," don't hallucinate.  If in doubt, stop and ask for help from your pair programming partner, the human architect.
+- **Sequential dispatch is the default.** Parallel subagents on overlapping file surfaces conflict. Use parallel only when dependencies AND file-touch surfaces are provably independent.
+- **Prefer `isolation: "worktree"`.** Worktree-isolated subagents are empowered to commit their own work to their own branch — the worktree is the safety rail, the primary branch stays untouched until the orchestrator merges.
+- **Non-isolated subagents stage but do not commit.** If a subagent works directly in the main working tree, the human approves each commit.
+- **Orchestrator verifies, does not implement.** Read the diff, run the tests, inspect integration results.
 
-No work is done until:
-  - We achieve as close to 80% unit test coverage as is realistic.
-  - We prove the function does what it is supposed to do in the context of the full stack with integration test.
-  - Documentation has been updated.
+## Definition of done (per phase)
+
+- ≥80% unit test coverage, as close as realistic.
+- Integration test proves end-to-end behavior in the full stack.
+- Documentation updated (README, design, architecture, as relevant).
+
+## When to pause
+
+Any form/fit/function issue in review → STOP and tell the human. Explain the situation, offer options. Do not guess. No slop, no hallucination. When in doubt, ask your pair-programming partner.
+
+## Aggregate review
+
+After all phases complete, the human reviews the feature branch in aggregate and merges to main. Per-subcommit review is unnecessary when each subagent was isolated.
