@@ -100,6 +100,7 @@ func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*P
 			Project:      project,
 			VaultPath:    cfg.VaultPath,
 			Force:        opts.Force,
+			DryRun:       opts.DryRun,
 		}
 
 		if opts.DryRun {

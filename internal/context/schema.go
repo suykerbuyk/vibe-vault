@@ -15,7 +15,7 @@ import (
 )
 
 // LatestSchemaVersion is the current agentctx schema version.
-const LatestSchemaVersion = 8
+const LatestSchemaVersion = 9
 
 // VersionFile represents the .version TOML file in an agentctx directory.
 type VersionFile struct {
@@ -75,6 +75,7 @@ type MigrationContext struct {
 	Project      string
 	VaultPath    string
 	Force        bool
+	DryRun       bool // true when the migration should not modify disk state.
 }
 
 // migrations is the ordered list of all schema migrations.
@@ -87,6 +88,7 @@ var migrations = []Migration{
 	{From: 5, To: 6, Apply: migrate5to6},
 	{From: 6, To: 7, Apply: migrate6to7},
 	{From: 7, To: 8, Apply: migrate7to8},
+	{From: 8, To: 9, Apply: migrate8to9},
 }
 
 // migrationsFrom returns all migrations applicable from the given version.
