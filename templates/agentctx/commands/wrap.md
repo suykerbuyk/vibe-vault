@@ -27,10 +27,18 @@ Specifically:
   the session's work and resume.md history — if a task has been implemented and
   committed, use `vv_manage_task` with `action: retire` to move it to done/,
   and update the resume.md file inventory accordingly
-- Read commit.msg using the Read tool first (it likely exists from a prior
-  iteration), then overwrite it using the Write tool. The Read tool must be
-  called before Write will allow overwriting an existing file.
-  commit.msg is NOT a repo-tracked file — do NOT stage it.
+- Update commit.msg — there are TWO copies and BOTH must be kept in sync:
+    1. Vault archive: `<vault_path>/Projects/<project>/agentctx/commit.msg`
+       (the canonical source; survives across machines via vault git sync).
+    2. Project-root working copy: `<project_root>/commit.msg` (gitignored;
+       the path `git commit -F commit.msg` reads when the user runs it).
+  Workflow: Read the vault copy first (it likely exists from a prior
+  iteration — Read must be called before Write will overwrite), overwrite
+  the vault copy with the new message via Write, then copy the vault file
+  to the project root via Bash `cp`. Neither copy is repo-tracked — do NOT
+  stage either of them. Verify the project-root copy exists before finishing
+  (`ls <project_root>/commit.msg`); a missing project-root copy means
+  `git commit -F commit.msg` would fall back to a stale version or fail.
 - Ensure the commit.msg is complete and standalone in documenting all the code
   changes, features added and bugs or warnings resolved. Don't be terse, be verbose.
 - Stage all modified and newly added project files (use git add with explicit
