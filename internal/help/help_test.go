@@ -417,6 +417,26 @@ var expectedTerminal = map[string]string{
 	"version": "vv version \u2014 print version\n" +
 		"\n" +
 		"Usage: vv version\n",
+
+	"memory": "vv memory \u2014 manage Claude Code auto-memory symlink into vault\n" +
+		"\n" +
+		"Usage: vv memory [link | unlink]\n" +
+		"\n" +
+		"Establishes (or removes) a symlink from Claude Code's per-project\n" +
+		"auto-memory directory (~/.claude/projects/{slug}/memory/) into the\n" +
+		"project's vault-resident agentctx/memory/ directory.\n" +
+		"\n" +
+		"Once linked, Claude Code's native memory writes land on vault disk\n" +
+		"transparently \u2014 the vault git sync then carries them across machines,\n" +
+		"eliminating the per-host drift that otherwise plagues auto-memory.\n" +
+		"\n" +
+		"Only projects that have already been marked vibe-vault-tracked\n" +
+		"(i.e. Projects/{name}/agentctx/ exists in the vault) can be linked.\n" +
+		"Run 'vv init' (or 'vv context init') first for new projects.\n" +
+		"\n" +
+		"Subcommands:\n" +
+		"  vv memory link     Symlink host-local memory into the vault\n" +
+		"  vv memory unlink   Reverse the symlink (vault copy preserved)\n",
 }
 
 func TestFormatTerminal(t *testing.T) {
@@ -454,6 +474,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv inject [--project X]          Output session-start context payload\n" +
 		"  vv export [--format X]           Export session data (JSON or CSV)\n" +
 		"  vv effectiveness [--project X]   Analyze context effectiveness on outcomes\n" +
+		"  vv memory [link | ...]           Link Claude Code auto-memory into vault\n" +
 		"  vv vault <command>               Vault git sync (pull, push, status)\n" +
 		"  vv zed <subcommand>              Import Zed agent panel threads into vault\n" +
 		"  vv mcp [install | ...]           Start MCP server (JSON-RPC over stdio)\n" +
@@ -476,7 +497,7 @@ func TestFormatUsage(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "context", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "vault", "zed", "mcp", "templates", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "memory", "vault", "zed", "mcp", "templates", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))
@@ -544,6 +565,7 @@ func TestFormatRoffStructure(t *testing.T) {
 	allCmds = append(allCmds, ContextSubcommands...)
 	allCmds = append(allCmds, ZedSubcommands...)
 	allCmds = append(allCmds, TemplatesSubcommands...)
+	allCmds = append(allCmds, MemorySubcommands...)
 	// Test each subcommand has required sections
 	for _, cmd := range allCmds {
 		t.Run(cmd.Name, func(t *testing.T) {
@@ -656,6 +678,24 @@ func TestFormatTerminal_McpSubcommands(t *testing.T) {
 				t.Errorf("FormatTerminal(%q) missing usage line", cmd.Name)
 			}
 			// Verify description present
+			if cmd.Description != "" && !strings.Contains(out, cmd.Description) {
+				t.Errorf("FormatTerminal(%q) missing description", cmd.Name)
+			}
+		})
+	}
+}
+
+func TestFormatTerminal_MemorySubcommands(t *testing.T) {
+	for _, cmd := range MemorySubcommands {
+		t.Run(cmd.Name, func(t *testing.T) {
+			out := FormatTerminal(cmd)
+			prefix := fmt.Sprintf("vv %s — %s\n", cmd.Name, cmd.Synopsis)
+			if !strings.HasPrefix(out, prefix) {
+				t.Errorf("FormatTerminal(%q) header mismatch.\nwant prefix: %q\ngot:         %q", cmd.Name, prefix, out[:min(len(out), len(prefix)+20)])
+			}
+			if !strings.Contains(out, "Usage: "+cmd.Usage) {
+				t.Errorf("FormatTerminal(%q) missing usage line", cmd.Name)
+			}
 			if cmd.Description != "" && !strings.Contains(out, cmd.Description) {
 				t.Errorf("FormatTerminal(%q) missing description", cmd.Name)
 			}

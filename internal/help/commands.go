@@ -845,6 +845,98 @@ Shows thread ID, last updated time, message count, and title/summary.`,
 	SeeAlso: []string{"vv(1)", "vv-zed(1)"},
 }
 
+var CmdMemory = Command{
+	Name:       "memory",
+	Synopsis:   "manage Claude Code auto-memory symlink into vault",
+	Brief:      "Link Claude Code auto-memory into vault",
+	Usage:      "vv memory [link | unlink]",
+	TableUsage: "vv memory [link | ...]",
+	Description: `Establishes (or removes) a symlink from Claude Code's per-project
+auto-memory directory (~/.claude/projects/{slug}/memory/) into the
+project's vault-resident agentctx/memory/ directory.
+
+Once linked, Claude Code's native memory writes land on vault disk
+transparently — the vault git sync then carries them across machines,
+eliminating the per-host drift that otherwise plagues auto-memory.
+
+Only projects that have already been marked vibe-vault-tracked
+(i.e. Projects/{name}/agentctx/ exists in the vault) can be linked.
+Run 'vv init' (or 'vv context init') first for new projects.
+
+Subcommands:
+  vv memory link     Symlink host-local memory into the vault
+  vv memory unlink   Reverse the symlink (vault copy preserved)`,
+	SeeAlso: []string{"vv(1)", "vv-memory-link(1)", "vv-memory-unlink(1)", "vv-context(1)"},
+}
+
+var CmdMemoryLink = Command{
+	Name:     "memory link",
+	Synopsis: "symlink host-local auto-memory into the vault",
+	Brief:    "Symlink host-local memory into the vault",
+	Usage:    "vv memory link [--working-dir <path>] [--force] [--dry-run]",
+	Flags: []Flag{
+		{Name: "--working-dir <path>", Desc: "Project working directory (default: current directory)"},
+		{Name: "--force", Desc: "Override refusal on wrong-symlink or conflicting files"},
+		{Name: "--dry-run", Desc: "Report actions without modifying any files"},
+	},
+	Description: `Computes the Claude slug from the working directory (symlinks
+resolved, trailing slashes normalized), resolves the vibe-vault
+project name via the same detector used by the rest of vv
+(.vibe-vault.toml → git remote → basename), and arranges:
+
+  1. Creates VibeVault/Projects/{name}/agentctx/memory/ if missing.
+  2. Creates ~/.claude/projects/{slug}/ parent if missing (fresh
+     machine where Claude Code has not opened the project yet).
+  3. Migrates any pre-existing host-local memory into the vault
+     target (identical files dropped, unique files moved).
+  4. On content conflict without --force, refuses. With --force,
+     quarantines host-local copies under
+     agentctx/memory-conflicts/{timestamp}/ (a SIBLING of memory/,
+     not a child — so they never pollute auto-memory output).
+  5. Creates the symlink.
+
+Already-linked projects report "already linked" and exit 0.`,
+	Examples: []string{
+		"vv memory link                     Link from current directory",
+		"vv memory link --dry-run           Preview what would happen",
+		"vv memory link --force             Migrate despite conflicts",
+	},
+	SeeAlso: []string{"vv(1)", "vv-memory(1)", "vv-memory-unlink(1)"},
+}
+
+var CmdMemoryUnlink = Command{
+	Name:     "memory unlink",
+	Synopsis: "restore host-local auto-memory (rollback)",
+	Brief:    "Reverse memory link (vault copy preserved)",
+	Usage:    "vv memory unlink [--working-dir <path>] [--force] [--dry-run]",
+	Flags: []Flag{
+		{Name: "--working-dir <path>", Desc: "Project working directory (default: current directory)"},
+		{Name: "--force", Desc: "Detach even if the symlink target is unrelated"},
+		{Name: "--dry-run", Desc: "Report actions without modifying any files"},
+	},
+	Description: `Removes the host-local symlink, creates a real directory in its
+place, and copies every file from the vault target into it. The
+vault copy is NOT removed — it remains the durable store, so this
+command is safe to re-run.
+
+Refuses if the host-local path is a real directory (nothing to
+undo) or a symlink pointing somewhere unexpected (re-run with
+--force to detach anyway).
+
+This inverse is primarily for rollback; normal usage is link-only.`,
+	Examples: []string{
+		"vv memory unlink                   Reverse link for current project",
+		"vv memory unlink --dry-run         Preview rollback",
+	},
+	SeeAlso: []string{"vv(1)", "vv-memory(1)", "vv-memory-link(1)"},
+}
+
+// MemorySubcommands is the ordered list of memory sub-subcommands.
+var MemorySubcommands = []Command{
+	CmdMemoryLink,
+	CmdMemoryUnlink,
+}
+
 var CmdVault = Command{
 	Name:     "vault",
 	Synopsis: "vault git synchronization",
@@ -956,6 +1048,7 @@ var Subcommands = []Command{
 	CmdInject,
 	CmdExport,
 	CmdEffectiveness,
+	CmdMemory,
 	CmdVault,
 	CmdZed,
 	CmdMcp,

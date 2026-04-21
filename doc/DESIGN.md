@@ -442,3 +442,48 @@ Key architectural and design decisions in vibe-vault, with rationale.
     embeds are the source of truth for vv-shipped content. Revisit if users
     report confusion about the three-tier model or request better custom
     template support.
+
+48. **Auto-memory symlink from Claude Code into the vault:** `vv memory link`
+    establishes `~/.claude/projects/{slug}/memory/` as a symlink into
+    `Projects/{name}/agentctx/memory/` inside the vault. Once linked, Claude
+    Code's native auto-memory writes land on vault disk transparently, and
+    the existing vault git sync propagates memory across machines — no
+    sidecar process, no dedicated sync daemon.
+
+    - **Slug computation:** Absolute working-dir path with `/` replaced by
+      `-`, after `filepath.EvalSymlinks` resolves any symlinked cwd. Without
+      the symlink resolution, `~/code/proj` and a `~/work/alias-proj -> ~/code/proj`
+      symlink would produce two distinct slugs for one project, each pointing
+      at a different vault target — a silent split-brain. Trailing slashes
+      on `--working-dir` are trimmed before conversion.
+
+    - **Project name resolution via `session.DetectProject`:** Memory link
+      routes through the same identity-file → git-remote → basename chain
+      that session capture uses. Basename-only mapping was rejected: a
+      project cloned into a directory whose name diverges from its git
+      remote or `.vibe-vault.toml` identity would get a different vault
+      target than the rest of `vv` — an entire class of drift bugs for
+      zero implementation benefit. Consistency with the rest of the
+      binary is a hard requirement.
+
+    - **Conflict-directory placement is a sibling, not a child:** When
+      `--force` migration quarantines a host-local file whose content
+      diverges from the vault copy, the quarantined copy lands in
+      `Projects/{name}/agentctx/memory-conflicts/{timestamp}/`, explicitly
+      *outside* the linked memory directory. Claude Code actively reads
+      the memory directory at bootstrap; a conflict artifact inside it
+      would pollute auto-memory output on every session start. Keeping
+      conflicts as a sibling means the quarantined file is still visible
+      to humans reviewing the vault but never leaks back into the agent's
+      context window.
+
+    - **Scope gate:** Link refuses unless `Projects/{name}/agentctx/` already
+      exists (the implicit `vv init` marker). Scratch/experimental Claude
+      projects stay host-local until a human opts them in — mirroring every
+      session under `~/.claude/projects/` would fill the vault with noise.
+
+    - **Unlink is rollback-only:** `vv memory unlink` removes the symlink,
+      restores a real directory, and copies every vault-side file into it.
+      The vault copy is preserved as the durable store. Normal usage is
+      link-only; unlink exists so rollback is always well-defined rather
+      than requiring manual `rm` + `cp`.

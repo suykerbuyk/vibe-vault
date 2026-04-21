@@ -301,6 +301,8 @@ deterministic heuristics rather than embeddings.
 | `vv vault pull` | Fetch + rebase vault with automatic conflict resolution |
 | `vv vault push [--message X]` | Commit all vault changes and push to remote |
 | `vv context [init \| migrate \| sync]` | Manage vault-resident AI context files |
+| `vv memory link` | Symlink Claude Code auto-memory into the vault |
+| `vv memory unlink` | Rollback: restore host-local auto-memory |
 | `vv mcp` | Start MCP server for AI agent integration |
 | `vv mcp install` | Register MCP server in all detected editors |
 | `vv mcp uninstall` | Remove MCP server from all detected editors |
@@ -364,6 +366,27 @@ vv context sync --all                 # sync all projects (vault-only operations
 vv context sync --dry-run             # preview changes without modifying files
 vv context sync --force               # overwrite user-customized files (resolve conflicts)
 ```
+
+**Mirror Claude Code auto-memory in the vault:**
+```bash
+vv memory link                      # symlink ~/.claude/projects/{slug}/memory/ into vault
+vv memory link --dry-run            # preview the migration plan without touching disk
+vv memory link --force              # resolve conflicts by quarantining host-local copies
+vv memory unlink                    # rollback: restore a real dir (vault copy preserved)
+```
+
+`vv memory link` computes the Claude slug from the resolved absolute working
+directory (symlinks resolved, trailing slashes normalized), uses the same
+project detector as the rest of `vv` (identity file → git remote → basename),
+creates `Projects/{name}/agentctx/memory/` in the vault if missing, migrates
+any pre-existing host-local files into the vault target, and establishes the
+symlink. Running it again is a no-op. Conflicting files (same name, different
+content) are refused without `--force`; with `--force` they are quarantined
+under `agentctx/memory-conflicts/{timestamp}/` — a *sibling* of the memory
+directory, not a child, so they do not pollute Claude Code's auto-memory
+output. Only projects that already have `Projects/{name}/agentctx/` (the
+vibe-vault-tracked marker) can be linked — run `vv init` or
+`vv context init` first for new projects.
 
 **MCP server for AI agent integration:**
 ```bash

@@ -382,6 +382,77 @@ func CheckAgentctxSchema(vaultPath, project string, latestVersion int) *Result {
 	}
 }
 
+// CheckMemoryLink reports whether a project's host-local Claude Code
+// memory directory is correctly symlinked into the vault. Projects
+// without host-local state at all are quietly skipped (pass: nothing
+// to do). Returns nil when the project lacks either a detectable
+// Claude slug directory or vault-side agentctx/memory target — this
+// is an advisory check, not a scope gate.
+func CheckMemoryLink(vaultPath, project, cwd string) *Result {
+	if vaultPath == "" || project == "" || project == "_unknown" {
+		return nil
+	}
+	agentctxDir := filepath.Join(vaultPath, "Projects", project, "agentctx")
+	if _, err := os.Stat(agentctxDir); os.IsNotExist(err) {
+		return nil
+	}
+	target := filepath.Join(agentctxDir, "memory")
+
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return nil
+	}
+	if evald, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = evald
+	}
+	slug := strings.ReplaceAll(filepath.Clean(abs), "/", "-")
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	source := filepath.Join(home, ".claude", "projects", slug, "memory")
+
+	info, err := os.Lstat(source)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &Result{
+				Name:   "memory-link",
+				Status: Warn,
+				Detail: fmt.Sprintf("%s: not linked (run `vv memory link`)", project),
+			}
+		}
+		return nil
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return &Result{
+			Name:   "memory-link",
+			Status: Warn,
+			Detail: fmt.Sprintf("%s: host-local memory is a real directory (run `vv memory link`)", project),
+		}
+	}
+	resolved, err := os.Readlink(source)
+	if err != nil {
+		return &Result{
+			Name:   "memory-link",
+			Status: Warn,
+			Detail: fmt.Sprintf("%s: cannot read symlink: %v", project, err),
+		}
+	}
+	if filepath.Clean(resolved) != filepath.Clean(target) {
+		return &Result{
+			Name:   "memory-link",
+			Status: Warn,
+			Detail: fmt.Sprintf("%s: symlink points to %s, expected %s", project, resolved, target),
+		}
+	}
+	return &Result{
+		Name:   "memory-link",
+		Status: Pass,
+		Detail: fmt.Sprintf("%s: linked → %s", project, config.CompressHome(target)),
+	}
+}
+
 // CheckStaleSymlinks checks for leftover symlinks from pre-v5 schema.
 // Returns nil if no issues found.
 func CheckStaleSymlinks(repoPath string, schemaVersion int) []Result {

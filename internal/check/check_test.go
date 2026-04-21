@@ -526,3 +526,138 @@ func TestCheckMCPFile_Neither(t *testing.T) {
 		t.Errorf("should not suggest --claude-plugin for fresh install, got: %s", r.Detail)
 	}
 }
+
+func TestCheckMemoryLink_Nil_NoProject(t *testing.T) {
+	if r := CheckMemoryLink("", "", "/tmp"); r != nil {
+		t.Errorf("expected nil, got %v", r)
+	}
+	if r := CheckMemoryLink("/v", "_unknown", "/tmp"); r != nil {
+		t.Errorf("expected nil on _unknown, got %v", r)
+	}
+}
+
+func TestCheckMemoryLink_Nil_NoAgentctx(t *testing.T) {
+	dir := t.TempDir()
+	if r := CheckMemoryLink(dir, "no-such-proj", "/tmp"); r != nil {
+		t.Errorf("expected nil when agentctx missing, got %v", r)
+	}
+}
+
+func TestCheckMemoryLink_Warn_NotLinked(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	vault := t.TempDir()
+	project := filepath.Join(t.TempDir(), "demo")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(vault, "Projects", "demo", "agentctx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := CheckMemoryLink(vault, "demo", project)
+	if r == nil || r.Status != Warn {
+		t.Fatalf("expected Warn, got %+v", r)
+	}
+	if !strings.Contains(r.Detail, "not linked") {
+		t.Errorf("expected 'not linked' detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckMemoryLink_Warn_RealDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	vault := t.TempDir()
+	parentDir := t.TempDir()
+	project := filepath.Join(parentDir, "demo")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(vault, "Projects", "demo", "agentctx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, _ := filepath.EvalSymlinks(project)
+	slug := strings.ReplaceAll(filepath.Clean(resolved), "/", "-")
+	if err := os.MkdirAll(filepath.Join(home, ".claude", "projects", slug, "memory"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := CheckMemoryLink(vault, "demo", project)
+	if r == nil || r.Status != Warn {
+		t.Fatalf("expected Warn, got %+v", r)
+	}
+	if !strings.Contains(r.Detail, "real directory") {
+		t.Errorf("expected 'real directory' detail, got: %s", r.Detail)
+	}
+}
+
+func TestCheckMemoryLink_Pass(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	vault := t.TempDir()
+	parentDir := t.TempDir()
+	project := filepath.Join(parentDir, "demo")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentctx := filepath.Join(vault, "Projects", "demo", "agentctx")
+	if err := os.MkdirAll(agentctx, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(agentctx, "memory")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, _ := filepath.EvalSymlinks(project)
+	slug := strings.ReplaceAll(filepath.Clean(resolved), "/", "-")
+	parent := filepath.Join(home, ".claude", "projects", slug)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(parent, "memory")); err != nil {
+		t.Fatal(err)
+	}
+
+	r := CheckMemoryLink(vault, "demo", project)
+	if r == nil || r.Status != Pass {
+		t.Fatalf("expected Pass, got %+v", r)
+	}
+}
+
+func TestCheckMemoryLink_Warn_WrongTarget(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	vault := t.TempDir()
+	parentDir := t.TempDir()
+	project := filepath.Join(parentDir, "demo")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(vault, "Projects", "demo", "agentctx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := filepath.Join(parentDir, "elsewhere")
+	if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, _ := filepath.EvalSymlinks(project)
+	slug := strings.ReplaceAll(filepath.Clean(resolved), "/", "-")
+	parent := filepath.Join(home, ".claude", "projects", slug)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, filepath.Join(parent, "memory")); err != nil {
+		t.Fatal(err)
+	}
+
+	r := CheckMemoryLink(vault, "demo", project)
+	if r == nil || r.Status != Warn {
+		t.Fatalf("expected Warn, got %+v", r)
+	}
+	if !strings.Contains(r.Detail, "points to") {
+		t.Errorf("expected 'points to' detail, got: %s", r.Detail)
+	}
+}

@@ -32,6 +32,7 @@ import (
 	"github.com/johns/vibe-vault/internal/inject"
 	"github.com/johns/vibe-vault/internal/llm"
 	"github.com/johns/vibe-vault/internal/mcp"
+	"github.com/johns/vibe-vault/internal/memory"
 	"github.com/johns/vibe-vault/internal/scaffold"
 	"github.com/johns/vibe-vault/internal/session"
 	"github.com/johns/vibe-vault/internal/stats"
@@ -98,6 +99,9 @@ func main() {
 
 	case "mcp":
 		runMcp()
+
+	case "memory":
+		runMemory()
 
 	case "vault":
 		runVault()
@@ -396,6 +400,9 @@ func runCheck() {
 			if result := check.CheckAgentctxSchema(cfg.VaultPath, project, vvcontext.LatestSchemaVersion); result != nil {
 				report.Results = append(report.Results, *result)
 			}
+			if result := check.CheckMemoryLink(cfg.VaultPath, project, cwd); result != nil {
+				report.Results = append(report.Results, *result)
+			}
 		}
 	}
 
@@ -608,6 +615,88 @@ func runExport() {
 	}
 
 	fmt.Print(output)
+}
+
+func runMemory() {
+	args := os.Args[2:]
+
+	if len(args) == 0 {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdMemory))
+		os.Exit(1)
+	}
+
+	// Only treat --help as "describe the parent" when no subcommand was
+	// given; once a subcommand is present the help flag belongs to it.
+	sub := args[0]
+	if strings.HasPrefix(sub, "-") {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdMemory))
+		return
+	}
+	subArgs := args[1:]
+
+	switch sub {
+	case "link":
+		if wantsHelp(subArgs) {
+			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdMemoryLink))
+			return
+		}
+		cfg := mustLoadConfig()
+		opts := memory.Opts{
+			VaultPath:  cfg.VaultPath,
+			WorkingDir: flagValue(subArgs, "--working-dir"),
+			Force:      hasFlag(subArgs, "--force"),
+			DryRun:     hasFlag(subArgs, "--dry-run"),
+		}
+		res, err := memory.Link(opts)
+		if err != nil {
+			fatal("memory link: %v", err)
+		}
+		printMemoryResult("memory link", res, opts.DryRun)
+
+	case "unlink":
+		if wantsHelp(subArgs) {
+			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdMemoryUnlink))
+			return
+		}
+		cfg := mustLoadConfig()
+		opts := memory.Opts{
+			VaultPath:  cfg.VaultPath,
+			WorkingDir: flagValue(subArgs, "--working-dir"),
+			Force:      hasFlag(subArgs, "--force"),
+			DryRun:     hasFlag(subArgs, "--dry-run"),
+		}
+		res, err := memory.Unlink(opts)
+		if err != nil {
+			fatal("memory unlink: %v", err)
+		}
+		printMemoryResult("memory unlink", res, opts.DryRun)
+
+	default:
+		fmt.Fprintf(os.Stderr, "unknown memory command: %s\n", sub)
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdMemory))
+		os.Exit(1)
+	}
+}
+
+func printMemoryResult(label string, res *memory.Result, dryRun bool) {
+	prefix := ""
+	if dryRun {
+		prefix = "(dry-run) "
+	}
+	if res.AlreadyLinked {
+		fmt.Printf("%s%s: %s: already linked → %s\n", prefix, label, res.Project, res.TargetPath)
+		return
+	}
+	fmt.Printf("%s%s: %s\n", prefix, label, res.Project)
+	fmt.Printf("  source: %s\n", res.SourcePath)
+	fmt.Printf("  target: %s\n", res.TargetPath)
+	for _, a := range res.Actions {
+		fmt.Printf("  %-8s %s", a.Kind, a.Path)
+		if a.Detail != "" {
+			fmt.Printf("  (%s)", a.Detail)
+		}
+		fmt.Println()
+	}
 }
 
 func runVault() {
