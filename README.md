@@ -397,12 +397,44 @@ vv mcp uninstall               # remove from all editors
 vv mcp                         # start server directly (used by editors, not run manually)
 ```
 
-This exposes 17 tools including `vv_bootstrap_context` (session-start context
+This exposes 19 tools including `vv_bootstrap_context` (session-start context
 in one call), `vv_get_project_context`, `vv_list_projects`,
 `vv_search_sessions`, `vv_get_resume`, `vv_update_resume`, `vv_manage_task`,
-`vv_capture_session`, and more. Plus 1 prompt (`vv_session_guidelines`). All
-names are prefixed with `vv_` to avoid collisions with other MCP servers. AI
-agents call these on demand instead of requiring pre-loaded context.
+`vv_capture_session`, `vv_list_learnings`, `vv_get_learning`, and more. Plus
+1 prompt (`vv_session_guidelines`). All names are prefixed with `vv_` to
+avoid collisions with other MCP servers. AI agents call these on demand
+instead of requiring pre-loaded context.
+
+**Cross-project learnings (`Knowledge/learnings/`):** Drop markdown files
+into `VibeVault/Knowledge/learnings/` to surface observations that apply
+across projects (testing philosophy, resume phrasing rules, feedback
+patterns). Each file uses a frontmatter header:
+
+```markdown
+---
+name: Testing philosophy
+description: Nothing is done until proven end-to-end with real data
+type: user
+---
+
+Body content...
+```
+
+The `type` field is constrained to `user`, `feedback`, or `reference` —
+`type: project` is rejected because a project-scoped memory has no
+meaning in a cross-project directory. Malformed files are skipped with
+a stderr warning.
+
+Agents discover learnings on demand:
+
+- `vv_list_learnings` returns metadata only (slug, name, description,
+  type) so the agent can choose what to load — cheap enough to call
+  during planning.
+- `vv_get_learning(slug)` returns full content.
+- `vv_bootstrap_context` adds a one-line
+  `knowledge_learnings_available: {count, hint}` field **only** when at
+  least one valid learning file exists, keeping the bootstrap payload
+  under the /restart token budget when the directory is empty.
 
 **Synchronize vault across machines:**
 ```bash

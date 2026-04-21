@@ -276,7 +276,7 @@ Key architectural and design decisions in vibe-vault, with rationale.
     tool can quantify whether its own context injection improves AI session
     quality.
 
-37. **MCP server as stdio JSON-RPC gateway:** `vv mcp` serves 17 tools + 1
+37. **MCP server as stdio JSON-RPC gateway:** `vv mcp` serves 19 tools + 1
     prompt over stdin/stdout JSON-RPC 2.0. All tool names use `vv_` prefix to
     avoid namespace collisions. Install paths differ by editor: Claude Code
     writes to `~/.claude/settings.json` `mcpServers`, Zed writes to
@@ -487,3 +487,37 @@ Key architectural and design decisions in vibe-vault, with rationale.
       The vault copy is preserved as the durable store. Normal usage is
       link-only; unlink exists so rollback is always well-defined rather
       than requiring manual `rm` + `cp`.
+
+49. **Cross-project learnings as on-demand MCP tools, not inline in
+    bootstrap.** `VibeVault/Knowledge/learnings/*.md` holds observations
+    that apply across projects (testing philosophy, resume phrasing
+    rules, feedback patterns). The natural place to surface them is
+    `vv_bootstrap_context` — but inlining full learning content there
+    would blow past the /restart 20–30K token budget as soon as the
+    directory accumulates a handful of entries. Two tools separate the
+    decision to load from the cost of loading:
+
+    - **`vv_list_learnings`** returns frontmatter only (slug, name,
+      description, type), ~20–50 tokens per entry. Cheap enough to call
+      during planning so the agent can decide which specific learnings
+      matter for the current task.
+    - **`vv_get_learning(slug)`** returns the full body. Called only
+      when the list already identified a relevant entry, so the
+      expensive payload flows exactly when it would be read — never
+      eagerly.
+    - **`vv_bootstrap_context`** emits a single
+      `knowledge_learnings_available: {count, hint}` field, present
+      **only** when the directory has ≥1 valid file. Zero learnings →
+      zero tokens; populated directory → ~25 tokens pointing the agent
+      at the two dedicated tools. The field's mere presence doubles as
+      a capability signal for agents that might otherwise not know the
+      cross-project surface exists.
+
+    The `type` constraint (`user | feedback | reference`; `project`
+    rejected) enforces the directory's semantic boundary at parse time.
+    Silently accepting `type: project` would leak project-scoped
+    memories into a cross-project list, producing confusing output that
+    the agent has no reliable way to filter. Malformed frontmatter is
+    skipped with a stderr warning rather than surfaced inline in the
+    JSON response — consumer code stays uniform, and vault-side data
+    hygiene issues land on the operator instead of the agent.
