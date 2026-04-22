@@ -256,6 +256,97 @@ func TestListTasksStatusFormats(t *testing.T) {
 	}
 }
 
+// TestListTasksOmitsEmptyMetadata verifies that taskEntry fields with
+// omitempty tags are absent from the serialized JSON when their values are
+// the zero value. Most active tasks in real projects have no frontmatter
+// metadata; suppressing the empty lines is the primary lever for trimming
+// vv_bootstrap_context payload size. Covers the Phase 1 behavior change.
+func TestListTasksOmitsEmptyMetadata(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/tasks/bare.md":       "# Bare Task\n\nNo metadata whatsoever.",
+		"Projects/testproj/agentctx/tasks/populated.md":  "# Populated Task\nStatus: active\nPriority: high\n",
+	})
+
+	tool := NewListTasksTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	// Locate the bare task's object block and assert empty fields omitted.
+	bareIdx := strings.Index(result, `"name": "bare"`)
+	if bareIdx < 0 {
+		t.Fatalf("bare task not found in output:\n%s", result)
+	}
+	bareBlockEnd := strings.Index(result[bareIdx:], "}")
+	if bareBlockEnd < 0 {
+		t.Fatalf("unterminated task block starting at %d", bareIdx)
+	}
+	bareBlock := result[bareIdx : bareIdx+bareBlockEnd]
+
+	if strings.Contains(bareBlock, `"status"`) {
+		t.Errorf("bare task block still contains status key:\n%s", bareBlock)
+	}
+	if strings.Contains(bareBlock, `"priority"`) {
+		t.Errorf("bare task block still contains priority key:\n%s", bareBlock)
+	}
+	if strings.Contains(bareBlock, `"done"`) {
+		t.Errorf("bare task block still contains done:false key:\n%s", bareBlock)
+	}
+
+	// Populated task must still carry its metadata.
+	popIdx := strings.Index(result, `"name": "populated"`)
+	if popIdx < 0 {
+		t.Fatalf("populated task not found in output:\n%s", result)
+	}
+	popBlockEnd := strings.Index(result[popIdx:], "}")
+	popBlock := result[popIdx : popIdx+popBlockEnd]
+
+	if !strings.Contains(popBlock, `"status": "active"`) {
+		t.Errorf("populated task missing status: %s", popBlock)
+	}
+	if !strings.Contains(popBlock, `"priority": "high"`) {
+		t.Errorf("populated task missing priority: %s", popBlock)
+	}
+
+	// Struct unmarshaling must still yield zero values for omitted fields
+	// (backward-compat guarantee for consumers).
+	var parsed struct {
+		Tasks []taskEntry `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(parsed.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(parsed.Tasks))
+	}
+	for _, task := range parsed.Tasks {
+		if task.Name == "bare" {
+			if task.Status != "" || task.Priority != "" || task.Done {
+				t.Errorf("bare task unmarshaled with non-zero fields: %+v", task)
+			}
+		}
+	}
+}
+
+// TestListTasksIncludeDoneRetainsTrueFlag confirms the omitempty on Done
+// still lets through the `true` value, which is the only case consumers
+// actually need to distinguish.
+func TestListTasksIncludeDoneRetainsTrueFlag(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/tasks/done/retired.md": "# Retired\nStatus: done\n",
+	})
+
+	tool := NewListTasksTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj","include_done":true}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if !strings.Contains(result, `"done": true`) {
+		t.Errorf("expected done:true in output:\n%s", result)
+	}
+}
+
 // --- vv_get_task tests ---
 
 func TestGetTaskBasic(t *testing.T) {

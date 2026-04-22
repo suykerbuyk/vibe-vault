@@ -163,12 +163,17 @@ func NewGetResumeTool(cfg config.Config) Tool {
 }
 
 // taskEntry represents a single task in the list output.
+// Status, Priority, and Done use omitempty: most active tasks have no
+// frontmatter metadata, so suppressing empty fields removes ~60 bytes per
+// task from vv_bootstrap_context and vv_list_tasks payloads. Consumers that
+// read the JSON into a struct with default zero values are unaffected
+// (absence and empty string are semantically equivalent).
 type taskEntry struct {
 	Name     string `json:"name"`
 	Title    string `json:"title"`
-	Status   string `json:"status"`
-	Priority string `json:"priority"`
-	Done     bool   `json:"done"`
+	Status   string `json:"status,omitempty"`
+	Priority string `json:"priority,omitempty"`
+	Done     bool   `json:"done,omitempty"`
 }
 
 // parseTaskHeader reads the first 10 lines of a task file and extracts title, status, priority.
