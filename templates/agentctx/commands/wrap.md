@@ -20,7 +20,10 @@ Specifically:
   test structure), update the relevant doc/ file
 - Append a new iteration narrative to iterations.md using `vv_append_iteration`
   describing what changed in this session and why (past tense, technical detail)
-- Add a corresponding summary row to the Project History table in resume.md
+- Add a corresponding summary row to the Project History table in resume.md,
+  keeping only the 5 most recent rows (drop the oldest row when adding a new
+  one if the table already has 5). Older iterations remain retrievable via
+  `vv_get_iterations` or directly from `iterations.md`
 - Move any completed plans from resume.md to the Completed Plans section
   in iterations.md, replacing them with a single-line pointer
 - Retire completed tasks: use `vv_list_tasks` to check each active task against

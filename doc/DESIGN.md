@@ -276,7 +276,7 @@ Key architectural and design decisions in vibe-vault, with rationale.
     tool can quantify whether its own context injection improves AI session
     quality.
 
-37. **MCP server as stdio JSON-RPC gateway:** `vv mcp` serves 19 tools + 1
+37. **MCP server as stdio JSON-RPC gateway:** `vv mcp` serves 20 tools + 1
     prompt over stdin/stdout JSON-RPC 2.0. All tool names use `vv_` prefix to
     avoid namespace collisions. Install paths differ by editor: Claude Code
     writes to `~/.claude/settings.json` `mcpServers`, Zed writes to

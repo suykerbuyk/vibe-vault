@@ -90,7 +90,7 @@ This adds a `vibe-vault` entry to the `mcpServers` section of
 This detects all installed editors (Claude Code, Zed) and installs into each
 one. Use `--claude-only` or `--zed-only` to target a single editor.
 
-The MCP server exposes 19 tools that let the agent search sessions, read
+The MCP server exposes 20 tools that let the agent search sessions, read
 project knowledge, manage AI context, and access friction trends on demand.
 
 To remove the MCP server later: `vv mcp uninstall`

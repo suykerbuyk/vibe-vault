@@ -29,7 +29,7 @@ project: {{PROJECT}}
 |----------|--------|---------|
 | resume.md | `vv_get_resume` | This file — current state and navigation |
 | workflow.md | `vv_get_workflow` | AI workflow rules and pair programming paradigm |
-| iterations.md | `vv_get_project_context` | Append-only archive of iteration narratives |
+| iterations.md | `vv_get_iterations` | Append-only archive of iteration narratives |
 | tasks/ | `vv_list_tasks` / `vv_get_task` | Active task files; tasks/done/ for completed |
 
 <!-- Add doc/ entries as project documentation grows:

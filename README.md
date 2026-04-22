@@ -438,10 +438,11 @@ vv mcp uninstall               # remove from all editors
 vv mcp                         # start server directly (used by editors, not run manually)
 ```
 
-This exposes 19 tools including `vv_bootstrap_context` (session-start context
+This exposes 20 tools including `vv_bootstrap_context` (session-start context
 in one call), `vv_get_project_context`, `vv_list_projects`,
-`vv_search_sessions`, `vv_get_resume`, `vv_update_resume`, `vv_manage_task`,
-`vv_capture_session`, `vv_list_learnings`, `vv_get_learning`, and more. Plus
+`vv_search_sessions`, `vv_get_resume`, `vv_update_resume`, `vv_get_iterations`,
+`vv_manage_task`, `vv_capture_session`, `vv_list_learnings`, `vv_get_learning`,
+and more. Plus
 1 prompt (`vv_session_guidelines`). All names are prefixed with `vv_` to
 avoid collisions with other MCP servers. AI agents call these on demand
 instead of requiring pre-loaded context.
