@@ -1,6 +1,7 @@
 package context
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2201,5 +2202,245 @@ func TestReadSnippetBody_Errors(t *testing.T) {
 	os.WriteFile(p, []byte("no markers"), 0o644)
 	if _, err := readSnippetBody(p, "x"); err == nil {
 		t.Error("expected error for marker-less file")
+	}
+}
+
+// --- Top-level (workflow.md) sync tests ---
+
+// seedTopLevelFixture creates a minimal vault + project layout with a
+// Templates/agentctx/workflow.md and optionally a project-side workflow.md
+// and baseline. Returns the vault root and the project's agentctx dir.
+func seedTopLevelFixture(t *testing.T, tmplContent, projContent, baselineContent string) (string, string) {
+	t.Helper()
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	tmplDir := filepath.Join(vault, "Templates", "agentctx")
+	if err := os.MkdirAll(agentctxDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(tmplDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmplDir, "workflow.md"), []byte(tmplContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if projContent != "" {
+		if err := os.WriteFile(filepath.Join(agentctxDir, "workflow.md"), []byte(projContent), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if baselineContent != "" {
+		if err := os.WriteFile(filepath.Join(agentctxDir, "workflow.md.baseline"), []byte(baselineContent), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return vault, agentctxDir
+}
+
+// Missing project file → CREATE + baseline written.
+func TestPropagateTopLevel_CreatesOnFirstSync(t *testing.T) {
+	vault, agentctxDir := seedTopLevelFixture(t, "# compressed workflow", "", "")
+
+	actions := propagateTopLevel(vault, agentctxDir, false, false)
+	if len(actions) != 1 || actions[0].Action != "CREATE" {
+		t.Fatalf("actions = %v, want single CREATE", actions)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "workflow.md"))
+	if string(data) != "# compressed workflow" {
+		t.Errorf("project file = %q, want template content", string(data))
+	}
+	if _, err := os.Stat(filepath.Join(agentctxDir, "workflow.md.baseline")); err != nil {
+		t.Error("baseline not created on first-time sync")
+	}
+}
+
+// Stock project file matching template + no baseline → silent backfill.
+func TestPropagateTopLevel_BackfillsBaselineWhenIdentical(t *testing.T) {
+	stock := "# stock workflow"
+	vault, agentctxDir := seedTopLevelFixture(t, stock, stock, "")
+
+	actions := propagateTopLevel(vault, agentctxDir, false, false)
+	if len(actions) != 0 {
+		t.Errorf("expected no actions for identical content; got %v", actions)
+	}
+
+	baseline, err := os.ReadFile(filepath.Join(agentctxDir, "workflow.md.baseline"))
+	if err != nil {
+		t.Fatalf("baseline not backfilled: %v", err)
+	}
+	if string(baseline) != stock {
+		t.Errorf("baseline = %q, want %q", string(baseline), stock)
+	}
+}
+
+// Drifted project file + no baseline → CUSTOMIZED, no overwrite.
+// This is the exact scenario for a pre-Phase-2d project picking up the
+// compressed workflow.md template: user didn't ask for the change, so sync
+// surfaces it as CUSTOMIZED rather than silently rewriting.
+func TestPropagateTopLevel_DriftedReportsCustomized(t *testing.T) {
+	vault, agentctxDir := seedTopLevelFixture(t, "# compressed", "# verbose", "")
+
+	actions := propagateTopLevel(vault, agentctxDir, false, false)
+	if len(actions) != 1 || actions[0].Action != "CUSTOMIZED" {
+		t.Fatalf("actions = %v, want single CUSTOMIZED", actions)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "workflow.md"))
+	if string(data) != "# verbose" {
+		t.Errorf("project file was overwritten: %q", string(data))
+	}
+}
+
+// Drifted project file + no baseline + --force → UPDATE with baseline seeded.
+// This is the recipe for adopting a drifted template: user inspects the
+// CUSTOMIZED report, decides to accept the new template, reruns with --force.
+func TestPropagateTopLevel_DriftedForceOverwrites(t *testing.T) {
+	vault, agentctxDir := seedTopLevelFixture(t, "# compressed", "# verbose", "")
+
+	actions := propagateTopLevel(vault, agentctxDir, false, true)
+	if len(actions) != 1 || actions[0].Action != "UPDATE" {
+		t.Fatalf("actions = %v, want single UPDATE", actions)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "workflow.md"))
+	if string(data) != "# compressed" {
+		t.Errorf("project file not updated: %q", string(data))
+	}
+	baseline, _ := os.ReadFile(filepath.Join(agentctxDir, "workflow.md.baseline"))
+	if string(baseline) != "# compressed" {
+		t.Errorf("baseline = %q, want template content", string(baseline))
+	}
+}
+
+// Baseline + template unchanged from baseline → no action.
+func TestPropagateTopLevel_NoopWhenTemplateUnchanged(t *testing.T) {
+	vault, agentctxDir := seedTopLevelFixture(t, "# stable", "# user edit", "# stable")
+
+	actions := propagateTopLevel(vault, agentctxDir, false, false)
+	if len(actions) != 0 {
+		t.Errorf("expected no actions when template unchanged; got %v", actions)
+	}
+}
+
+// Template changed + user-clean (project matches baseline) → auto-UPDATE.
+func TestPropagateTopLevel_AutoUpdateCleanUser(t *testing.T) {
+	vault, agentctxDir := seedTopLevelFixture(t, "# new", "# old", "# old")
+
+	actions := propagateTopLevel(vault, agentctxDir, false, false)
+	if len(actions) != 1 || actions[0].Action != "UPDATE" {
+		t.Fatalf("actions = %v, want single UPDATE", actions)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "workflow.md"))
+	if string(data) != "# new" {
+		t.Errorf("project file = %q, want # new", string(data))
+	}
+}
+
+// Template changed AND user changed (both diverge from baseline) → CONFLICT.
+func TestPropagateTopLevel_ConflictOnBothSidesChanged(t *testing.T) {
+	vault, agentctxDir := seedTopLevelFixture(t, "# new tmpl", "# user edit", "# original")
+
+	actions := propagateTopLevel(vault, agentctxDir, false, false)
+	if len(actions) != 1 || actions[0].Action != "CONFLICT" {
+		t.Fatalf("actions = %v, want single CONFLICT", actions)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "workflow.md"))
+	if string(data) != "# user edit" {
+		t.Errorf("project file was overwritten: %q", string(data))
+	}
+}
+
+// Missing vault template → skip silently (no action).
+func TestPropagateTopLevel_MissingTemplateSkips(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	os.MkdirAll(agentctxDir, 0o755)
+
+	actions := propagateTopLevel(vault, agentctxDir, false, false)
+	if len(actions) != 0 {
+		t.Errorf("expected no actions when template missing; got %v", actions)
+	}
+}
+
+// Template tokens ({{PROJECT}}, {{DATE}}) must be substituted before write.
+// Regression guard: pre-substitution, synced workflow.md contained literal
+// "{{PROJECT}}" in the heading because propagateFile skipped applyVars.
+func TestPropagateTopLevel_SubstitutesProjectToken(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "myproj", "agentctx")
+	tmplDir := filepath.Join(vault, "Templates", "agentctx")
+	os.MkdirAll(agentctxDir, 0o755)
+	os.MkdirAll(tmplDir, 0o755)
+	os.WriteFile(filepath.Join(tmplDir, "workflow.md"),
+		[]byte("# {{PROJECT}} — Workflow\n"), 0o644)
+
+	actions := propagateTopLevel(vault, agentctxDir, false, false)
+	if len(actions) != 1 || actions[0].Action != "CREATE" {
+		t.Fatalf("actions = %v, want single CREATE", actions)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "workflow.md"))
+	if strings.Contains(string(data), "{{PROJECT}}") {
+		t.Errorf("synced workflow.md still contains literal {{PROJECT}}: %q", string(data))
+	}
+	if !strings.Contains(string(data), "myproj") {
+		t.Errorf("synced workflow.md missing substituted project name: %q", string(data))
+	}
+}
+
+// End-to-end: full Sync() pipeline propagates the embedded workflow.md
+// template to a project whose workflow.md matches its baseline (user-clean).
+//
+// Sync() calls forceUpdateVaultTemplates() which rewrites Tier 2 from the Go
+// embeds on every invocation, so the test cannot stub Tier 2 — it must work
+// against whatever the embedded workflow.md actually is. The assertion is
+// structural: (a) project file changed, (b) baseline was refreshed to match
+// project file, (c) an UPDATE action fired for workflow.md.
+func TestSync_PropagatesTopLevelWorkflow(t *testing.T) {
+	vault := t.TempDir()
+	cwd := t.TempDir()
+	cfg := testConfig(vault)
+
+	agentctxDir := filepath.Join(vault, "Projects", "wftest", "agentctx")
+	os.MkdirAll(agentctxDir, 0o755)
+	WriteVersion(agentctxDir, newVersionFile(LatestSchemaVersion))
+
+	// Seed project + baseline with stub content that won't match the
+	// embedded workflow.md, simulating a pre-template-change project.
+	stubContent := []byte("# stub workflow — outdated")
+	os.WriteFile(filepath.Join(agentctxDir, "workflow.md"), stubContent, 0o644)
+	os.WriteFile(filepath.Join(agentctxDir, "workflow.md.baseline"), stubContent, 0o644)
+
+	result, err := Sync(cfg, cwd, SyncOpts{Project: "wftest"})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	// Project file should have changed.
+	data, _ := os.ReadFile(filepath.Join(agentctxDir, "workflow.md"))
+	if bytes.Equal(data, stubContent) {
+		t.Error("workflow.md was not updated by Sync")
+	}
+
+	// Baseline should be refreshed to match the new project content.
+	base, _ := os.ReadFile(filepath.Join(agentctxDir, "workflow.md.baseline"))
+	if !bytes.Equal(bytes.TrimSpace(data), bytes.TrimSpace(base)) {
+		t.Error("workflow.md.baseline was not refreshed to match project file")
+	}
+
+	// An UPDATE action should be present for workflow.md at the top level.
+	found := false
+	for _, psr := range result.Projects {
+		for _, a := range psr.Actions {
+			if a.Path == "workflow.md" && a.Action == "UPDATE" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("expected UPDATE action for workflow.md in Sync result")
 	}
 }

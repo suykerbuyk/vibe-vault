@@ -627,3 +627,80 @@ Key architectural and design decisions in vibe-vault, with rationale.
     this project, ~7.4 KB per `vv_bootstrap_context` call. For other
     projects, proportional to however much Current State prose has
     accumulated.
+
+52. **`vv context` subcommand guardrails and top-level file sync.**
+    Two sync-side correctness bugs closed together in iter 122.
+
+    **Bug 1: Marker check.** Before iter 122 `vv context
+    {init,sync,migrate}` ran in any directory, including empty
+    tmpdirs with no `.vibe-vault.toml`. Accidental invocations in
+    the wrong directory silently created vault Projects/ entries
+    under basename heuristics or pushed cwd-derived `.claude/`
+    content into unrelated repos. `internal/identity/FindMarker`
+    walks up the directory tree looking for `.vibe-vault.toml`,
+    returning typed `ErrNoProjectMarker` on miss. Dispatch semantics:
+    `sync` hard-fails without a marker (skipped when `--all` — that
+    flag is an explicit opt-out operating on vault state independent
+    of cwd); `migrate` hard-fails unless a marker exists OR an
+    explicit `--project` flag is supplied (migrate legitimately
+    bootstraps the marker as part of its action, so requiring one
+    up-front would break the core legacy-bootstrap use case — the
+    `--project` flag is itself an intent signal); `init` prompts
+    `[y/N]` when an ancestor (not cwd itself) has a marker, bypassed
+    by `-y`/`--yes` for scripted use.
+
+    **Bug 2: workflow.md never participated in sync.** Pre-iter-122
+    `syncProject()` propagated only the `propagateDirs = {"commands",
+    "skills"}` subdirectories. Top-level `agentctx/` files
+    (`workflow.md`, `resume.md`, `iterations.md`, `features.md`)
+    were written once by `Init()` from templates and then never
+    touched by sync. Consequence: iter 121's Phase 2d compression
+    of `workflow.md` (Tier 1 + Tier 2) never reached any existing
+    project — three-way tracking couldn't reconcile a file it never
+    scanned. The iter 121 narrative had flagged this edge case
+    explicitly ("this project's Tier 3 has never had a
+    `workflow.md.baseline` file, so it's never been three-way-
+    tracked").
+
+    **Fix shape.** Extracted the inner three-way comparison body of
+    `propagateSharedSubdir` into a new `propagateFile()` helper.
+    Added `propagateTopLevel(vaultPath, agentctxPath, dryRun, force)`
+    keyed off a package-level `topLevelFiles = []string{"workflow.md"}`
+    constant — iterates the list, computes src/dst paths, delegates
+    each file to the shared helper. Wired into `syncProject` after
+    the existing `propagateSharedSubdir` loop. `propagateFile` now
+    also takes a `TemplateVars` argument and applies
+    `applyVars()` to the template bytes before any comparison or
+    write, so `{{PROJECT}}` / `{{DATE}}` tokens no longer leak into
+    baselines. `varsForAgentctx(agentctxPath)` derives the project
+    name from the `<vault>/Projects/<name>/agentctx` path convention.
+
+    **Why not add `resume.md`, `iterations.md`, `features.md` to
+    `topLevelFiles`?** Those three are per-project state, not
+    template-driven. `iterations.md` is append-only project history;
+    `features.md` is a project-scoped capability index; `resume.md`
+    carries per-project current-state invariants whose general
+    cross-project propagation is the explicit scope of the
+    `features-md-schema-migration` task (schema v9→v10). Scoping
+    `topLevelFiles` to `workflow.md` today keeps the iter 122 change
+    minimal; the list is deliberately open for future additions.
+
+    **Regression caught during live verification.** The first force-
+    sync after the refactor wrote unsubstituted template content —
+    `# {{PROJECT}} — Workflow` instead of `# vibe-vault — Workflow`.
+    Root cause: the extracted `propagateFile()` copied raw template
+    bytes with no `applyVars()` pass. The pre-refactor
+    `propagateSharedSubdir` had the same gap but never hit it
+    because no commands-subdir file uses template tokens. Fixed in
+    the same task by threading `TemplateVars` through the
+    propagation pipeline; pinned with
+    `TestPropagateTopLevel_SubstitutesProjectToken`.
+
+    **User-facing recipe.** On projects that predate top-level sync:
+    (a) first `vv context sync --project <name>` reports
+    `CUSTOMIZED [vault] workflow.md` if the project file differs
+    from the template (no baseline exists yet, so sync treats it as
+    user-owned); (b) to accept the compressed template, rerun as
+    `vv context sync --force --project <name>` — emits `UPDATE` and
+    seeds `workflow.md.baseline`. Payload savings realized on this
+    project: ~714 B from compression plus proper substitution.

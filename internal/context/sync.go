@@ -170,6 +170,10 @@ func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*P
 		}
 	}
 
+	// Propagate template-driven top-level files (workflow.md).
+	psr.Actions = append(psr.Actions,
+		propagateTopLevel(cfg.VaultPath, agentctxPath, opts.DryRun, force)...)
+
 	return psr, nil
 }
 
@@ -226,6 +230,7 @@ func propagateSharedSubdir(vaultPath, agentctxPath, subdir string, dryRun, force
 
 	var actions []FileAction
 	projectSubDir := filepath.Join(agentctxPath, subdir)
+	vars := varsForAgentctx(agentctxPath)
 
 	for _, e := range entries {
 		// Directory entries (e.g., skills/startup-analyst/)
@@ -244,121 +249,159 @@ func propagateSharedSubdir(vaultPath, agentctxPath, subdir string, dryRun, force
 		srcPath := filepath.Join(templatesDir, e.Name())
 		dstPath := filepath.Join(projectSubDir, e.Name())
 		qualPath := subdir + "/" + e.Name()
+		actions = append(actions, propagateFile(srcPath, dstPath, qualPath, vars, dryRun, force)...)
+	}
+	return actions
+}
 
-		srcData, err := os.ReadFile(srcPath)
-		if err != nil {
-			continue
+// varsForAgentctx derives the TemplateVars for a project given its agentctx
+// directory (e.g. "<vault>/Projects/<project>/agentctx"). Used by the
+// propagation helpers to apply {{PROJECT}} / {{DATE}} substitution to
+// template content before comparison against the project file.
+func varsForAgentctx(agentctxPath string) TemplateVars {
+	project := filepath.Base(filepath.Dir(agentctxPath))
+	return DefaultVars(project)
+}
+
+// topLevelFiles lists agentctx/ root files that are template-driven and
+// should participate in three-way sync. resume.md, iterations.md, and
+// features.md are per-project state, not template-driven, and are omitted.
+var topLevelFiles = []string{"workflow.md"}
+
+// propagateTopLevel propagates template-driven top-level agentctx/ files
+// (currently just workflow.md) using three-way baseline comparison.
+func propagateTopLevel(vaultPath, agentctxPath string, dryRun, force bool) []FileAction {
+	vars := varsForAgentctx(agentctxPath)
+	var actions []FileAction
+	for _, name := range topLevelFiles {
+		srcPath := filepath.Join(vaultPath, "Templates", "agentctx", name)
+		if _, err := os.Stat(srcPath); err != nil {
+			continue // template doesn't exist in vault, skip silently
 		}
+		dstPath := filepath.Join(agentctxPath, name)
+		qualPath := name
+		actions = append(actions, propagateFile(srcPath, dstPath, qualPath, vars, dryRun, force)...)
+	}
+	return actions
+}
 
-		// File doesn't exist in project → CREATE + write .baseline
-		if _, statErr := os.Stat(dstPath); statErr != nil {
-			if dryRun {
-				actions = append(actions, FileAction{Path: qualPath, Action: "DRY-RUN", Location: "vault"})
-				continue
-			}
-			if mkErr := os.MkdirAll(projectSubDir, 0o755); mkErr != nil {
-				actions = append(actions, FileAction{Path: qualPath, Action: "ERROR: " + mkErr.Error()})
-				continue
-			}
-			if wErr := os.WriteFile(dstPath, srcData, 0o644); wErr != nil {
-				actions = append(actions, FileAction{Path: qualPath, Action: "ERROR: " + wErr.Error()})
-				continue
-			}
-			writeBaseline(dstPath, srcData)
-			cleanPending(dstPath)
-			actions = append(actions, FileAction{Path: qualPath, Action: "CREATE", Location: "vault"})
-			continue
+// propagateFile syncs a single file from srcPath to dstPath using three-way
+// baseline comparison against <dstPath>.baseline. Creates dst's parent
+// directory on first write. qualPath is the human-readable path used in
+// FileAction entries (e.g. "commands/restart.md" or "workflow.md"). The vars
+// argument supplies {{PROJECT}} / {{DATE}} substitution applied to the
+// template bytes before comparison and write — the dst file, baseline, and
+// comparisons all operate on the substituted form.
+//
+// Action outcomes:
+//   - Missing dst → CREATE (write file + baseline)
+//   - .pinned sidecar present → skip silently
+//   - No baseline, content == template → silently backfill baseline
+//   - No baseline, content != template → CUSTOMIZED (unless force: UPDATE)
+//   - Baseline + template unchanged since last sync → nothing
+//   - Baseline + template changed, user clean → UPDATE
+//   - Baseline + template changed, user changed → CONFLICT (unless force: UPDATE)
+func propagateFile(srcPath, dstPath, qualPath string, vars TemplateVars, dryRun, force bool) []FileAction {
+	rawSrc, err := os.ReadFile(srcPath)
+	if err != nil {
+		return nil
+	}
+	srcData := []byte(applyVars(string(rawSrc), vars))
+
+	// File doesn't exist in project → CREATE + write .baseline
+	if _, statErr := os.Stat(dstPath); statErr != nil {
+		if dryRun {
+			return []FileAction{{Path: qualPath, Action: "DRY-RUN", Location: "vault"}}
 		}
-
-		// .pinned → always skip
-		if _, pinErr := os.Stat(dstPath + ".pinned"); pinErr == nil {
-			continue
+		if mkErr := os.MkdirAll(filepath.Dir(dstPath), 0o755); mkErr != nil {
+			return []FileAction{{Path: qualPath, Action: "ERROR: " + mkErr.Error()}}
 		}
-
-		dstData, err := os.ReadFile(dstPath)
-		if err != nil {
-			continue
+		if wErr := os.WriteFile(dstPath, srcData, 0o644); wErr != nil {
+			return []FileAction{{Path: qualPath, Action: "ERROR: " + wErr.Error()}}
 		}
-		baselineData, hasBaseline := readBaseline(dstPath)
+		writeBaseline(dstPath, srcData)
+		cleanPending(dstPath)
+		return []FileAction{{Path: qualPath, Action: "CREATE", Location: "vault"}}
+	}
 
-		tmpl := bytes.TrimSpace(srcData)
-		proj := bytes.TrimSpace(dstData)
-		base := bytes.TrimSpace(baselineData)
+	// .pinned → always skip
+	if _, pinErr := os.Stat(dstPath + ".pinned"); pinErr == nil {
+		return nil
+	}
 
-		if !hasBaseline {
-			// Legacy file from before baseline tracking.
-			if bytes.Equal(tmpl, proj) {
-				// Identical — backfill .baseline silently
-				if !dryRun {
-					writeBaseline(dstPath, srcData)
-					cleanPending(dstPath)
-				}
-				continue
-			}
-			// Different and no baseline — treat as user-customized.
-			// With --force, overwrite anyway.
-			if force {
-				if !dryRun {
-					if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
-						actions = append(actions, FileAction{Path: qualPath, Action: "ERROR: " + err.Error()})
-						continue
-					}
-					writeBaseline(dstPath, srcData)
-					cleanPending(dstPath)
-				}
-				actions = append(actions, FileAction{Path: qualPath, Action: "UPDATE", Location: "vault"})
-				continue
-			}
-			actions = append(actions, FileAction{Path: qualPath, Action: "CUSTOMIZED", Location: "vault"})
-			continue
-		}
+	dstData, err := os.ReadFile(dstPath)
+	if err != nil {
+		return nil
+	}
+	baselineData, hasBaseline := readBaseline(dstPath)
 
-		// Three-way comparison with baseline.
-		if bytes.Equal(tmpl, base) {
-			// Template unchanged since last sync — nothing to do.
-			// (User may have customized, but template hasn't changed.)
+	tmpl := bytes.TrimSpace(srcData)
+	proj := bytes.TrimSpace(dstData)
+	base := bytes.TrimSpace(baselineData)
+
+	if !hasBaseline {
+		// Legacy file from before baseline tracking.
+		if bytes.Equal(tmpl, proj) {
+			// Identical — backfill .baseline silently
 			if !dryRun {
+				writeBaseline(dstPath, srcData)
 				cleanPending(dstPath)
 			}
-			continue
+			return nil
 		}
-
-		// Template changed since last sync.
-		if bytes.Equal(proj, base) {
-			// User hasn't touched the file → safe to auto-update.
-			if dryRun {
-				actions = append(actions, FileAction{Path: qualPath, Action: "DRY-RUN", Location: "vault"})
-				continue
-			}
-			if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
-				actions = append(actions, FileAction{Path: qualPath, Action: "ERROR: " + err.Error()})
-				continue
-			}
-			writeBaseline(dstPath, srcData)
-			cleanPending(dstPath)
-			actions = append(actions, FileAction{Path: qualPath, Action: "UPDATE", Location: "vault"})
-			continue
-		}
-
-		// Both template and user changed → conflict.
+		// Different and no baseline — treat as user-customized.
+		// With --force, overwrite anyway.
 		if force {
 			if !dryRun {
 				if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
-					actions = append(actions, FileAction{Path: qualPath, Action: "ERROR: " + err.Error()})
-					continue
+					return []FileAction{{Path: qualPath, Action: "ERROR: " + err.Error()}}
 				}
 				writeBaseline(dstPath, srcData)
 				cleanPending(dstPath)
 			}
-			actions = append(actions, FileAction{Path: qualPath, Action: "UPDATE", Location: "vault"})
-			continue
+			return []FileAction{{Path: qualPath, Action: "UPDATE", Location: "vault"}}
 		}
+		return []FileAction{{Path: qualPath, Action: "CUSTOMIZED", Location: "vault"}}
+	}
+
+	// Three-way comparison with baseline.
+	if bytes.Equal(tmpl, base) {
+		// Template unchanged since last sync — nothing to do.
 		if !dryRun {
 			cleanPending(dstPath)
 		}
-		actions = append(actions, FileAction{Path: qualPath, Action: "CONFLICT", Location: "vault"})
+		return nil
 	}
-	return actions
+
+	// Template changed since last sync.
+	if bytes.Equal(proj, base) {
+		// User hasn't touched the file → safe to auto-update.
+		if dryRun {
+			return []FileAction{{Path: qualPath, Action: "DRY-RUN", Location: "vault"}}
+		}
+		if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
+			return []FileAction{{Path: qualPath, Action: "ERROR: " + err.Error()}}
+		}
+		writeBaseline(dstPath, srcData)
+		cleanPending(dstPath)
+		return []FileAction{{Path: qualPath, Action: "UPDATE", Location: "vault"}}
+	}
+
+	// Both template and user changed → conflict.
+	if force {
+		if !dryRun {
+			if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
+				return []FileAction{{Path: qualPath, Action: "ERROR: " + err.Error()}}
+			}
+			writeBaseline(dstPath, srcData)
+			cleanPending(dstPath)
+		}
+		return []FileAction{{Path: qualPath, Action: "UPDATE", Location: "vault"}}
+	}
+	if !dryRun {
+		cleanPending(dstPath)
+	}
+	return []FileAction{{Path: qualPath, Action: "CONFLICT", Location: "vault"}}
 }
 
 // isSidecar returns true for .pending, .pinned, and .baseline sidecar files.

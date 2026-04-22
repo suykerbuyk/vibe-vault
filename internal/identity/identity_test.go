@@ -4,6 +4,7 @@
 package identity
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -127,6 +128,71 @@ name = "my-real-project"
 	}
 	if id.Project.Domain != "" {
 		t.Errorf("Project.Domain = %q, want empty (still commented)", id.Project.Domain)
+	}
+}
+
+func TestFindMarker_CwdItself(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".vibe-vault.toml"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := FindMarker(dir)
+	if err != nil {
+		t.Fatalf("FindMarker: %v", err)
+	}
+	// Compare as absolute paths — macOS prefixes TempDir with /private.
+	wantAbs, _ := filepath.Abs(dir)
+	if got != wantAbs {
+		t.Errorf("FindMarker = %q, want %q", got, wantAbs)
+	}
+}
+
+func TestFindMarker_Ancestor(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".vibe-vault.toml"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "a", "b", "c")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := FindMarker(nested)
+	if err != nil {
+		t.Fatalf("FindMarker: %v", err)
+	}
+	wantAbs, _ := filepath.Abs(root)
+	if got != wantAbs {
+		t.Errorf("FindMarker = %q, want %q (walk-up should stop at root)", got, wantAbs)
+	}
+}
+
+func TestFindMarker_NotFound(t *testing.T) {
+	// Isolated tmpdir with no marker anywhere inside.
+	dir := t.TempDir()
+	nested := filepath.Join(dir, "nothing", "here")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// FindMarker may discover a real marker above t.TempDir() on a dev
+	// machine (e.g. under ~/code). That's expected — the walk-up correctly
+	// finds the nearest ancestor. What we're testing here is the
+	// not-found path, so only assert ErrNoProjectMarker when the caller's
+	// filesystem genuinely has no marker above dir.
+	_, err := FindMarker(nested)
+	if err != nil && !errors.Is(err, ErrNoProjectMarker) {
+		t.Errorf("FindMarker: got %v, want nil or ErrNoProjectMarker", err)
+	}
+}
+
+func TestFindMarker_NotFoundAtRoot(t *testing.T) {
+	// Guaranteed not-found case: walk up from a path we construct such
+	// that no ancestor can possibly contain the marker. Use the
+	// filesystem root directly — no project marker exists at "/".
+	_, err := FindMarker(string(filepath.Separator))
+	if !errors.Is(err, ErrNoProjectMarker) {
+		t.Errorf("FindMarker(/): got %v, want ErrNoProjectMarker", err)
 	}
 }
 

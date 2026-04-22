@@ -947,6 +947,9 @@ func TestIntegration(t *testing.T) {
 	// 10e2. context sync
 	t.Run("context_sync", func(t *testing.T) {
 		syncCwd := t.TempDir()
+		// Seed the project marker — `vv context sync` requires
+		// .vibe-vault.toml in cwd or an ancestor (unless --all).
+		writeFixture(t, syncCwd, ".vibe-vault.toml", "# vibe-vault project marker\n")
 
 		// Create a legacy agentctx (no .version) to test migration
 		legacyProject := "sync-legacy"
@@ -1015,6 +1018,50 @@ func TestIntegration(t *testing.T) {
 		// Help flag
 		_, syncHelpStderr, _ := runVV(t, env, "context", "sync", "--help")
 		assertContains(t, syncHelpStderr, "sync", "context sync help text")
+	})
+
+	// 10e3. context marker-check guards
+	t.Run("context_marker_guards", func(t *testing.T) {
+		// sync without marker → hard-fail
+		noMarker := t.TempDir()
+		_, stderr, err := runVVInDir(t, env, noMarker, "context", "sync", "--project", "anything")
+		if err == nil {
+			t.Error("expected sync to fail without .vibe-vault.toml marker")
+		}
+		assertContains(t, stderr, "not in a vibe-vault project", "sync error message")
+
+		// sync --all without marker → succeeds (explicit opt-out)
+		_, _, err = runVVInDir(t, env, noMarker, "context", "sync", "--all")
+		if err != nil {
+			t.Errorf("sync --all should succeed without marker: %v", err)
+		}
+
+		// migrate without marker AND without --project → hard-fail
+		_, stderr, err = runVVInDir(t, env, noMarker, "context", "migrate")
+		if err == nil {
+			t.Error("expected migrate to fail without marker or --project")
+		}
+		assertContains(t, stderr, "no --project flag", "migrate error message")
+
+		// migrate with --project (no marker) → proceeds (legitimate bootstrap)
+		migrateOK := t.TempDir()
+		writeFixture(t, migrateOK, "RESUME.md", "# Legacy")
+		_, _, err = runVVInDir(t, env, migrateOK, "context", "migrate", "--project", "guard-bootstrap-test")
+		if err != nil {
+			t.Errorf("migrate with --project should succeed without marker: %v", err)
+		}
+
+		// sync with marker in an ancestor directory → succeeds
+		ancestorRoot := t.TempDir()
+		writeFixture(t, ancestorRoot, ".vibe-vault.toml", "# marker\n")
+		nested := filepath.Join(ancestorRoot, "sub", "dir")
+		if mkErr := os.MkdirAll(nested, 0o755); mkErr != nil {
+			t.Fatal(mkErr)
+		}
+		_, _, err = runVVInDir(t, env, nested, "context", "sync", "--project", "sync-legacy")
+		if err != nil {
+			t.Errorf("sync should succeed when marker is in ancestor: %v", err)
+		}
 	})
 
 	// 10f. export

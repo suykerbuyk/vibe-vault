@@ -28,6 +28,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/friction"
 	"github.com/suykerbuyk/vibe-vault/internal/help"
 	"github.com/suykerbuyk/vibe-vault/internal/hook"
+	"github.com/suykerbuyk/vibe-vault/internal/identity"
 	"github.com/suykerbuyk/vibe-vault/internal/index"
 	"github.com/suykerbuyk/vibe-vault/internal/inject"
 	"github.com/suykerbuyk/vibe-vault/internal/llm"
@@ -247,6 +248,13 @@ func runContext() {
 			if err != nil {
 				fatal("getwd: %v", err)
 			}
+			assumeYes := hasFlag(args[1:], "-y") || hasFlag(args[1:], "--yes")
+			if ancestor, ok := ancestorMarker(cwd); ok && !assumeYes {
+				prompt := fmt.Sprintf("Nested project detected: parent marker at %s.\n  Create marker here anyway?", ancestor)
+				if !promptYesNo(prompt) {
+					fatal("aborted by user")
+				}
+			}
 			opts := vvcontext.Opts{
 				Project: flagValue(args[1:], "--project"),
 				Force:   hasFlag(args[1:], "--force"),
@@ -276,8 +284,14 @@ func runContext() {
 			if err != nil {
 				fatal("getwd: %v", err)
 			}
+			projectFlag := flagValue(args[1:], "--project")
+			if projectFlag == "" {
+				if _, markerErr := identity.FindMarker(cwd); markerErr != nil {
+					fatal("not in a vibe-vault project (no .vibe-vault.toml found) and no --project flag\n  For a first-time migrate, pass --project <name> to specify the target vault project.")
+				}
+			}
 			opts := vvcontext.Opts{
-				Project: flagValue(args[1:], "--project"),
+				Project: projectFlag,
 				Force:   hasFlag(args[1:], "--force"),
 			}
 			result, err := vvcontext.Migrate(cfg, cwd, opts)
@@ -305,6 +319,9 @@ func runContext() {
 				All:     hasFlag(args[1:], "--all"),
 				DryRun:  hasFlag(args[1:], "--dry-run"),
 				Force:   hasFlag(args[1:], "--force"),
+			}
+			if !syncOpts.All {
+				requireProjectMarker(cwd)
 			}
 			syncResult, err := vvcontext.Sync(cfg, cwd, syncOpts)
 			if err != nil {
@@ -1847,4 +1864,41 @@ func printAction(a vvcontext.FileAction) {
 func fatal(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "vv: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// requireProjectMarker fatal-exits unless .vibe-vault.toml is found in cwd or
+// any ancestor. Used by `vv context {sync,migrate}` — the guard is skipped by
+// `vv context sync --all`, which operates on vault state independent of cwd.
+func requireProjectMarker(cwd string) {
+	if _, err := identity.FindMarker(cwd); err != nil {
+		fatal("not in a vibe-vault project (no .vibe-vault.toml found)\n  Run `vv init` in your project root first, or cd into an existing vibe-vault project.")
+	}
+}
+
+// ancestorMarker reports whether any strict ancestor of cwd contains a
+// .vibe-vault.toml. Used by `vv context init` to warn about nested projects.
+func ancestorMarker(cwd string) (string, bool) {
+	parent := filepath.Dir(cwd)
+	if parent == cwd {
+		return "", false
+	}
+	dir, err := identity.FindMarker(parent)
+	if err != nil {
+		return "", false
+	}
+	return dir, true
+}
+
+// promptYesNo writes the question to stderr and reads a single line from
+// stdin. Returns true only on an affirmative response; any other input,
+// EOF, or read error is treated as "no".
+func promptYesNo(question string) bool {
+	fmt.Fprint(os.Stderr, question+" [y/N] ")
+	var buf [256]byte
+	n, err := os.Stdin.Read(buf[:])
+	if err != nil || n == 0 {
+		return false
+	}
+	r := strings.TrimSpace(strings.ToLower(string(buf[:n])))
+	return r == "y" || r == "yes"
 }
