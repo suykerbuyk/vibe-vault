@@ -4,10 +4,11 @@
 package noteparse
 
 import (
-	"bufio"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/suykerbuyk/vibe-vault/internal/frontmatter"
 )
 
 // Note represents a parsed session note with frontmatter and body sections.
@@ -47,68 +48,26 @@ func ParseFile(path string) (*Note, error) {
 
 // Parse reads and parses a session note from a reader.
 func Parse(r io.Reader) (*Note, error) {
-	scanner := bufio.NewScanner(r)
-	note := &Note{
-		Frontmatter: make(map[string]string),
-	}
-
-	// State machine for frontmatter
-	inFrontmatter := false
-	frontmatterDone := false
-	var bodyLines []string
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if !inFrontmatter && !frontmatterDone {
-			if strings.TrimSpace(line) == "---" {
-				inFrontmatter = true
-				continue
-			}
-			// No frontmatter delimiter found yet — treat as body
-			bodyLines = append(bodyLines, line)
-			frontmatterDone = true
-			continue
-		}
-
-		if inFrontmatter {
-			if strings.TrimSpace(line) == "---" {
-				inFrontmatter = false
-				frontmatterDone = true
-				continue
-			}
-			// Parse key: value
-			if idx := strings.IndexByte(line, ':'); idx > 0 {
-				key := strings.TrimSpace(line[:idx])
-				val := strings.TrimSpace(line[idx+1:])
-				// Strip surrounding quotes
-				val = stripQuotes(val)
-				note.Frontmatter[key] = val
-			}
-			continue
-		}
-
-		// Body
-		bodyLines = append(bodyLines, line)
-	}
-
-	if err := scanner.Err(); err != nil {
+	res, err := frontmatter.Parse(r, frontmatter.Options{})
+	if err != nil {
 		return nil, err
 	}
 
+	note := &Note{Frontmatter: res.Fields}
+
 	// Map frontmatter to typed fields
-	note.SessionID = note.Frontmatter["session_id"]
-	note.Date = note.Frontmatter["date"]
-	note.Project = note.Frontmatter["project"]
-	note.Domain = note.Frontmatter["domain"]
-	note.Branch = note.Frontmatter["branch"]
-	note.Model = note.Frontmatter["model"]
-	note.Iteration = note.Frontmatter["iteration"]
-	note.Summary = note.Frontmatter["summary"]
-	note.Previous = note.Frontmatter["previous"]
+	note.SessionID = res.Fields["session_id"]
+	note.Date = res.Fields["date"]
+	note.Project = res.Fields["project"]
+	note.Domain = res.Fields["domain"]
+	note.Branch = res.Fields["branch"]
+	note.Model = res.Fields["model"]
+	note.Iteration = res.Fields["iteration"]
+	note.Summary = res.Fields["summary"]
+	note.Previous = res.Fields["previous"]
 
 	// Parse tags bracket list
-	if tagsRaw, ok := note.Frontmatter["tags"]; ok {
+	if tagsRaw, ok := res.Fields["tags"]; ok {
 		note.Tags = parseBracketList(tagsRaw)
 		// Extract activity tag (skip base session tags)
 		for _, t := range note.Tags {
@@ -120,10 +79,10 @@ func Parse(r io.Reader) (*Note, error) {
 	}
 
 	// Extract body sections
-	note.Decisions = extractBulletSection(bodyLines, "## Key Decisions")
-	note.OpenThreads = extractCheckboxSection(bodyLines, "## Open Threads")
-	note.FilesChanged = extractCodeItems(bodyLines, "## What Changed")
-	note.Commits = extractCodeItems(bodyLines, "## Commits")
+	note.Decisions = extractBulletSection(res.Body, "## Key Decisions")
+	note.OpenThreads = extractCheckboxSection(res.Body, "## Open Threads")
+	note.FilesChanged = extractCodeItems(res.Body, "## What Changed")
+	note.Commits = extractCodeItems(res.Body, "## Commits")
 
 	return note, nil
 }
@@ -214,11 +173,3 @@ func extractSection(lines []string, heading string, parse func(string) (string, 
 	return items
 }
 
-func stripQuotes(s string) string {
-	if len(s) >= 2 {
-		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
-			return s[1 : len(s)-1]
-		}
-	}
-	return s
-}
