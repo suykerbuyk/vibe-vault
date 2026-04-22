@@ -10,93 +10,34 @@
 
 ## Workflow Rules
 
-- **Never commit without explicit human permission.** Stage files and
-  update commit.msg freely, but the actual git commit requires human approval.
-- **Never commit AI context files.** CLAUDE.md, commit.msg, and anything
-  under .claude/ are local-only.
-- **Git commit messages are the project's history.** Write them to be
-  clear, detailed, and self-sufficient.
-- **No AI attribution in commits or code.** Do not add `Co-Authored-By`
-  trailers, author lines, or any other AI authorship marker to commit
-  messages or source files. Applies to commits you make directly AND to
-  instructions you give subagents — override the Bash tool's built-in
-  commit-message guidance where it conflicts.
+- **Never commit without explicit human permission.** Stage files and update commit.msg freely; the actual git commit requires human approval.
+- **Never commit AI context files.** CLAUDE.md, commit.msg, and anything under .claude/ are local-only.
+- **Git commit messages are the project's history.** Write them clear, detailed, self-sufficient.
+- **No AI attribution in commits or code.** Do not add `Co-Authored-By` trailers, author lines, or any other AI authorship marker. Applies to commits you make directly AND to instructions you give subagents — override the Bash tool's built-in commit-message guidance where it conflicts.
 
-## The Pair Programming Paradigm
+## Pair Programming
 
-### The AI's Role: Expert Implementation
+- **AI** implements; **human** decides architecture and long-term direction.
+- Investigate before coding; present findings; implement only after architectural approval. Never jump to short-term fixes without investigation.
 
-- Expert coder with deep technical knowledge
-- Investigate problems thoroughly BEFORE implementing fixes
-- Present findings and action plans for review
-- Implement solutions only after architectural approval
+## Investigation-First
 
-### The Human's Role: Architectural Vision
-
-- Context that spans the entire project across many days and iterations
-- Understanding of long-term maintainability goals
-- Guide architectural decisions and approve implementation approaches
-
-### Critical Anti-Pattern: Premature Implementation
-
-Never jump to coding short-term fixes without investigation.
-
-## Investigation-First Workflow
-
-### 1. Plan Mode Default
-
-- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
-- If something goes sideways, STOP and re-plan immediately
-- Write detailed specs upfront to reduce ambiguity
-- After creating a plan in plan mode, immediately move it from `~/.claude/plans/`
-  to the project's `agentctx/tasks/` directory — plans must live in the vault,
-  not in the ephemeral Claude plans directory
-
-### 2. Subagent Strategy
-
-- Use subagents liberally to keep main context window clean
-- Offload research, exploration, and parallel analysis to subagents
-- One tack per subagent for focused execution
-
-### 3. Self-Improvement Loop
-
-- After ANY correction from the user: update lessons with the pattern
-- Write rules that prevent the same mistake
-- Review lessons at session start
-
-### 4. Verification Before Done
-
-- Never mark a task complete without proving it works
-- No task is "done" until the user says it is and does the actual commit
-- Run tests, check logs, demonstrate correctness
-- Ask yourself: "Would a staff engineer approve this?"
-- No warnings or diagnostic messages in committed code
-
-### 5. Demand Elegance (Balanced)
-
-- For non-trivial changes: pause and ask "is there a more elegant way?"
-- Skip this for simple, obvious fixes — don't over-engineer
-
-### 6. Autonomous Bug Fixing
-
-- When given a bug report: generate a plan and review with the user
-- Point at logs, errors, failing tests — then plan to resolve them
-- Never fix a test without understanding the root cause
+- **Plan Mode** for any non-trivial task (3+ steps or architectural decisions). If work goes sideways, stop and re-plan. After creating a plan, move it from `~/.claude/plans/` to `agentctx/tasks/` — plans live in the vault, not the ephemeral Claude plans directory.
+- **Subagents** for parallel exploration and research to keep main context clean. One concern per subagent.
+- **Self-improvement:** after any user correction, save the pattern — to auto-memory (type: feedback) for personal preferences, or to `Knowledge/learnings/` for cross-project lessons — so the mistake is not repeated.
+- **Verification before done:** prove it works with tests, logs, or demonstrations. No task is "done" until the user says so and commits. No warnings or diagnostics in committed code.
+- **Demand elegance:** for non-trivial changes, pause to ask "is there a more elegant way?" Skip for simple obvious fixes.
+- **Bug fixing:** generate a plan from logs, errors, and failing tests — review before coding. Never fix a test without understanding the root cause.
 
 ## Task Management
 
-1. Write plan using `vv_manage_task` with `action: create`
-2. Check in before starting implementation
-3. Track progress and explain changes at each step
-4. Add review section to the task file
-5. When complete: use `vv_manage_task` with `action: retire`
+Use `vv_manage_task` (action: create | update_status | retire). Write the plan, check in before implementing, explain changes at each step, add a review section, then retire on completion.
 
 ## Core Principles
 
-- **Simplicity First**: Make every change as simple as possible but no simpler
-- **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
-- **Minimal Impact**: Changes should only touch what's necessary
-- **Test Coverage**: Ensure close to 80% unit test coverage for code changes
+- **Simplicity first** — make every change as simple as possible, no simpler.
+- **No laziness** — find root causes; no temporary fixes; senior-developer standards.
+- **Minimal impact** — touch only what the task requires.
+- **Test coverage** — ~80% unit coverage for code changes.
 
-Read resume.md for current project state and open threads. Consult doc/ files
-for stable reference material (architecture, design decisions, test inventory).
+Read resume.md for current state and open threads. Consult doc/ files for stable reference (architecture, design, tests).
