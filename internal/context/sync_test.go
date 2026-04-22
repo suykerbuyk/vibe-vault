@@ -2170,7 +2170,7 @@ func TestInsertAfterFirstH2_MultipleH2(t *testing.T) {
 	idxFirst := strings.Index(got, "## First")
 	idxBlock := strings.Index(got, dataWorkflowStart)
 	idxSecond := strings.Index(got, "## Second")
-	if !(idxFirst < idxBlock && idxBlock < idxSecond) {
+	if idxFirst >= idxBlock || idxBlock >= idxSecond {
 		t.Errorf("snippet not between first and second H2:\n%s", got)
 	}
 }

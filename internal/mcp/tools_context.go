@@ -507,7 +507,7 @@ func NewBootstrapContextTool(cfg config.Config) Tool {
 			// keeps the bootstrap payload lean (zero tokens when the
 			// vault has no learnings yet) while still signaling to the
 			// model that the on-demand tools are worth calling.
-			if count, err := knowledge.Count(cfg.VaultPath); err == nil && count > 0 {
+			if count, cerr := knowledge.Count(cfg.VaultPath); cerr == nil && count > 0 {
 				response.KnowledgeLearningsAvailable = &learningsAvailableHint{
 					Count: count,
 					Hint:  "call vv_list_learnings when planning, vv_get_learning(slug) to fetch one",
