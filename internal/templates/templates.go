@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/context"
-	"github.com/johns/vibe-vault/internal/scaffold"
+	"github.com/suykerbuyk/vibe-vault/internal/context"
+	"github.com/suykerbuyk/vibe-vault/internal/scaffold"
 )
 
 // Status describes the state of a vault template relative to its default.

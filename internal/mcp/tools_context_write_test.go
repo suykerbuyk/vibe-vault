@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johns/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
 )
 
 // --- vv_update_resume tests ---

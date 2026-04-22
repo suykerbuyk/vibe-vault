@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johns/vibe-vault/internal/config"
-	"github.com/johns/vibe-vault/internal/llm"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/llm"
 )
 
 func TestRun_NilProvider(t *testing.T) {

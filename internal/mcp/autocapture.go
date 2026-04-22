@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/config"
-	"github.com/johns/vibe-vault/internal/zed"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/zed"
 )
 
 // AutoCaptureConfig configures the background auto-capture goroutine.

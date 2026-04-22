@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
 )
 
 // ExportEntry is a flattened session record for export.

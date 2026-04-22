@@ -4,7 +4,7 @@
 package zed
 
 import (
-	"github.com/johns/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
 
 // toolNameMap normalizes Zed tool names to vibe-vault canonical names.

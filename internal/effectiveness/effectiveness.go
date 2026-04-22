@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
 )
 
 // Cohort groups sessions by context depth.

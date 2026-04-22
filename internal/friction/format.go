@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
 )
 
 // ComputeProjectFriction computes aggregate friction metrics from index entries.

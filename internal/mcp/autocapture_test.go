@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
 
 func TestStartAutoCapture_MissingDBPath_NoOp(t *testing.T) {

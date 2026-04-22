@@ -13,17 +13,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/config"
-	"github.com/johns/vibe-vault/internal/enrichment"
-	"github.com/johns/vibe-vault/internal/friction"
-	"github.com/johns/vibe-vault/internal/index"
-	"github.com/johns/vibe-vault/internal/llm"
-	"github.com/johns/vibe-vault/internal/narrative"
-	"github.com/johns/vibe-vault/internal/prose"
-	"github.com/johns/vibe-vault/internal/render"
-	"github.com/johns/vibe-vault/internal/sanitize"
-	"github.com/johns/vibe-vault/internal/stats"
-	"github.com/johns/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/enrichment"
+	"github.com/suykerbuyk/vibe-vault/internal/friction"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/llm"
+	"github.com/suykerbuyk/vibe-vault/internal/narrative"
+	"github.com/suykerbuyk/vibe-vault/internal/prose"
+	"github.com/suykerbuyk/vibe-vault/internal/render"
+	"github.com/suykerbuyk/vibe-vault/internal/sanitize"
+	"github.com/suykerbuyk/vibe-vault/internal/stats"
+	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
 
 // CaptureOpts configures a Capture invocation.

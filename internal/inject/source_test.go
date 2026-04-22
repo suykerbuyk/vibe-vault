@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johns/vibe-vault/internal/index"
-	"github.com/johns/vibe-vault/internal/trends"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/trends"
 )
 
 func TestBuild_ZedSessions(t *testing.T) {

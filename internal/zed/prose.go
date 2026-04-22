@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/prose"
+	"github.com/suykerbuyk/vibe-vault/internal/prose"
 )
 
 const (

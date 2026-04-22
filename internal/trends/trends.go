@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
 )
 
 // WeekBucket accumulates raw values for a single ISO week.

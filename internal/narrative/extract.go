@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/sanitize"
-	"github.com/johns/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/sanitize"
+	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
 
 // Extract processes a transcript and produces a Narrative with activities,

@@ -31,7 +31,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/frontmatter"
+	"github.com/suykerbuyk/vibe-vault/internal/frontmatter"
 )
 
 // LearningMetadata is the frontmatter-only view of a learning file,

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johns/vibe-vault/internal/config"
-	"github.com/johns/vibe-vault/internal/plugin"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/plugin"
 )
 
 // pluginGenerate is a test helper that calls plugin.Generate.

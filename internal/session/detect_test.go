@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/johns/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
 
 func TestDetectProject(t *testing.T) {

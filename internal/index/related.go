@@ -6,7 +6,7 @@ package index
 import (
 	"sort"
 
-	"github.com/johns/vibe-vault/internal/mdutil"
+	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
 )
 
 // RelatedSession holds a related session and its relevance score.

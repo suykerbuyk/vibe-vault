@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/johns/vibe-vault/internal/help"
+	"github.com/suykerbuyk/vibe-vault/internal/help"
 )
 
 // LatestSchemaVersion is the current agentctx schema version.

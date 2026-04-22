@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/config"
-	"github.com/johns/vibe-vault/internal/mdutil"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
 )
 
 // Apply executes the synthesis result: appends learnings, flags stale entries,

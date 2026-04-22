@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johns/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
 
 func TestInferTitle_FromSegmentRequest(t *testing.T) {

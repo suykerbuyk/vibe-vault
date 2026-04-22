@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/sanitize"
+	"github.com/suykerbuyk/vibe-vault/internal/sanitize"
 )
 
 func computeStats(entries []Entry) Stats {

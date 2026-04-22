@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/narrative"
+	"github.com/suykerbuyk/vibe-vault/internal/narrative"
 )
 
 // ToolMetric holds effectiveness data for a single tool.

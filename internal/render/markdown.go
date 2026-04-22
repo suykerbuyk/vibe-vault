@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/narrative"
-	"github.com/johns/vibe-vault/internal/sanitize"
-	"github.com/johns/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/narrative"
+	"github.com/suykerbuyk/vibe-vault/internal/sanitize"
+	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
 
 // SourceFallbackSummary returns the generic session fallback for a given source.

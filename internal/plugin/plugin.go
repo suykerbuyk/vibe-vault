@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/johns/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
 
 const (

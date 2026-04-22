@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johns/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
 )
 
 func makeEntry(id, project, model, date, tag string, tokIn, tokOut, msgs, tools, dur int, files []string) index.SessionEntry {

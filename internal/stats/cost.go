@@ -6,7 +6,7 @@ package stats
 import (
 	"path/filepath"
 
-	"github.com/johns/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
 
 // CostInput holds the token counts needed for cost estimation.

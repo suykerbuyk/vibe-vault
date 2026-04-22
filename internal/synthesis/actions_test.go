@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johns/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
 
 func TestAppendLearnings_NewEntry(t *testing.T) {

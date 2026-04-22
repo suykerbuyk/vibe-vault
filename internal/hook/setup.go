@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/config"
-	"github.com/johns/vibe-vault/internal/help"
-	"github.com/johns/vibe-vault/internal/plugin"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/help"
+	"github.com/suykerbuyk/vibe-vault/internal/plugin"
 )
 
 const hookCommand = "vv hook"

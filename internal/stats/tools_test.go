@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/narrative"
+	"github.com/suykerbuyk/vibe-vault/internal/narrative"
 )
 
 func TestAnalyzeTools_NoActivities(t *testing.T) {

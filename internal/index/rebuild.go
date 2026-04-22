@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/noteparse"
+	"github.com/suykerbuyk/vibe-vault/internal/noteparse"
 )
 
 // Rebuild walks the Projects directory, parses each note via noteparse,

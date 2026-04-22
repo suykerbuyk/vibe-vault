@@ -6,7 +6,7 @@ package narrative
 import (
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
 
 // reasoningKeywords are phrases that indicate interesting reasoning.

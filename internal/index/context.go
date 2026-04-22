@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/mdutil"
+	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
 )
 
 // ContextOptions controls history.md rendering and pruning behavior.

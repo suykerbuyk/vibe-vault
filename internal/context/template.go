@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johns/vibe-vault/templates"
+	"github.com/suykerbuyk/vibe-vault/templates"
 )
 
 // TemplateVars holds substitution variables for vault templates.

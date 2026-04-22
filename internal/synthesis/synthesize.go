@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/johns/vibe-vault/internal/llm"
+	"github.com/suykerbuyk/vibe-vault/internal/llm"
 )
 
 // Synthesize sends the gathered input to the LLM and returns structured actions.

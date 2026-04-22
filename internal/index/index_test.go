@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/mdutil"
+	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
 )
 
 // --- Backwards compat & enriched roundtrip ---

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
 
 var ts = time.Date(2027, 6, 15, 10, 0, 0, 0, time.UTC)

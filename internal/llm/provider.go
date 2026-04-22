@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/johns/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
 
 // NewProvider creates a Provider from enrichment config.

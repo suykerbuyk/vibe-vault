@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
 
 // minimalTranscript is a JSONL transcript with enough messages to not be skipped as trivial.

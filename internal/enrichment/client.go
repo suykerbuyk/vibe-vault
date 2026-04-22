@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/llm"
+	"github.com/suykerbuyk/vibe-vault/internal/llm"
 )
 
 var allowedTags = map[string]bool{

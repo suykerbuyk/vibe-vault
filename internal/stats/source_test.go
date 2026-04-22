@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johns/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
 )
 
 func TestCompute_SourceBreakdown(t *testing.T) {

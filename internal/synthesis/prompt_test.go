@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johns/vibe-vault/internal/noteparse"
+	"github.com/suykerbuyk/vibe-vault/internal/noteparse"
 )
 
 func TestBuildPrompt_AllSections(t *testing.T) {

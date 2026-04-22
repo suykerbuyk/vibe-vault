@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
 
 func TestSegmentEntries_NoCompaction(t *testing.T) {

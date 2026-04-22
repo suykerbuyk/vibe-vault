@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/config"
-	"github.com/johns/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
 )
 
 // writeTestVault creates a vault directory with a session-index.json and optional

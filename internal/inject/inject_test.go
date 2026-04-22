@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/index"
-	"github.com/johns/vibe-vault/internal/mdutil"
-	"github.com/johns/vibe-vault/internal/trends"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
+	"github.com/suykerbuyk/vibe-vault/internal/trends"
 )
 
 func makeEntry(id, project, date string, iter int) index.SessionEntry {

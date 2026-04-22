@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
 
 func parseTestThread(t *testing.T, opts ...threadOpt) *Thread {

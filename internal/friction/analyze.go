@@ -6,10 +6,10 @@ package friction
 import (
 	"fmt"
 
-	"github.com/johns/vibe-vault/internal/mdutil"
-	"github.com/johns/vibe-vault/internal/narrative"
-	"github.com/johns/vibe-vault/internal/prose"
-	"github.com/johns/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
+	"github.com/suykerbuyk/vibe-vault/internal/narrative"
+	"github.com/suykerbuyk/vibe-vault/internal/prose"
+	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
 
 // Analysis thresholds for signal detection and summary generation.

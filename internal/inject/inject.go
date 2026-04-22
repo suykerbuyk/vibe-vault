@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/index"
-	"github.com/johns/vibe-vault/internal/mdutil"
-	"github.com/johns/vibe-vault/internal/trends"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
+	"github.com/suykerbuyk/vibe-vault/internal/trends"
 )
 
 // Section names in priority order (truncation drops from the end).

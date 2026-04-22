@@ -1,6 +1,6 @@
 BINARY  := vv
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -s -w -X github.com/johns/vibe-vault/internal/help.Version=$(VERSION)
+LDFLAGS := -s -w -X github.com/suykerbuyk/vibe-vault/internal/help.Version=$(VERSION)
 GOFLAGS := -trimpath -ldflags="$(LDFLAGS)"
 MANDIR  := man
 PREFIX  ?= $(HOME)/.local
@@ -20,10 +20,10 @@ help: ## Show this help
 .PHONY: build man
 build: ## Build binary and man pages
 	go build $(GOFLAGS) -o $(BINARY) ./cmd/vv
-	go run -ldflags="-X github.com/johns/vibe-vault/internal/help.Version=$(shell git describe --tags --always 2>/dev/null || echo dev)" ./cmd/gen-man $(MANDIR)
+	go run -ldflags="-X github.com/suykerbuyk/vibe-vault/internal/help.Version=$(shell git describe --tags --always 2>/dev/null || echo dev)" ./cmd/gen-man $(MANDIR)
 
 man: ## Regenerate man pages only
-	go run -ldflags="-X github.com/johns/vibe-vault/internal/help.Version=$(shell git describe --tags --always 2>/dev/null || echo dev)" ./cmd/gen-man $(MANDIR)
+	go run -ldflags="-X github.com/suykerbuyk/vibe-vault/internal/help.Version=$(shell git describe --tags --always 2>/dev/null || echo dev)" ./cmd/gen-man $(MANDIR)
 
 ##@ Test
 .PHONY: test integration check vet lint coverage bench fuzz

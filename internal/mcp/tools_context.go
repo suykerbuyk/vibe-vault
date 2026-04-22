@@ -13,13 +13,13 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/config"
-	"github.com/johns/vibe-vault/internal/index"
-	"github.com/johns/vibe-vault/internal/inject"
-	"github.com/johns/vibe-vault/internal/knowledge"
-	"github.com/johns/vibe-vault/internal/session"
-	"github.com/johns/vibe-vault/internal/trends"
-	"github.com/johns/vibe-vault/templates"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/inject"
+	"github.com/suykerbuyk/vibe-vault/internal/knowledge"
+	"github.com/suykerbuyk/vibe-vault/internal/session"
+	"github.com/suykerbuyk/vibe-vault/internal/trends"
+	"github.com/suykerbuyk/vibe-vault/templates"
 )
 
 var (

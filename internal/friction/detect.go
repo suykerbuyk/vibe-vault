@@ -6,7 +6,7 @@ package friction
 import (
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/prose"
+	"github.com/suykerbuyk/vibe-vault/internal/prose"
 )
 
 // DetectCorrections scans prose dialogue for user correction patterns.

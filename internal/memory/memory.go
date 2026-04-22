@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/session"
+	"github.com/suykerbuyk/vibe-vault/internal/session"
 )
 
 // Opts controls a Link or Unlink invocation.

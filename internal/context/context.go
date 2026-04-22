@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/config"
-	"github.com/johns/vibe-vault/internal/identity"
-	"github.com/johns/vibe-vault/internal/session"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/identity"
+	"github.com/suykerbuyk/vibe-vault/internal/session"
 )
 
 // claudeSubdirs are the .claude/ subdirectories symlinked through agentctx.

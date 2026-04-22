@@ -14,11 +14,11 @@ import (
 
 	"path/filepath"
 
-	"github.com/johns/vibe-vault/internal/config"
-	"github.com/johns/vibe-vault/internal/index"
-	"github.com/johns/vibe-vault/internal/llm"
-	"github.com/johns/vibe-vault/internal/session"
-	"github.com/johns/vibe-vault/internal/synthesis"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/llm"
+	"github.com/suykerbuyk/vibe-vault/internal/session"
+	"github.com/suykerbuyk/vibe-vault/internal/synthesis"
 )
 
 // Input is the JSON object Claude Code sends to hooks via stdin.

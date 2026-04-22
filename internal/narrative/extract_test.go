@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
 
 func makeEntry(role, content string, toolUses ...transcript.ContentBlock) transcript.Entry {

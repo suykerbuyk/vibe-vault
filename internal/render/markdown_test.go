@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/narrative"
-	"github.com/johns/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/narrative"
+	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
 
 func TestSessionNote_AllFields(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/johns/vibe-vault/internal/sanitize"
+	"github.com/suykerbuyk/vibe-vault/internal/sanitize"
 )
 
 // ConfigDir returns the vibe-vault config directory path.

@@ -4,7 +4,7 @@ An Obsidian vault that automatically captures AI coding sessions into structured
 
 ## How It Works
 
-The `vv` binary (from [vibe-vault](https://github.com/johns/vibe-vault)) runs as a Claude Code hook. When a session ends, it:
+The `vv` binary (from [vibe-vault](https://github.com/suykerbuyk/vibe-vault)) runs as a Claude Code hook. When a session ends, it:
 
 1. Reads the full JSONL transcript
 2. Extracts stats (duration, tokens, files changed, message counts)

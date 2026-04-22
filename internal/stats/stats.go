@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/johns/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
 )
 
 // Summary holds aggregate metrics computed from the session index.

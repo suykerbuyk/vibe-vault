@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/johns/vibe-vault/internal/llm"
-	"github.com/johns/vibe-vault/internal/noteparse"
+	"github.com/suykerbuyk/vibe-vault/internal/llm"
+	"github.com/suykerbuyk/vibe-vault/internal/noteparse"
 )
 
 type mockProvider struct {

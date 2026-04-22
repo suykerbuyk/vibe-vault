@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johns/vibe-vault/internal/llm"
+	"github.com/suykerbuyk/vibe-vault/internal/llm"
 )
 
 func TestTruncate(t *testing.T) {

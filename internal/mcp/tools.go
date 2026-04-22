@@ -17,14 +17,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/config"
-	"github.com/johns/vibe-vault/internal/effectiveness"
-	"github.com/johns/vibe-vault/internal/index"
-	"github.com/johns/vibe-vault/internal/inject"
-	"github.com/johns/vibe-vault/internal/narrative"
-	"github.com/johns/vibe-vault/internal/session"
-	"github.com/johns/vibe-vault/internal/transcript"
-	"github.com/johns/vibe-vault/internal/trends"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/effectiveness"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/inject"
+	"github.com/suykerbuyk/vibe-vault/internal/narrative"
+	"github.com/suykerbuyk/vibe-vault/internal/session"
+	"github.com/suykerbuyk/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/trends"
 )
 
 var dateRegexp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)

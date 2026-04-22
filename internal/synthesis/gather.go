@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johns/vibe-vault/internal/config"
-	"github.com/johns/vibe-vault/internal/index"
-	"github.com/johns/vibe-vault/internal/noteparse"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/noteparse"
 )
 
 const (

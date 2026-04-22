@@ -2,7 +2,7 @@
 // propagates learnings, flags stale context, and updates project documents.
 package synthesis
 
-import "github.com/johns/vibe-vault/internal/noteparse"
+import "github.com/suykerbuyk/vibe-vault/internal/noteparse"
 
 // Input holds everything the synthesis agent needs to make judgments.
 type Input struct {

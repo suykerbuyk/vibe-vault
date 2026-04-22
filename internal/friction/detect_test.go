@@ -3,7 +3,7 @@ package friction
 import (
 	"testing"
 
-	"github.com/johns/vibe-vault/internal/prose"
+	"github.com/suykerbuyk/vibe-vault/internal/prose"
 )
 
 func makeDialogue(turns ...prose.Element) *prose.Dialogue {
