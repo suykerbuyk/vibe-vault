@@ -12,10 +12,17 @@ Specifically:
 - Ensure all unit and integration tests pass
 - Read the current resume.md using `vv_get_resume` and CLAUDE.md
 - Compare against the actual codebase state (files, tests, architecture)
-- Update resume.md using `vv_update_resume`: current state (test count,
-  iteration count), open threads. Do NOT add file inventories, architecture
-  diagrams, design decisions, or module tables to resume.md — those belong
-  in doc/ files
+- Update resume.md using `vv_update_resume`: Current State should hold
+  only evergreen invariants (test count, iteration count, schema version,
+  module path, MCP tool count, embedded template count). Do NOT add
+  shipped-feature descriptions, narrative paragraphs, file inventories,
+  architecture diagrams, design decisions, or module tables to resume.md.
+  Shipped-capability descriptions belong in `agentctx/features.md`;
+  stable reference material belongs in `doc/` files
+- When a new capability ships, add (or update) an entry in
+  `agentctx/features.md` under the appropriate section heading. Keep it
+  brief: 1–2 sentences on what it does, where it lives
+  (package/file/flag), and the iteration that introduced it
 - If stable project documentation changed (architecture, design decisions,
   test structure), update the relevant doc/ file
 - Append a new iteration narrative to iterations.md using `vv_append_iteration`
