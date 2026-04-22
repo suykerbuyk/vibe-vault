@@ -2,7 +2,13 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**1184 tests** across 33 test packages + **1 integration test** (23 subtests). All passing.
+**1342 tests** across 36 test packages + **1 integration test** (22 subtests). All passing.
+
+> **Note (iter 121):** The detailed per-file table below is out of date relative to the
+> headline counts above — accumulated drift across many iterations. Treat the table
+> as indicative rather than authoritative; use `go test -v ./... 2>&1 | grep -c '^=== RUN'`
+> for the current total and `go test -v ./internal/<package>` to enumerate tests in any
+> specific package.
 
 Run unit tests: `make test` (or `go test -short ./...`)
 Run integration: `make integration` (or `go test -run TestIntegration -timeout 60s ./test/`)

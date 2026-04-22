@@ -571,3 +571,59 @@ Key architectural and design decisions in vibe-vault, with rationale.
     branch today. Extending `syncProject` to call migrations with
     `ctx.DryRun=true` and let them emit finer-grained dry-run output is
     deferred — v9's current dry-run behaviour matches v1–v8.
+
+51. **Shipped-capability descriptions live in `agentctx/features.md`,
+    not `resume.md`.** `resume.md` is loaded into every session's
+    bootstrap context and was accumulating prose paragraphs describing
+    every shipped feature — content duplicated in `iterations.md`
+    narratives, commit messages, and `doc/DESIGN.md`. Iter 119's
+    bootstrap-payload measurement showed `resume.md` at ~18.4 KB with
+    roughly ~10 KB of that being the "Current State" feature prose
+    alone.
+
+    **The split.** `resume.md`'s Current State now holds only evergreen
+    invariants (test count, iteration count, schema version, module
+    path, MCP tool count, embedded template count). Shipped-capability
+    descriptions go to a new `agentctx/features.md` with themed
+    headings (Template cascade / Memory & knowledge / MCP server /
+    Vault operations / Workflow & discipline / Code hygiene). Each
+    features.md entry is 1–2 sentences pointing at a package or file
+    and the iteration that introduced it.
+
+    **Why features.md is not in `doc/`.** `doc/` carries source-
+    controlled implementation documentation that ships alongside the
+    code (architecture, design rationale, test inventory). Shipped
+    capabilities are vault project history — they evolve session by
+    session, are project-scoped (not protocol-scoped), and belong with
+    `iterations.md` in `agentctx/`. A project reading from a packaged
+    binary without the vault context still has `doc/` from the repo
+    clone; features.md is the vault's equivalent.
+
+    **Why not auto-generate from `iterations.md`.** Tempting, but
+    iteration narratives are verbose and describe *changes* to
+    capabilities rather than the capabilities themselves. The manual
+    index can group multiple iterations under one entry (e.g., "MCP
+    server — 20 tools + 1 prompt, iters 95–121") and can describe
+    what the feature *is* now, not how it evolved. An auto-generated
+    version would force either a 1:1 iteration-to-feature mapping
+    (lossy) or a parse of iteration narratives into feature
+    descriptions (fragile).
+
+    **`/wrap` routing.** When a new capability ships, `/wrap` now adds
+    (or updates) an entry in `agentctx/features.md` under the
+    appropriate section heading rather than accumulating prose in
+    `resume.md`. `resume.md`'s Current State bullets still get
+    refreshed with new counts (tests, iterations, MCP tools), but no
+    longer accept narrative.
+
+    **Deferred: schema v9→v10 migration.** Automatically splitting
+    other projects' existing resume.md Current State into a new
+    features.md lands with schema v10. Phase 2b shipped the manual
+    version for this project only (A3 variant). The migration
+    (`features-md-schema-migration` task) follows the iter 116
+    v8→v9 pattern — marker-delimited injection, `.baseline` tracking,
+    `.pinned` / suppression opt-outs — and will run automatically on
+    the next `vv context sync` once implemented. Payload savings: for
+    this project, ~7.4 KB per `vv_bootstrap_context` call. For other
+    projects, proportional to however much Current State prose has
+    accumulated.
