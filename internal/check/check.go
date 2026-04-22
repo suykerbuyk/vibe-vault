@@ -402,7 +402,7 @@ func CheckMemoryLink(vaultPath, project, cwd string) *Result {
 	if err != nil {
 		return nil
 	}
-	if evald, err := filepath.EvalSymlinks(abs); err == nil {
+	if evald, symErr := filepath.EvalSymlinks(abs); symErr == nil {
 		abs = evald
 	}
 	slug := strings.ReplaceAll(filepath.Clean(abs), "/", "-")
