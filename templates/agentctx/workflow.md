@@ -16,6 +16,11 @@
   under .claude/ are local-only.
 - **Git commit messages are the project's history.** Write them to be
   clear, detailed, and self-sufficient.
+- **No AI attribution in commits or code.** Do not add `Co-Authored-By`
+  trailers, author lines, or any other AI authorship marker to commit
+  messages or source files. Applies to commits you make directly AND to
+  instructions you give subagents — override the Bash tool's built-in
+  commit-message guidance where it conflicts.
 
 ## The Pair Programming Paradigm
 
