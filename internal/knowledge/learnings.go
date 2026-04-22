@@ -23,13 +23,15 @@
 package knowledge
 
 import (
-	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/johns/vibe-vault/internal/frontmatter"
 )
 
 // LearningMetadata is the frontmatter-only view of a learning file,
@@ -199,54 +201,25 @@ func parseLearning(path string) (LearningMetadata, string, error) {
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
-
-	fm := map[string]string{}
-	var bodyLines []string
-
-	state := 0 // 0 = before frontmatter, 1 = inside, 2 = after
-	for scanner.Scan() {
-		line := scanner.Text()
-		switch state {
-		case 0:
-			if strings.TrimSpace(line) == "---" {
-				state = 1
-				continue
-			}
-			// Any content before the frontmatter delimiter is a
-			// malformed learning; the schema requires frontmatter.
+	res, err := frontmatter.Parse(f, frontmatter.Options{
+		RequireDelimiter: true,
+		RequireClose:     true,
+		MaxLineBytes:     4 * 1024 * 1024,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, frontmatter.ErrMissingOpener):
 			return LearningMetadata{}, "", fmt.Errorf("missing frontmatter opener")
-		case 1:
-			if strings.TrimSpace(line) == "---" {
-				state = 2
-				continue
-			}
-			if idx := strings.IndexByte(line, ':'); idx > 0 {
-				key := strings.TrimSpace(line[:idx])
-				val := strings.TrimSpace(line[idx+1:])
-				val = stripQuotes(val)
-				fm[key] = val
-			}
-		case 2:
-			bodyLines = append(bodyLines, line)
+		case errors.Is(err, frontmatter.ErrUnterminated):
+			return LearningMetadata{}, "", fmt.Errorf("unterminated frontmatter")
 		}
-	}
-	if err := scanner.Err(); err != nil {
 		return LearningMetadata{}, "", fmt.Errorf("scan: %w", err)
 	}
 
-	if state == 0 {
-		return LearningMetadata{}, "", fmt.Errorf("no frontmatter block")
-	}
-	if state == 1 {
-		return LearningMetadata{}, "", fmt.Errorf("unterminated frontmatter")
-	}
-
 	meta := LearningMetadata{
-		Name:        fm["name"],
-		Description: fm["description"],
-		Type:        fm["type"],
+		Name:        res.Fields["name"],
+		Description: res.Fields["description"],
+		Type:        res.Fields["type"],
 	}
 	if meta.Name == "" {
 		return LearningMetadata{}, "", fmt.Errorf("missing required frontmatter field: name")
@@ -266,20 +239,9 @@ func parseLearning(path string) (LearningMetadata, string, error) {
 
 	// Trim a single leading empty line so the body reads cleanly while
 	// preserving intentional blank lines deeper in the file.
-	if len(bodyLines) > 0 && strings.TrimSpace(bodyLines[0]) == "" {
-		bodyLines = bodyLines[1:]
+	body := res.Body
+	if len(body) > 0 && strings.TrimSpace(body[0]) == "" {
+		body = body[1:]
 	}
-	return meta, strings.Join(bodyLines, "\n"), nil
-}
-
-// stripQuotes removes matching single or double quotes from the edges
-// of a frontmatter value. Keeps the parser forgiving about how users
-// hand-author learning files.
-func stripQuotes(s string) string {
-	if len(s) >= 2 {
-		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
-			return s[1 : len(s)-1]
-		}
-	}
-	return s
+	return meta, strings.Join(body, "\n"), nil
 }
