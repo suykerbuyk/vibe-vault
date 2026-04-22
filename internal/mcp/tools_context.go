@@ -16,6 +16,7 @@ import (
 	"github.com/johns/vibe-vault/internal/config"
 	"github.com/johns/vibe-vault/internal/index"
 	"github.com/johns/vibe-vault/internal/inject"
+	"github.com/johns/vibe-vault/internal/knowledge"
 	"github.com/johns/vibe-vault/internal/session"
 	"github.com/johns/vibe-vault/internal/trends"
 	"github.com/johns/vibe-vault/templates"
@@ -487,11 +488,12 @@ func NewBootstrapContextTool(cfg config.Config) Tool {
 				tasks = []taskEntry{}
 			}
 			response := struct {
-				Project     string      `json:"project"`
-				Workflow    string      `json:"workflow"`
-				Resume      string      `json:"resume"`
-				ActiveTasks []taskEntry `json:"active_tasks"`
-				Context     string      `json:"context"`
+				Project                     string                    `json:"project"`
+				Workflow                    string                    `json:"workflow"`
+				Resume                      string                    `json:"resume"`
+				ActiveTasks                 []taskEntry               `json:"active_tasks"`
+				Context                     string                    `json:"context"`
+				KnowledgeLearningsAvailable *learningsAvailableHint   `json:"knowledge_learnings_available,omitempty"`
 			}{
 				Project:     project,
 				Workflow:    workflow,
@@ -500,7 +502,114 @@ func NewBootstrapContextTool(cfg config.Config) Tool {
 				Context:     contextOutput,
 			}
 
+			// 6. Cross-project learnings hint: emit only when the
+			// Knowledge/learnings/ directory has ≥1 valid entry. This
+			// keeps the bootstrap payload lean (zero tokens when the
+			// vault has no learnings yet) while still signaling to the
+			// model that the on-demand tools are worth calling.
+			if count, cerr := knowledge.Count(cfg.VaultPath); cerr == nil && count > 0 {
+				response.KnowledgeLearningsAvailable = &learningsAvailableHint{
+					Count: count,
+					Hint:  "call vv_list_learnings when planning, vv_get_learning(slug) to fetch one",
+				}
+			}
+
 			data, err := json.MarshalIndent(response, "", "  ")
+			if err != nil {
+				return "", fmt.Errorf("marshal: %w", err)
+			}
+			return string(data) + "\n", nil
+		},
+	}
+}
+
+// learningsAvailableHint is the structure emitted in
+// vv_bootstrap_context's optional knowledge_learnings_available field.
+// Kept at package scope so the JSON shape is testable and stable.
+type learningsAvailableHint struct {
+	Count int    `json:"count"`
+	Hint  string `json:"hint"`
+}
+
+// NewListLearningsTool creates the vv_list_learnings tool. Walks
+// VibeVault/Knowledge/learnings/*.md, parses frontmatter only, and
+// returns metadata entries sorted alphabetically by slug. Files with
+// malformed frontmatter or the disallowed "type: project" are skipped
+// with a warning on the server's stderr (never surfaced inline) so the
+// consumer contract stays uniform.
+func NewListLearningsTool(cfg config.Config) Tool {
+	return Tool{
+		Definition: ToolDef{
+			Name:        "vv_list_learnings",
+			Description: "List cross-project learnings stored in VibeVault/Knowledge/learnings/. Returns metadata only (slug, name, description, type) so the caller can pick one to load via vv_get_learning. Files with malformed frontmatter or type=project are skipped with a stderr warning.",
+			InputSchema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"filter_type": {
+						"type": "string",
+						"description": "When set, only entries with this type are returned. Valid values: user, feedback, reference."
+					}
+				}
+			}`),
+		},
+		Handler: func(params json.RawMessage) (string, error) {
+			var args struct {
+				FilterType string `json:"filter_type"`
+			}
+			if len(params) > 0 {
+				if err := json.Unmarshal(params, &args); err != nil {
+					return "", fmt.Errorf("invalid arguments: %w", err)
+				}
+			}
+
+			entries, err := knowledge.List(cfg.VaultPath, args.FilterType)
+			if err != nil {
+				return "", fmt.Errorf("list learnings: %w", err)
+			}
+			data, err := json.MarshalIndent(entries, "", "  ")
+			if err != nil {
+				return "", fmt.Errorf("marshal: %w", err)
+			}
+			return string(data) + "\n", nil
+		},
+	}
+}
+
+// NewGetLearningTool creates the vv_get_learning tool. Returns the full
+// frontmatter + body of a single learning. Unknown slugs produce an
+// error whose message lists the slugs that ARE available, so the
+// caller can correct a typo without round-tripping to vv_list_learnings
+// first.
+func NewGetLearningTool(cfg config.Config) Tool {
+	return Tool{
+		Definition: ToolDef{
+			Name:        "vv_get_learning",
+			Description: "Get the full content of a cross-project learning by slug (filename without .md). Returns metadata plus the markdown body. Unknown slugs produce an error that lists available slugs.",
+			InputSchema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"slug": {
+						"type": "string",
+						"description": "Learning slug (filename without .md extension)."
+					}
+				},
+				"required": ["slug"]
+			}`),
+		},
+		Handler: func(params json.RawMessage) (string, error) {
+			var args struct {
+				Slug string `json:"slug"`
+			}
+			if len(params) > 0 {
+				if err := json.Unmarshal(params, &args); err != nil {
+					return "", fmt.Errorf("invalid arguments: %w", err)
+				}
+			}
+			learning, err := knowledge.Get(cfg.VaultPath, args.Slug)
+			if err != nil {
+				return "", err
+			}
+			data, err := json.MarshalIndent(learning, "", "  ")
 			if err != nil {
 				return "", fmt.Errorf("marshal: %w", err)
 			}

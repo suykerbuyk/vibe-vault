@@ -809,7 +809,7 @@ func TestIntegration(t *testing.T) {
 			t.Error("vault agentctx/.version not created")
 		} else {
 			versionContent := readFile(t, filepath.Join(agentctxDir, ".version"))
-			assertContains(t, versionContent, "schema_version = 8", ".version has latest schema")
+			assertContains(t, versionContent, "schema_version = 9", ".version has latest schema")
 		}
 
 		// No agentctx symlink at repo root (v5)
@@ -957,11 +957,11 @@ func TestIntegration(t *testing.T) {
 		// Run sync — should migrate 0→6
 		stdout := mustRunVVInDir(t, env, syncCwd, "context", "sync", "--project", legacyProject)
 		assertContains(t, stdout, "v0", "sync shows from version")
-		assertContains(t, stdout, "v8", "sync shows to version")
+		assertContains(t, stdout, "v9", "sync shows to version")
 
 		// .version should be at latest
 		versionContent := readFile(t, filepath.Join(legacyAgentctx, ".version"))
-		assertContains(t, versionContent, "schema_version = 8", ".version at latest after sync")
+		assertContains(t, versionContent, "schema_version = 9", ".version at latest after sync")
 
 		// No agentctx symlink at repo root (v5)
 		if isSymlink(filepath.Join(syncCwd, "agentctx")) {
@@ -1136,8 +1136,8 @@ func TestIntegration(t *testing.T) {
 		// Response 1: tools/list — should have tools array
 		toolsResult := responses[1]["result"].(map[string]interface{})
 		tools := toolsResult["tools"].([]interface{})
-		if len(tools) != 17 {
-			t.Errorf("tools/list: expected 17 tools, got %d", len(tools))
+		if len(tools) != 19 {
+			t.Errorf("tools/list: expected 19 tools, got %d", len(tools))
 		}
 		toolNames := make(map[string]bool)
 		for _, tool := range tools {

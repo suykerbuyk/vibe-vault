@@ -190,11 +190,14 @@ context.Init()                     context.Sync()
     │                                  │
     ▼                                  ▼
 Scaffold agentctx/                 Refresh vault templates from embeds
-from templates.                    Run migrations (schema 0→8)
+from templates.                    Run migrations (schema 0→9)
     │                                  │
     ▼                                  ▼
 Create repo files                  Three-way baseline propagation
 (CLAUDE.md, .claude/)              (template vs baseline vs project)
+                                   + v8→v9: snippets/ propagation
+                                     and marker-block injection into
+                                     agentctx/resume.md (.datablock.baseline)
 ```
 
 ### Template Cascade (three-tier, baseline-tracked)
@@ -221,10 +224,11 @@ Source of truth: Tier 1 (Go embeds). See DESIGN.md decisions #41 and #46.
 |---------|------|----------------|
 | `cmd/vv` | `main.go` | CLI arg parsing, subcommand routing (including hook sub-subcommands), help via `internal/help`, `wantsHelp()` flag guard, unknown flag rejection, `runTrends()` with `--project` and `--weeks` flags, `runInject()` with `--project`/`--format`/`--sections`/`--max-tokens` flags, `runExport()` with `--format`/`--project` flags, `runContext()` with `sync` sub-subcommand (`--project`/`--all`/`--dry-run`/`--force`), `runCheck()` agentctx schema check |
 | `cmd/gen-man` | `main.go` | Generates `man/*.1` files from help registry (Subcommands + HookSubcommands + ContextSubcommands) |
-| `templates` | `embed.go` | `//go:embed all:agentctx` — embeds 22 agentctx template files (commands, skills, settings) into the binary; `AgentctxFS()` returns the `embed.FS`. Templates use `{{PROJECT}}`/`{{DATE}}` placeholders resolved at runtime. These are Tier 1 of the three-tier template cascade (see DESIGN.md #46) |
+| `templates` | `embed.go` | `//go:embed all:agentctx` — embeds 24 agentctx template files (commands, skills, snippets, settings) into the binary; `AgentctxFS()` returns the `embed.FS`. Templates use `{{PROJECT}}`/`{{DATE}}` placeholders resolved at runtime. These are Tier 1 of the three-tier template cascade (see DESIGN.md #46). The `snippets/` subdirectory holds marker-delimited blocks injected into user-owned files by schema migrations (e.g., v8→v9's `resume-data-workflow.md`). |
 | `context` | `context.go` | `Init()` — scaffold vault-resident context (templates from embed.FS, repo-side CLAUDE.md symlink + .claude/{commands,rules,skills,agents} symlinks, agentctx symlink, .version); `Migrate()` — copy local files to vault + force-update repo-side; `claudeSubdirs` var defines .claude/ subdirectories; helpers: safeWrite, safeSymlink, gitignoreEnsure, copyFile/Dir |
-| `context` | `schema.go` | `VersionFile` TOML struct, `ReadVersion`/`WriteVersion`, `LatestSchemaVersion` const (8), `Migration` type + registry (0→1 through 7→8), `migrationsFrom()` |
+| `context` | `schema.go` | `VersionFile` TOML struct, `ReadVersion`/`WriteVersion`, `LatestSchemaVersion` const (9), `Migration` type + registry (0→1 through 8→9), `MigrationContext` (incl. `DryRun` field), `migrationsFrom()` |
 | `context` | `sync.go` | `Sync()` — run schema migrations + three-way baseline propagation for one or all projects; `SyncOpts`/`SyncResult`/`ProjectSyncResult` types; `propagateSharedSubdir()` with `.baseline` tracking (template vs baseline vs project three-way comparison); `propagateDir()` with `dirContentsChanged()` gate; `isSidecar()`/`writeBaseline()`/`readBaseline()`/`cleanPending()` helpers; `forceUpdateVaultTemplates()`; migrations `1→2` through `7→8` (level-set with baselines) |
+| `context` | `blocksync.go` | `migrate8to9()` — data-workflow block injection migration; `injectDataWorkflowBlock()`, `insertAfterFirstH2()`, `readSnippetBody()`, `writeResume()` helpers. Reads Tier-3 `snippets/resume-data-workflow.md` and injects a marker-delimited span into `agentctx/resume.md` with span-only `.datablock.baseline` tracking for conflict detection. Opt-outs: `snippets/resume-data-workflow.md.pinned` (freeze snippet body) and `resume.md.no-data-workflow` (skip injection). |
 | `context` | `template.go` | `TemplateVars`, `DefaultVars()`, `resolveTemplate()` (vault Templates/agentctx/ first, fallback to `templates.AgentctxFS()`), `readEmbedded()`, `applyVars()` ({{PROJECT}}/{{DATE}}), `BuiltinTemplates()` (walks embed.FS), `EnsureVaultTemplates()` (seed-once for Init), `forceUpdateVaultTemplates()` (always-overwrite for Sync — Tier 1→2 refresh) |
 | `friction` | `types.go` | `Correction`, `Signals`, `Result`, `ProjectFriction` types |
 | `friction` | `detect.go` | `DetectCorrections()` — linguistic (negation, redirect, undo, quality, repetition) + contextual (short negation after long assistant turn) correction detection |

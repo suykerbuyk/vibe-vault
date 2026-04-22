@@ -96,8 +96,8 @@ func Link(opts Opts) (*Result, error) {
 	// Ensure target exists.
 	if _, err := os.Stat(rs.targetPath); os.IsNotExist(err) {
 		if !opts.DryRun {
-			if err := os.MkdirAll(rs.targetPath, 0o755); err != nil {
-				return nil, fmt.Errorf("create target: %w", err)
+			if mkErr := os.MkdirAll(rs.targetPath, 0o755); mkErr != nil {
+				return nil, fmt.Errorf("create target: %w", mkErr)
 			}
 		}
 		res.Actions = append(res.Actions, Action{Kind: "CREATE", Path: rs.targetPath, Detail: "vault memory dir"})
@@ -110,8 +110,8 @@ func Link(opts Opts) (*Result, error) {
 	parent := filepath.Dir(rs.sourcePath)
 	if _, err := os.Stat(parent); os.IsNotExist(err) {
 		if !opts.DryRun {
-			if err := os.MkdirAll(parent, 0o755); err != nil {
-				return nil, fmt.Errorf("create claude project parent: %w", err)
+			if mkErr := os.MkdirAll(parent, 0o755); mkErr != nil {
+				return nil, fmt.Errorf("create claude project parent: %w", mkErr)
 			}
 		}
 		res.Actions = append(res.Actions, Action{Kind: "CREATE", Path: parent, Detail: "claude project parent"})
@@ -269,7 +269,7 @@ func resolve(opts Opts) (*resolved, error) {
 	// Resolve symlinks so symlinked cwds produce a single canonical
 	// slug. Fall back to the cleaned absolute path when the evaluation
 	// fails (e.g. temp dir eviction during a test).
-	if evald, err := filepath.EvalSymlinks(abs); err == nil {
+	if evald, symErr := filepath.EvalSymlinks(abs); symErr == nil {
 		abs = evald
 	}
 	abs = filepath.Clean(abs)
@@ -283,9 +283,9 @@ func resolve(opts Opts) (*resolved, error) {
 
 	home := opts.HomeDir
 	if home == "" {
-		h, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("user home: %w", err)
+		h, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			return nil, fmt.Errorf("user home: %w", homeErr)
 		}
 		home = h
 	}
@@ -352,11 +352,10 @@ func migrateDir(rs *resolved, opts Opts, res *Result) error {
 	// conflicts before mutating anything. This keeps the operation
 	// closer to transactional when --force is absent.
 	type plan struct {
-		name     string
-		src      string
-		dst      string
-		action   string // "MOVE", "DROP", "CONFLICT"
-		conflict string // non-empty when --force must move file aside
+		name   string
+		src    string
+		dst    string
+		action string // "MOVE", "DROP", "CONFLICT"
 	}
 
 	var plans []plan
@@ -501,16 +500,16 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
+	if mkErr := os.MkdirAll(filepath.Dir(dst), 0o755); mkErr != nil {
+		return mkErr
 	}
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
 	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		return err
+	if _, copyErr := io.Copy(out, in); copyErr != nil {
+		return copyErr
 	}
 	info, err := os.Stat(src)
 	if err == nil {

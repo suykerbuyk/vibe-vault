@@ -206,8 +206,8 @@ func TestLink_RealDirMigration_NoConflicts(t *testing.T) {
 	}
 	for _, name := range []string{"goals.md", "testing.md"} {
 		p := filepath.Join(fx.target, name)
-		if _, err := os.Stat(p); err != nil {
-			t.Errorf("expected file in vault target: %s: %v", name, err)
+		if _, statErr := os.Stat(p); statErr != nil {
+			t.Errorf("expected file in vault target: %s: %v", name, statErr)
 		}
 	}
 	// Source should now be a symlink.
@@ -267,8 +267,8 @@ func TestLink_RealDirMigration_DifferentContent_Force_Quarantines(t *testing.T) 
 	if err != nil {
 		t.Fatalf("link --force: %v", err)
 	}
-	if !strings.HasPrefix(filepath.Base(filepath.Dir(res.Actions[0].Path)), "") {
-		// nothing, just a usage of Actions to keep the linter quiet
+	if len(res.Actions) == 0 {
+		t.Error("expected Link --force to record actions")
 	}
 
 	// Vault copy preserved.

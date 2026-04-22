@@ -388,6 +388,47 @@ output. Only projects that already have `Projects/{name}/agentctx/` (the
 vibe-vault-tracked marker) can be linked — run `vv init` or
 `vv context init` first for new projects.
 
+**Data-workflow block in `agentctx/resume.md`:**
+
+Schema v9 (applied automatically on the next `vv context sync`) injects a
+canonical "Data workflow" section into each project's
+`agentctx/resume.md`, delimited by:
+
+```
+<!-- vv:data-workflow:start -->
+...
+<!-- vv:data-workflow:end -->
+```
+
+The block documents where code, session narratives, auto-memory, and
+cross-project learnings live, so any agent (or human) resuming the
+project knows the layout at a glance. The canonical text is embedded in
+the `vv` binary at `templates/agentctx/snippets/resume-data-workflow.md`,
+propagated through the three-tier template cascade (see DESIGN.md #46),
+and re-injected on every `vv context sync`:
+
+- If the block is absent, it is inserted after the first `## ` heading
+  (or appended if no H2 exists) and recorded in
+  `agentctx/resume.md.datablock.baseline`.
+- If the block exists and matches the baseline, it is auto-updated to
+  the new canonical body.
+- If the user edited the block since the last sync, the migration
+  records `CONFLICT` and leaves the file alone — rerun with `--force`
+  to overwrite.
+
+Two opt-outs:
+
+- `agentctx/snippets/resume-data-workflow.md.pinned` — freezes the
+  Tier-3 snippet body, so the canonical wording can be customized
+  per-project and never overwritten. The customized body is still
+  injected into `resume.md`.
+- `agentctx/resume.md.no-data-workflow` — suppresses injection into
+  `resume.md` entirely (the migration reports `SKIP-OPTOUT` and moves on).
+
+`vv context sync` is the canonical way to apply v9 — there is no
+dedicated subcommand. Run `vv context sync --all` after upgrading `vv`
+to push the block to every qualifying project at once.
+
 **MCP server for AI agent integration:**
 ```bash
 vv mcp install                 # detect and install into all editors (then restart)
@@ -397,12 +438,44 @@ vv mcp uninstall               # remove from all editors
 vv mcp                         # start server directly (used by editors, not run manually)
 ```
 
-This exposes 17 tools including `vv_bootstrap_context` (session-start context
+This exposes 19 tools including `vv_bootstrap_context` (session-start context
 in one call), `vv_get_project_context`, `vv_list_projects`,
 `vv_search_sessions`, `vv_get_resume`, `vv_update_resume`, `vv_manage_task`,
-`vv_capture_session`, and more. Plus 1 prompt (`vv_session_guidelines`). All
-names are prefixed with `vv_` to avoid collisions with other MCP servers. AI
-agents call these on demand instead of requiring pre-loaded context.
+`vv_capture_session`, `vv_list_learnings`, `vv_get_learning`, and more. Plus
+1 prompt (`vv_session_guidelines`). All names are prefixed with `vv_` to
+avoid collisions with other MCP servers. AI agents call these on demand
+instead of requiring pre-loaded context.
+
+**Cross-project learnings (`Knowledge/learnings/`):** Drop markdown files
+into `VibeVault/Knowledge/learnings/` to surface observations that apply
+across projects (testing philosophy, resume phrasing rules, feedback
+patterns). Each file uses a frontmatter header:
+
+```markdown
+---
+name: Testing philosophy
+description: Nothing is done until proven end-to-end with real data
+type: user
+---
+
+Body content...
+```
+
+The `type` field is constrained to `user`, `feedback`, or `reference` —
+`type: project` is rejected because a project-scoped memory has no
+meaning in a cross-project directory. Malformed files are skipped with
+a stderr warning.
+
+Agents discover learnings on demand:
+
+- `vv_list_learnings` returns metadata only (slug, name, description,
+  type) so the agent can choose what to load — cheap enough to call
+  during planning.
+- `vv_get_learning(slug)` returns full content.
+- `vv_bootstrap_context` adds a one-line
+  `knowledge_learnings_available: {count, hint}` field **only** when at
+  least one valid learning file exists, keeping the bootstrap payload
+  under the /restart token budget when the directory is empty.
 
 **Synchronize vault across machines:**
 ```bash

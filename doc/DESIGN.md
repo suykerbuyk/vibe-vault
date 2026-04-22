@@ -276,7 +276,7 @@ Key architectural and design decisions in vibe-vault, with rationale.
     tool can quantify whether its own context injection improves AI session
     quality.
 
-37. **MCP server as stdio JSON-RPC gateway:** `vv mcp` serves 17 tools + 1
+37. **MCP server as stdio JSON-RPC gateway:** `vv mcp` serves 19 tools + 1
     prompt over stdin/stdout JSON-RPC 2.0. All tool names use `vv_` prefix to
     avoid namespace collisions. Install paths differ by editor: Claude Code
     writes to `~/.claude/settings.json` `mcpServers`, Zed writes to
@@ -487,3 +487,87 @@ Key architectural and design decisions in vibe-vault, with rationale.
       The vault copy is preserved as the durable store. Normal usage is
       link-only; unlink exists so rollback is always well-defined rather
       than requiring manual `rm` + `cp`.
+
+49. **Cross-project learnings as on-demand MCP tools, not inline in
+    bootstrap.** `VibeVault/Knowledge/learnings/*.md` holds observations
+    that apply across projects (testing philosophy, resume phrasing
+    rules, feedback patterns). The natural place to surface them is
+    `vv_bootstrap_context` — but inlining full learning content there
+    would blow past the /restart 20–30K token budget as soon as the
+    directory accumulates a handful of entries. Two tools separate the
+    decision to load from the cost of loading:
+
+    - **`vv_list_learnings`** returns frontmatter only (slug, name,
+      description, type), ~20–50 tokens per entry. Cheap enough to call
+      during planning so the agent can decide which specific learnings
+      matter for the current task.
+    - **`vv_get_learning(slug)`** returns the full body. Called only
+      when the list already identified a relevant entry, so the
+      expensive payload flows exactly when it would be read — never
+      eagerly.
+    - **`vv_bootstrap_context`** emits a single
+      `knowledge_learnings_available: {count, hint}` field, present
+      **only** when the directory has ≥1 valid file. Zero learnings →
+      zero tokens; populated directory → ~25 tokens pointing the agent
+      at the two dedicated tools. The field's mere presence doubles as
+      a capability signal for agents that might otherwise not know the
+      cross-project surface exists.
+
+    The `type` constraint (`user | feedback | reference`; `project`
+    rejected) enforces the directory's semantic boundary at parse time.
+    Silently accepting `type: project` would leak project-scoped
+    memories into a cross-project list, producing confusing output that
+    the agent has no reliable way to filter. Malformed frontmatter is
+    skipped with a stderr warning rather than surfaced inline in the
+    JSON response — consumer code stays uniform, and vault-side data
+    hygiene issues land on the operator instead of the agent.
+
+50. **Marker-delimited block injection via schema migration (v8→v9).** The
+    canonical "Data workflow" section in each project's `agentctx/resume.md`
+    is managed by the schema v8→v9 migration inside `vv context sync`
+    rather than a dedicated subcommand. Rationale:
+
+    - **Reuse existing pipeline.** `vv context sync` already walks every
+      qualifying project, runs schema migrations, and propagates templates
+      via three-way baseline comparison. A new `vv config sync` subcommand
+      would duplicate that machinery and collide with `vv context sync`
+      conceptually.
+    - **Reachable from every call site.** `/restart`, `/wrap`, and manual
+      `vv context sync` invocations all pick up v9 automatically — no new
+      entry point for humans or scripts to discover.
+    - **Inherits `--dry-run`, `--force`, `.pinned`, `--all`.** Free with
+      the existing pipeline; a fresh subcommand would re-implement each.
+
+    **Span-only baseline.** The migration writes
+    `agentctx/resume.md.datablock.baseline` containing only the injected
+    block (the span between the two markers), not the whole file. Other
+    migrations' `.baseline` files may exist alongside and track the
+    whole-file state of `resume.md`; mixing the two would cause one
+    migration's baseline refresh to clobber the other's conflict
+    detection. The distinct filename (`.datablock.baseline`) keeps them
+    orthogonal — v9 only compares the span, and the three-way comparison
+    for the block survives unrelated edits elsewhere in `resume.md`.
+
+    **Two opt-out layers.** `.pinned` on the Tier-3 snippet freezes the
+    snippet body (user retains local wording forever); the sibling file
+    `resume.md.no-data-workflow` suppresses injection entirely (the
+    project acknowledges the workflow but doesn't want the section in
+    its resume). Split rather than unified because the two workflows are
+    actually different: pinning lets a project customize the wording,
+    opt-out declines the block at all. A single flag would conflate them.
+
+    **Marker choice.** HTML comments (`<!-- vv:data-workflow:start -->`)
+    render as invisible in Obsidian and standard markdown viewers, so
+    the block's boundaries don't clutter the rendered resume. The
+    `vv:` prefix reserves a namespace for future marker-delimited
+    blocks managed by the same machinery (e.g., vv-injected security
+    notes, team-wide disclaimers) without a second naming convention.
+
+    **Current `--dry-run` caveat.** `syncProject()` short-circuits
+    migrations in dry-run mode with a coarse `DRY-RUN` action per
+    migration. `MigrationContext` carries a `DryRun` field that
+    `migrate8to9` honours when invoked directly (e.g., from tests or
+    future callers), but the outer Sync pipeline never reaches that
+    branch today. Extending `syncProject` to call migrations with
+    `ctx.DryRun=true` and let them emit finer-grained dry-run output is
+    deferred — v9's current dry-run behaviour matches v1–v8.
