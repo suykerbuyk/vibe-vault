@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
+	vvcontext "github.com/suykerbuyk/vibe-vault/internal/context"
 	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
 )
 
@@ -35,9 +36,9 @@ func Apply(result *Result, project string, cfg config.Config) (*ActionReport, er
 
 	// Update resume
 	if result.ResumeUpdate != nil {
-		resumePath := filepath.Join(projectDir, "agentctx", "resume.md")
+		agentctxDir := filepath.Join(projectDir, "agentctx")
 		var updated bool
-		updated, err = updateResume(resumePath, result.ResumeUpdate)
+		updated, err = updateResume(agentctxDir, result.ResumeUpdate)
 		if err != nil {
 			return nil, fmt.Errorf("update resume: %w", err)
 		}
@@ -272,7 +273,8 @@ func flagEntry(doc string, entry StaleEntry) (string, bool) {
 	return doc, false
 }
 
-func updateResume(resumePath string, update *ResumeUpdate) (bool, error) {
+func updateResume(agentctxDir string, update *ResumeUpdate) (bool, error) {
+	resumePath := filepath.Join(agentctxDir, "resume.md")
 	data, err := os.ReadFile(resumePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -300,9 +302,63 @@ func updateResume(resumePath string, update *ResumeUpdate) (bool, error) {
 	}
 
 	if modified {
-		return true, mdutil.AtomicWriteFile(resumePath, []byte(doc), 0o644)
+		if err := mdutil.AtomicWriteFile(resumePath, []byte(doc), 0o644); err != nil {
+			return true, err
+		}
 	}
-	return false, nil
+
+	// Route shipped-capability narrative to features.md on v10+ projects.
+	// Pre-v10 projects don't have the features.md contract yet — ignore silently.
+	if update.Features != "" {
+		vf, verr := vvcontext.ReadVersion(agentctxDir)
+		if verr == nil && vf.SchemaVersion >= 10 {
+			featuresPath := filepath.Join(agentctxDir, "features.md")
+			if err := appendFeaturesEntry(featuresPath, update.Features); err != nil {
+				return modified, err
+			}
+		}
+	}
+
+	return modified, nil
+}
+
+// appendFeaturesEntry appends entry as a bullet to the first `## ` section of
+// features.md. If features.md doesn't exist or contains no `## ` section, a
+// new `## Ungrouped` section is seeded first.
+func appendFeaturesEntry(featuresPath, entry string) error {
+	content, err := os.ReadFile(featuresPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	doc := string(content)
+
+	section := firstMarkdownSection(doc)
+	if section == "" {
+		section = "Ungrouped"
+		switch {
+		case doc == "":
+			doc = "# Features\n\n## Ungrouped\n"
+		case strings.HasSuffix(doc, "\n"):
+			doc += "\n## Ungrouped\n"
+		default:
+			doc += "\n\n## Ungrouped\n"
+		}
+	}
+	doc = insertBulletInSection(doc, section, entry)
+	return mdutil.AtomicWriteFile(featuresPath, []byte(doc), 0o644)
+}
+
+// firstMarkdownSection returns the name of the first `## ` heading, or "" if
+// none is present. The returned name has `## ` and surrounding whitespace
+// stripped.
+func firstMarkdownSection(doc string) string {
+	for _, line := range strings.Split(doc, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
+		}
+	}
+	return ""
 }
 
 func applyTaskUpdates(tasksDir string, updates []TaskUpdate) (int, error) {

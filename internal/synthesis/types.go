@@ -54,9 +54,15 @@ type StaleEntry struct {
 }
 
 // ResumeUpdate provides new content for resume.md sections.
+//
+// Features is a single prose entry that, on v10+ projects, is appended as a
+// bullet to agentctx/features.md rather than written into resume.md's Current
+// State. Empty string is a no-op. On pre-v10 projects the field is ignored
+// silently (features.md is not part of the schema yet).
 type ResumeUpdate struct {
 	CurrentState string `json:"current_state"`
 	OpenThreads  string `json:"open_threads"`
+	Features     string `json:"features"`
 }
 
 // TaskUpdate describes a task status change.

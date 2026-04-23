@@ -137,6 +137,18 @@ func TestBuildPrompt_NoCommitsNoDiff(t *testing.T) {
 	}
 }
 
+func TestSynthesisPromptMentionsFeaturesSchema(t *testing.T) {
+	// Guard against accidental deletion of the "features" schema field from
+	// the system prompt. Does not exercise real LLM behavior — that is
+	// Phase 7 manual-verification only.
+	if !strings.Contains(systemPrompt, `"features"`) {
+		t.Error(`systemPrompt missing "features" schema field`)
+	}
+	if !strings.Contains(systemPrompt, "invariant bullets") {
+		t.Error(`systemPrompt missing invariant-bullet rule`)
+	}
+}
+
 func TestNumberBullets_ResetsBetweenSections(t *testing.T) {
 	md := "## A\n\n- one\n- two\n\n## B\n\n- alpha\n"
 	result := numberBullets(md)

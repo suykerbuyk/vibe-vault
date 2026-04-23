@@ -186,10 +186,9 @@ func TestFlagStaleEntries_AlreadyFlagged(t *testing.T) {
 
 func TestUpdateResume_BothSections(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "resume.md")
-	os.WriteFile(path, []byte("# Resume\n\n## Current State\n\nold state\n\n## Open Threads\n\nold threads\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "resume.md"), []byte("# Resume\n\n## Current State\n\nold state\n\n## Open Threads\n\nold threads\n"), 0o644)
 
-	updated, err := updateResume(path, &ResumeUpdate{
+	updated, err := updateResume(dir, &ResumeUpdate{
 		CurrentState: "New state after synthesis",
 		OpenThreads:  "New threads",
 	})
@@ -200,7 +199,7 @@ func TestUpdateResume_BothSections(t *testing.T) {
 		t.Error("expected updated=true")
 	}
 
-	data, _ := os.ReadFile(path)
+	data, _ := os.ReadFile(filepath.Join(dir, "resume.md"))
 	content := string(data)
 	if !strings.Contains(content, "New state after synthesis") {
 		t.Error("current state not updated")
@@ -212,10 +211,9 @@ func TestUpdateResume_BothSections(t *testing.T) {
 
 func TestUpdateResume_OneSection(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "resume.md")
-	os.WriteFile(path, []byte("# Resume\n\n## Current State\n\nold\n\n## Open Threads\n\nkeep this\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "resume.md"), []byte("# Resume\n\n## Current State\n\nold\n\n## Open Threads\n\nkeep this\n"), 0o644)
 
-	updated, err := updateResume(path, &ResumeUpdate{
+	updated, err := updateResume(dir, &ResumeUpdate{
 		CurrentState: "Updated",
 		OpenThreads:  "",
 	})
@@ -226,7 +224,7 @@ func TestUpdateResume_OneSection(t *testing.T) {
 		t.Error("expected updated=true")
 	}
 
-	data, _ := os.ReadFile(path)
+	data, _ := os.ReadFile(filepath.Join(dir, "resume.md"))
 	content := string(data)
 	if !strings.Contains(content, "Updated") {
 		t.Error("current state not updated")
@@ -237,12 +235,118 @@ func TestUpdateResume_OneSection(t *testing.T) {
 }
 
 func TestUpdateResume_MissingFile(t *testing.T) {
-	updated, err := updateResume("/nonexistent/resume.md", &ResumeUpdate{CurrentState: "test"})
+	updated, err := updateResume("/nonexistent", &ResumeUpdate{CurrentState: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if updated {
 		t.Error("expected updated=false for missing file")
+	}
+}
+
+func TestSynthesis_RoutesFeaturesToFeaturesMd(t *testing.T) {
+	dir := t.TempDir()
+	resumePath := filepath.Join(dir, "resume.md")
+	featuresPath := filepath.Join(dir, "features.md")
+	versionPath := filepath.Join(dir, ".version")
+
+	os.WriteFile(resumePath, []byte("# Resume\n\n## Current State\n\n- **Tests:** 1200.\n\n## Open Threads\n\nold threads\n"), 0o644)
+	os.WriteFile(featuresPath, []byte("# Features\n\n## Template cascade\n\n- pre-existing entry\n"), 0o644)
+	// Stamp v10.
+	os.WriteFile(versionPath, []byte("schema_version = 10\n"), 0o644)
+
+	updated, err := updateResume(dir, &ResumeUpdate{
+		OpenThreads: "keep threads updated",
+		Features:    "new capability: synthesis Features routing",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated {
+		t.Error("expected resume updated=true (OpenThreads was set)")
+	}
+
+	// Current State should be untouched — Features routed elsewhere.
+	resumeContent, _ := os.ReadFile(resumePath)
+	if !strings.Contains(string(resumeContent), "- **Tests:** 1200.") {
+		t.Error("Current State should be untouched by features routing")
+	}
+	if strings.Contains(string(resumeContent), "synthesis Features routing") {
+		t.Error("Features prose should not appear in resume.md")
+	}
+
+	// features.md should have the new bullet appended under the first section.
+	featuresContent, _ := os.ReadFile(featuresPath)
+	fc := string(featuresContent)
+	if !strings.Contains(fc, "- new capability: synthesis Features routing") {
+		t.Errorf("features.md missing appended entry:\n%s", fc)
+	}
+	if !strings.Contains(fc, "## Template cascade") || !strings.Contains(fc, "- pre-existing entry") {
+		t.Error("features.md existing content should be preserved")
+	}
+}
+
+func TestSynthesis_IgnoresFeaturesOnPreV10(t *testing.T) {
+	dir := t.TempDir()
+	resumePath := filepath.Join(dir, "resume.md")
+	featuresPath := filepath.Join(dir, "features.md")
+	versionPath := filepath.Join(dir, ".version")
+
+	os.WriteFile(resumePath, []byte("# Resume\n\n## Current State\n\nstate\n\n## Open Threads\n\nthreads\n"), 0o644)
+	// Stamp v9 — pre-contract.
+	os.WriteFile(versionPath, []byte("schema_version = 9\n"), 0o644)
+
+	_, err := updateResume(dir, &ResumeUpdate{
+		Features: "should be silently ignored",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// features.md must NOT have been created.
+	if _, statErr := os.Stat(featuresPath); !os.IsNotExist(statErr) {
+		t.Errorf("features.md should not exist on pre-v10 project (stat err: %v)", statErr)
+	}
+}
+
+func TestAppendFeaturesEntry_SeedsUngroupedWhenEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "features.md")
+
+	if err := appendFeaturesEntry(path, "first feature"); err != nil {
+		t.Fatal(err)
+	}
+
+	data, _ := os.ReadFile(path)
+	content := string(data)
+	if !strings.Contains(content, "## Ungrouped") {
+		t.Errorf("expected seeded Ungrouped section:\n%s", content)
+	}
+	if !strings.Contains(content, "- first feature") {
+		t.Errorf("expected entry as bullet:\n%s", content)
+	}
+}
+
+func TestAppendFeaturesEntry_AppendsToFirstSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "features.md")
+	os.WriteFile(path, []byte("# Features\n\n## A\n\n- one\n- two\n\n## B\n\n- alpha\n"), 0o644)
+
+	if err := appendFeaturesEntry(path, "three"); err != nil {
+		t.Fatal(err)
+	}
+
+	data, _ := os.ReadFile(path)
+	content := string(data)
+	// "three" should follow section A's bullets, before section B.
+	aIdx := strings.Index(content, "## A")
+	bIdx := strings.Index(content, "## B")
+	threeIdx := strings.Index(content, "- three")
+	if aIdx < 0 || bIdx < 0 || threeIdx < 0 {
+		t.Fatalf("missing markers (aIdx=%d bIdx=%d threeIdx=%d):\n%s", aIdx, bIdx, threeIdx, content)
+	}
+	if aIdx >= threeIdx || threeIdx >= bIdx {
+		t.Errorf("entry not inserted in section A:\n%s", content)
 	}
 }
 

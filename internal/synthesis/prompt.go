@@ -11,7 +11,7 @@ Output MUST be valid JSON matching this schema:
 {
   "learnings": [{"section": "Decisions|Patterns|Learnings", "entry": "text"}],
   "stale_entries": [{"file": "knowledge.md|resume.md", "section": "heading", "index": 0, "entry": "approx text", "reason": "why stale"}],
-  "resume_update": {"current_state": "text or empty", "open_threads": "text or empty"} or null,
+  "resume_update": {"current_state": "text or empty", "open_threads": "text or empty", "features": "text or empty"} or null,
   "task_updates": [{"name": "task-slug", "action": "complete|update_status", "status": "new status", "reason": "why"}],
   "reasoning": "brief explanation of your analysis"
 }
@@ -25,6 +25,7 @@ Rules:
 - Be conservative: when uncertain, omit rather than guess
 - Use empty arrays for absent fields, not null (except resume_update which can be null)
 - Learning sections must be exactly "Decisions", "Patterns", or "Learnings"
+- "current_state" must only contain invariant bullets (counts, versions, IDs). Narrative and shipped-capability prose belongs in "features".
 `
 
 // buildUserPrompt assembles all input fields into a labeled prompt.
