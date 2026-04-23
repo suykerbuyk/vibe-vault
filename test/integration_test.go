@@ -2,15 +2,21 @@ package test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/suykerbuyk/vibe-vault/internal/testutil/gitx"
 	"github.com/suykerbuyk/vibe-vault/templates"
 )
@@ -204,6 +210,12 @@ func TestIntegration(t *testing.T) {
 
 	env := buildEnv(xdgConfigHome)
 	stateDir := filepath.Join(vaultPath, ".vibe-vault")
+
+	// Canary: snapshot the operator's real vault BEFORE any subtest runs.
+	// The no_real_vault_mutation subtest at the end of this chain re-snapshots
+	// and diffs. Any mutation to the protected paths during TestIntegration
+	// means a subtest leaked writes out of its tempdir sandbox.
+	preCanarySnapshot, canaryRealConfigPath, canaryRealVault := vaultCanarySnapshot(t)
 
 	// Write fixture files
 	a1Path := writeFixture(t, fixtureDir, "session-aaa-001.jsonl", readTestdata(t, "session-a1.jsonl"))
@@ -1960,4 +1972,345 @@ Body content for the reference-type sample learning.
 
 		_ = partialStderr // stderr may carry push progress lines; not asserted
 	})
+
+	// no_real_vault_mutation: Phase-0 canary. Re-snapshot the operator's real
+	// vault and real config, diff against the pre-run snapshot, and fail with a
+	// human-readable listing if any protected path was mutated by the preceding
+	// subtests. Must run LAST in the shared-vault chain.
+	t.Run("no_real_vault_mutation", func(t *testing.T) {
+		if preCanarySnapshot == nil {
+			t.Skip("canary pre-snapshot not taken (no operator config)")
+		}
+		postSnapshot, _, _ := vaultCanarySnapshotAt(t, canaryRealConfigPath, canaryRealVault)
+		diffs := vaultCanaryDiff(preCanarySnapshot, postSnapshot)
+		if len(diffs) == 0 {
+			return
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "real vault was mutated by TestIntegration (%d path(s)):\n",
+			len(diffs))
+		fmt.Fprintf(&b, "  realVault:  %s\n", canaryRealVault)
+		fmt.Fprintf(&b, "  realConfig: %s\n", canaryRealConfigPath)
+		for _, d := range diffs {
+			b.WriteString("  - ")
+			b.WriteString(d)
+			b.WriteString("\n")
+		}
+		t.Fatal(b.String())
+	})
+}
+
+// --- Canary helpers (Phase 0: detect leaks out of per-subtest sandboxes) ---
+
+// canaryFileInfo captures the identity of a single regular file for
+// comparison purposes.
+type canaryFileInfo struct {
+	relPath string
+	mtime   time.Time
+	sha256  string
+}
+
+// canarySnapshot maps absolute path roots to the set of files found under
+// each root, keyed by relative path within the root. A nil entry for a given
+// root means "the root did not exist at snapshot time, skip".
+type canarySnapshot struct {
+	// roots maps absolute root path → (relPath → canaryFileInfo). A root
+	// whose value is a nil map was not present on disk; absent keys are
+	// treated the same.
+	roots map[string]map[string]canaryFileInfo
+	// configFile is the snapshot of $HOME/.config/vibe-vault/config.toml, or
+	// nil if the operator config was not present.
+	configFile *canaryFileInfo
+}
+
+// readOperatorConfigVaultPath parses the operator's real config directly —
+// bypassing internal/config so we don't re-enter the env-aware loader whose
+// behavior is itself under investigation in this task. Returns ("", "", nil)
+// with no error if the config file does not exist (the canary should skip).
+func readOperatorConfigVaultPath() (vaultPath, configPath string, err error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", "", fmt.Errorf("user home dir: %w", err)
+	}
+	cfgPath := filepath.Join(home, ".config", "vibe-vault", "config.toml")
+	if _, statErr := os.Stat(cfgPath); os.IsNotExist(statErr) {
+		return "", "", nil
+	} else if statErr != nil {
+		return "", "", fmt.Errorf("stat %s: %w", cfgPath, statErr)
+	}
+	var parsed struct {
+		VaultPath string `toml:"vault_path"`
+	}
+	if _, err := toml.DecodeFile(cfgPath, &parsed); err != nil {
+		return "", "", fmt.Errorf("decode %s: %w", cfgPath, err)
+	}
+	if parsed.VaultPath == "" {
+		return "", cfgPath, fmt.Errorf("operator config %s has empty vault_path", cfgPath)
+	}
+	// Expand ~/ to the operator's home.
+	if strings.HasPrefix(parsed.VaultPath, "~/") {
+		parsed.VaultPath = filepath.Join(home, parsed.VaultPath[2:])
+	}
+	return parsed.VaultPath, cfgPath, nil
+}
+
+// canaryProtectedRoots returns the list of real-vault subtrees the canary
+// watches. Globs (paths ending in "*") are expanded against the filesystem;
+// non-glob paths are returned as-is. Missing paths are filtered out here
+// rather than in the snapshot walker so the caller has a clean list.
+func canaryProtectedRoots(realVault string) []string {
+	patterns := []string{
+		filepath.Join(realVault, "Projects", "ctx-project"),
+		filepath.Join(realVault, "Projects", "myproject"),
+		filepath.Join(realVault, "Projects", "narr-project"),
+		filepath.Join(realVault, "Projects", "other-project"),
+		filepath.Join(realVault, "Projects", "memory-cli-demo"),
+		filepath.Join(realVault, "Projects", "sync-legacy"),
+		filepath.Join(realVault, "Projects", "resume-invariants-*"),
+	}
+	var out []string
+	for _, p := range patterns {
+		if strings.Contains(p, "*") {
+			matches, err := filepath.Glob(p)
+			if err != nil {
+				continue
+			}
+			out = append(out, matches...)
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// canaryShouldSkipFile returns true for entries the canary must not monitor
+// because they are written by non-test processes (Claude Code hooks, Obsidian
+// sync) and would create false positives. The skip test is applied to the
+// path relative to the root it was found under.
+func canaryShouldSkipFile(rel string) bool {
+	// Top-level iterations.md or history.md inside a watched root: skip.
+	if rel == "iterations.md" || rel == "history.md" {
+		return true
+	}
+	// Any sessions/*.md file (Claude Code hook output).
+	if strings.HasPrefix(rel, "sessions"+string(filepath.Separator)) &&
+		strings.HasSuffix(rel, ".md") {
+		return true
+	}
+	return false
+}
+
+// snapshotRoot walks a single root and returns a (relPath → info) map. If the
+// root does not exist, returns (nil, nil). Symlinks are not followed.
+func snapshotRoot(root string) (map[string]canaryFileInfo, error) {
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	result := make(map[string]canaryFileInfo)
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		// Skip symlinks; we only hash regular files.
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if canaryShouldSkipFile(rel) {
+			return nil
+		}
+		sum, err := sha256File(path)
+		if err != nil {
+			return err
+		}
+		result[rel] = canaryFileInfo{
+			relPath: rel,
+			mtime:   info.ModTime(),
+			sha256:  sum,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// sha256File computes the hex-encoded sha256 digest of a file's contents.
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// snapshotConfigFile snapshots the operator's real config.toml, or returns
+// nil if it doesn't exist.
+func snapshotConfigFile(configPath string) (*canaryFileInfo, error) {
+	info, err := os.Stat(configPath)
+	if os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	sum, err := sha256File(configPath)
+	if err != nil {
+		return nil, err
+	}
+	return &canaryFileInfo{
+		relPath: configPath,
+		mtime:   info.ModTime(),
+		sha256:  sum,
+	}, nil
+}
+
+// vaultCanarySnapshot is the entry point used at TestIntegration start. It
+// reads the operator config, discovers the real vault, and snapshots
+// protected paths. Returns (nil, "", "") if no operator config is present —
+// in that case the canary subtest will skip.
+func vaultCanarySnapshot(t *testing.T) (*canarySnapshot, string, string) {
+	t.Helper()
+	realVault, configPath, err := readOperatorConfigVaultPath()
+	if err != nil {
+		t.Fatalf("canary: read operator config: %v", err)
+	}
+	if configPath == "" {
+		return nil, "", ""
+	}
+	snap, _, _ := vaultCanarySnapshotAt(t, configPath, realVault)
+	return snap, configPath, realVault
+}
+
+// vaultCanarySnapshotAt takes a snapshot using an already-known config path
+// and real vault path (used for the "after" snapshot so we don't re-resolve).
+func vaultCanarySnapshotAt(t *testing.T, configPath, realVault string) (*canarySnapshot, string, string) {
+	t.Helper()
+	snap := &canarySnapshot{
+		roots: make(map[string]map[string]canaryFileInfo),
+	}
+	for _, root := range canaryProtectedRoots(realVault) {
+		files, err := snapshotRoot(root)
+		if err != nil {
+			t.Fatalf("canary: snapshot %s: %v", root, err)
+		}
+		snap.roots[root] = files
+	}
+	cfg, err := snapshotConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("canary: snapshot config %s: %v", configPath, err)
+	}
+	snap.configFile = cfg
+	return snap, configPath, realVault
+}
+
+// vaultCanaryDiff compares two snapshots and returns a slice of human-readable
+// strings, one per mutation (added / removed / modified file, or changed
+// config). Empty slice means no mutation.
+func vaultCanaryDiff(before, after *canarySnapshot) []string {
+	var out []string
+
+	// Config file diff.
+	switch {
+	case before.configFile == nil && after.configFile != nil:
+		out = append(out, fmt.Sprintf("ADDED    config: %s", after.configFile.relPath))
+	case before.configFile != nil && after.configFile == nil:
+		out = append(out, fmt.Sprintf("REMOVED  config: %s", before.configFile.relPath))
+	case before.configFile != nil && after.configFile != nil:
+		if before.configFile.sha256 != after.configFile.sha256 {
+			out = append(out, fmt.Sprintf(
+				"MODIFIED config: %s  (mtime %s → %s)",
+				before.configFile.relPath,
+				before.configFile.mtime.Format(time.RFC3339Nano),
+				after.configFile.mtime.Format(time.RFC3339Nano)))
+		}
+	}
+
+	// Root diffs. Union of roots across before/after; roots that newly
+	// appeared or disappeared are reported as such.
+	rootSet := make(map[string]struct{})
+	for r := range before.roots {
+		rootSet[r] = struct{}{}
+	}
+	for r := range after.roots {
+		rootSet[r] = struct{}{}
+	}
+	rootList := make([]string, 0, len(rootSet))
+	for r := range rootSet {
+		rootList = append(rootList, r)
+	}
+	sort.Strings(rootList)
+
+	for _, root := range rootList {
+		beforeFiles := before.roots[root]
+		afterFiles := after.roots[root]
+		if beforeFiles == nil && afterFiles != nil && len(afterFiles) > 0 {
+			out = append(out, fmt.Sprintf("ADDED    root: %s (now contains %d file(s))",
+				root, len(afterFiles)))
+			for rel := range afterFiles {
+				out = append(out, fmt.Sprintf("  ADDED    %s/%s", root, rel))
+			}
+			continue
+		}
+		if beforeFiles != nil && afterFiles == nil {
+			out = append(out, fmt.Sprintf("REMOVED  root: %s (contained %d file(s))",
+				root, len(beforeFiles)))
+			continue
+		}
+		// File-level diff within root. Collect sorted rel paths from union.
+		relSet := make(map[string]struct{})
+		for rel := range beforeFiles {
+			relSet[rel] = struct{}{}
+		}
+		for rel := range afterFiles {
+			relSet[rel] = struct{}{}
+		}
+		rels := make([]string, 0, len(relSet))
+		for rel := range relSet {
+			rels = append(rels, rel)
+		}
+		sort.Strings(rels)
+		for _, rel := range rels {
+			bf, okBefore := beforeFiles[rel]
+			af, okAfter := afterFiles[rel]
+			switch {
+			case !okBefore && okAfter:
+				out = append(out, fmt.Sprintf("ADDED    %s/%s", root, rel))
+			case okBefore && !okAfter:
+				out = append(out, fmt.Sprintf("REMOVED  %s/%s", root, rel))
+			case okBefore && okAfter:
+				if bf.sha256 != af.sha256 {
+					delta := af.mtime.Sub(bf.mtime)
+					out = append(out, fmt.Sprintf(
+						"MODIFIED %s/%s  (mtime Δ=%s: %s → %s, sha %s → %s)",
+						root, rel, delta,
+						bf.mtime.Format(time.RFC3339Nano),
+						af.mtime.Format(time.RFC3339Nano),
+						bf.sha256[:8], af.sha256[:8]))
+				}
+			}
+		}
+	}
+
+	return out
 }
