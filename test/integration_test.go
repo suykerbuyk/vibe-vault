@@ -1,6 +1,7 @@
 package test
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/suykerbuyk/vibe-vault/templates"
 )
 
 // vvBinary is the path to the compiled vv binary, set by TestMain.
@@ -1721,5 +1724,53 @@ Body content for the reference-type sample learning.
 
 		// Stderr should show the tool calls.
 		assertContains(t, stderr, "tools/call: vv_update_resume", "stderr log")
+	})
+
+	// context_sync_t1_t2_cascade verifies that `vv context sync` refreshes
+	// the Tier-2 vault template cache from the embedded Tier-1 source.
+	//
+	// The code under test is forceUpdateVaultTemplates
+	// (internal/context/sync.go:874), which overwrites every file under
+	// {vaultPath}/Templates/agentctx/ with content from BuiltinTemplates()
+	// on every syncProject invocation. We exercise that path through the
+	// real CLI: corrupt the Tier-2 cache file, run `vv context sync`, and
+	// byte-compare against the embedded FS source.
+	//
+	// Earlier subtests (context_init_and_migrate, context_sync) already
+	// populated the Tier-2 cache via their init/sync invocations, so we
+	// can corrupt the file directly without pre-seeding.
+	t.Run("context_sync_t1_t2_cascade", func(t *testing.T) {
+		// Corrupt the Tier-2 cache file with a sentinel.
+		cascadeTarget := filepath.Join(vaultPath, "Templates", "agentctx", "commands", "restart.md")
+		if err := os.WriteFile(cascadeTarget, []byte("STALE-T2-CACHE\n"), 0o644); err != nil {
+			t.Fatalf("corrupt tier-2 cache: %v", err)
+		}
+
+		// `vv context sync` (without --all) requires a .vibe-vault.toml
+		// marker in cwd or an ancestor — see cmd/vv/main.go:323-324.
+		cascadeCwd := t.TempDir()
+		writeFixture(t, cascadeCwd, ".vibe-vault.toml", "# vibe-vault project marker\n")
+
+		// ctx-project was scaffolded at v10 by context_init_and_migrate.
+		mustRunVVInDir(t, env, cascadeCwd, "context", "sync", "--project", "ctx-project")
+
+		// Tier-2 cache must now be byte-equal to the embedded Tier-1 source.
+		got, err := os.ReadFile(cascadeTarget)
+		if err != nil {
+			t.Fatalf("read tier-2 after sync: %v", err)
+		}
+		want, err := templates.AgentctxFS().ReadFile("agentctx/commands/restart.md")
+		if err != nil {
+			t.Fatalf("read embedded source: %v", err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("tier-2 restart.md not byte-equal to embedded source\nwant %d bytes:\n%s\n\ngot %d bytes:\n%s",
+				len(want), string(want), len(got), string(got))
+		}
+
+		// Sanity: the stale sentinel must be gone.
+		if bytes.Contains(got, []byte("STALE-T2-CACHE")) {
+			t.Error("tier-2 cache still contains stale sentinel after sync")
+		}
 	})
 }
