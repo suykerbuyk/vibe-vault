@@ -1555,4 +1555,171 @@ Body content for the reference-type sample learning.
 		assertContains(t, stderr, "tools/call: vv_list_learnings", "stderr log")
 		assertContains(t, stderr, "tools/call: vv_get_learning", "stderr log")
 	})
+
+	// 14. MCP vv_update_resume v10 Current-State guard (stdio transport).
+	//
+	// Exercises the same guard covered by the unit tests in
+	// internal/mcp/tools_context_write_test.go, but over the real
+	// vv mcp subprocess with NDJSON over stdin/stdout. The ctx-project
+	// agentctx was seeded at v10 by the earlier context_init_and_migrate
+	// subtest.
+	t.Run("mcp_update_resume_guard", func(t *testing.T) {
+		// Build tools/call arguments via json.Marshal so we never hand-write
+		// escapes into the request line (matches updateResumePayload in
+		// tools_context_write_test.go).
+		updateCall := func(id int, section, content string) string {
+			args := struct {
+				Project string `json:"project"`
+				Section string `json:"section"`
+				Content string `json:"content"`
+			}{"ctx-project", section, content}
+			argsJSON, err := json.Marshal(args)
+			if err != nil {
+				t.Fatalf("marshal args: %v", err)
+			}
+			params := map[string]any{
+				"name":      "vv_update_resume",
+				"arguments": json.RawMessage(argsJSON),
+			}
+			paramsJSON, err := json.Marshal(params)
+			if err != nil {
+				t.Fatalf("marshal params: %v", err)
+			}
+			req := map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"method":  "tools/call",
+				"params":  json.RawMessage(paramsJSON),
+			}
+			reqJSON, err := json.Marshal(req)
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			return string(reqJSON)
+		}
+
+		validBullets := "- **Tests:** 1459 across 36 packages.\n- **Lint:** clean.\n"
+		narrativeBody := "This is a paragraph of project narrative that does not belong here."
+		frobBody := "- **Frobnicator:** enabled.\n"
+		openThreadsBody := "- arbitrary narrative line\n"
+
+		requests := strings.Join([]string{
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test"}}}`,
+			`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+			updateCall(2, "Current State", validBullets),
+			updateCall(3, "Current State", narrativeBody),
+			updateCall(4, "Current State", frobBody),
+			updateCall(5, "Open Threads", openThreadsBody),
+		}, "\n")
+
+		stdout, stderr, err := runVVWithStdin(t, env, requests, "mcp")
+		if err != nil {
+			t.Fatalf("vv mcp failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+		}
+
+		trimmed := strings.TrimSpace(stdout)
+		var lines []string
+		for line := range strings.SplitSeq(trimmed, "\n") {
+			lines = append(lines, line)
+		}
+		// 5 requests with an id → 5 responses; the notification is silent.
+		if len(lines) != 5 {
+			t.Fatalf("expected 5 response lines, got %d:\n%s", len(lines), stdout)
+		}
+
+		var responses []map[string]any
+		for i, line := range lines {
+			var resp map[string]any
+			if err := json.Unmarshal([]byte(line), &resp); err != nil {
+				t.Fatalf("response %d: invalid JSON: %v\nline: %s", i, err, line)
+			}
+			responses = append(responses, resp)
+		}
+
+		// Response 0: initialize — must have serverInfo.
+		initResult, initOK := responses[0]["result"].(map[string]any)
+		if !initOK {
+			t.Fatalf("initialize: missing result: %v", responses[0])
+		}
+		if initResult["serverInfo"] == nil {
+			t.Error("initialize: missing serverInfo")
+		}
+
+		// Helper to pull content[0].text from a tool/call response.
+		extractText := func(idx int) string {
+			t.Helper()
+			result, ok := responses[idx]["result"].(map[string]any)
+			if !ok {
+				t.Fatalf("response %d: missing result: %v", idx, responses[idx])
+			}
+			content, ok := result["content"].([]any)
+			if !ok || len(content) == 0 {
+				t.Fatalf("response %d: missing content: %v", idx, result)
+			}
+			first, ok := content[0].(map[string]any)
+			if !ok {
+				t.Fatalf("response %d: content[0] wrong shape: %v", idx, content[0])
+			}
+			text, ok := first["text"].(string)
+			if !ok {
+				t.Fatalf("response %d: content[0].text not a string: %v", idx, first)
+			}
+			return text
+		}
+
+		// Response 1: valid invariant bullets — success, disk updated.
+		validResult, ok := responses[1]["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("valid Current State: missing result: %v", responses[1])
+		}
+		if isErr, _ := validResult["isError"].(bool); isErr {
+			t.Errorf("valid Current State: unexpected isError=true; text=%q", extractText(1))
+		}
+		resumePath := filepath.Join(vaultPath, "Projects", "ctx-project", "agentctx", "resume.md")
+		resumeAfterValid := readFile(t, resumePath)
+		assertContains(t, resumeAfterValid, "- **Tests:** 1459 across 36 packages.", "resume.md gained Tests bullet")
+		assertContains(t, resumeAfterValid, "- **Lint:** clean.", "resume.md gained Lint bullet")
+		assertContains(t, resumeAfterValid, "## Current State", "Current State heading preserved")
+
+		// Response 2: narrative body — isError=true, text points to features.md.
+		narrResult, ok := responses[2]["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("narrative rejection: missing result: %v", responses[2])
+		}
+		if narrResult["isError"] != true {
+			t.Errorf("narrative rejection: expected isError=true, got %v", narrResult["isError"])
+		}
+		narrText := extractText(2)
+		assertContains(t, narrText, "features.md", "narrative rejection points to features.md")
+
+		// Response 3: non-whitelisted KEY bullet — isError=true, cites the key.
+		frobResult, ok := responses[3]["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("Frobnicator rejection: missing result: %v", responses[3])
+		}
+		if frobResult["isError"] != true {
+			t.Errorf("Frobnicator rejection: expected isError=true, got %v", frobResult["isError"])
+		}
+		frobText := extractText(3)
+		assertContains(t, frobText, "Frobnicator", "Frobnicator rejection names the offending key")
+
+		// Response 4: Open Threads — v10 guard does not fire outside Current State.
+		openResult, ok := responses[4]["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("Open Threads happy path: missing result: %v", responses[4])
+		}
+		if isErr, _ := openResult["isError"].(bool); isErr {
+			t.Errorf("Open Threads happy path: unexpected isError=true; text=%q", extractText(4))
+		}
+		resumeAfterOpen := readFile(t, resumePath)
+		assertContains(t, resumeAfterOpen, "- arbitrary narrative line", "Open Threads section accepted narrative bullet")
+		assertContains(t, resumeAfterOpen, "## Open Threads", "Open Threads heading preserved")
+		// The valid Current State body from response 1 must still be present —
+		// rejected writes (responses 2 & 3) must not have clobbered disk, and
+		// the Open Threads write must not have touched Current State.
+		assertContains(t, resumeAfterOpen, "- **Tests:** 1459 across 36 packages.", "Current State bullet still on disk after later writes")
+
+		// Stderr should show the tool calls.
+		assertContains(t, stderr, "tools/call: vv_update_resume", "stderr log")
+	})
 }
