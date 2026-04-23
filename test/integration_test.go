@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/suykerbuyk/vibe-vault/internal/testutil/gitx"
 	"github.com/suykerbuyk/vibe-vault/templates"
 )
 
@@ -1881,5 +1882,82 @@ Body content for the reference-type sample learning.
 		if isSymlink(linkPath) {
 			t.Error("symlink still present after unlink")
 		}
+	})
+
+	t.Run("vault_push_multi_remote", func(t *testing.T) {
+		// Fully isolated from the shared vaultPath/xdgConfigHome.
+		e2Vault := t.TempDir()
+		e2Xdg := t.TempDir()
+		e2Home := t.TempDir()
+		e2Env := buildEnvWithHome(e2Xdg, e2Home)
+		// vaultsync.CommitAndPush shells out to `git commit`, which needs
+		// an identity. The sandboxed HOME has no .gitconfig, so inject
+		// identity via process env so git picks it up regardless of
+		// system gitconfig.
+		e2Env = append(e2Env,
+			"GIT_AUTHOR_NAME=test",
+			"GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test",
+			"GIT_COMMITTER_EMAIL=test@test.com",
+		)
+
+		// Create the config pointing at e2Vault.
+		mustRunVV(t, e2Env, "init", e2Vault)
+
+		// Make the vault directory a git repo with an initial commit so
+		// CommitAndPush has a clean history to push.
+		gitx.GitRun(t, e2Vault, "init", "-b", "main")
+		gitx.GitRun(t, e2Vault, "add", ".")
+		gitx.GitRun(t, e2Vault, "commit", "-m", "initial vault commit")
+
+		// Two bare remotes.
+		githubRemote := gitx.InitBareRemote(t)
+		vaultRemote := gitx.InitBareRemote(t)
+		gitx.AddRemote(t, e2Vault, "github", githubRemote)
+		gitx.AddRemote(t, e2Vault, "vault", vaultRemote)
+
+		// --- Happy path: stage a change, push, both remotes advance ---
+		writeFixture(t, e2Vault, "change-one.txt", "first change\n")
+
+		happyStdout := mustRunVV(t, e2Env, "vault", "push", "--message", "first change")
+		assertContains(t, happyStdout, "committed and pushed to 2 remote(s)",
+			"happy path: stdout reports push to 2 remotes")
+
+		// Both bare remotes must have advanced to the same SHA.
+		githubSHA1 := strings.TrimSpace(gitx.GitRun(t, githubRemote, "rev-parse", "refs/heads/main"))
+		vaultSHA1 := strings.TrimSpace(gitx.GitRun(t, vaultRemote, "rev-parse", "refs/heads/main"))
+		if githubSHA1 == "" {
+			t.Error("github remote: refs/heads/main did not advance")
+		}
+		if vaultSHA1 == "" {
+			t.Error("vault remote: refs/heads/main did not advance")
+		}
+		if githubSHA1 != vaultSHA1 {
+			t.Errorf("remotes diverged after push: github=%s vault=%s", githubSHA1, vaultSHA1)
+		}
+
+		// --- Partial failure: remove vaultRemote, stage another change, push ---
+		if err := os.RemoveAll(vaultRemote); err != nil {
+			t.Fatalf("remove vaultRemote: %v", err)
+		}
+		writeFixture(t, e2Vault, "change-two.txt", "second change\n")
+
+		partialStdout, partialStderr, _ := runVV(t, e2Env, "vault", "push", "--message", "second change")
+		// The `vault` remote push should fail; `github` should still succeed.
+		assertContains(t, partialStdout, "partial push", "partial failure branch in stdout")
+		assertContains(t, partialStdout, "github: ok", "github marked ok")
+		assertContains(t, partialStdout, "vault: FAILED", "vault marked FAILED")
+
+		// Sanity: github advanced; its new HEAD's parent is the first commit.
+		githubSHA2 := strings.TrimSpace(gitx.GitRun(t, githubRemote, "rev-parse", "refs/heads/main"))
+		if githubSHA2 == githubSHA1 {
+			t.Error("github remote did not advance on partial-push run")
+		}
+		parent := strings.TrimSpace(gitx.GitRun(t, githubRemote, "rev-parse", "refs/heads/main^"))
+		if parent != githubSHA1 {
+			t.Errorf("github HEAD^ = %s, want %s (the first commit)", parent, githubSHA1)
+		}
+
+		_ = partialStderr // stderr may carry push progress lines; not asserted
 	})
 }
