@@ -1773,4 +1773,113 @@ Body content for the reference-type sample learning.
 			t.Error("tier-2 cache still contains stale sentinel after sync")
 		}
 	})
+
+	// memory_link_cli exercises the cmd/vv dispatch layer for
+	// `vv memory link` and `vv memory unlink`: flag parsing, config
+	// loading, and reaching the library. Library-level writethrough /
+	// inode / vault-preservation invariants live in
+	// internal/memory/memory_integration_test.go and are not repeated
+	// here.
+	//
+	// We sandbox HOME per-subtest via buildEnvWithHome so the link
+	// lands under a tempdir rather than the developer's real
+	// ~/.claude/ directory.
+	t.Run("memory_link_cli", func(t *testing.T) {
+		fakeHome := t.TempDir()
+		e1Env := buildEnvWithHome(xdgConfigHome, fakeHome)
+		projectRepo := t.TempDir()
+
+		// Scaffold the vault-side agentctx tree by running
+		// `vv context init` — memory.Link requires
+		// {vaultPath}/Projects/<project>/agentctx to exist.
+		mustRunVVInDir(t, e1Env, projectRepo, "context", "init", "--project", "memory-cli-demo")
+
+		// memory.Link resolves the project via session.DetectProject,
+		// which reads .vibe-vault.toml. The template shipped by
+		// `context init` leaves `name = ...` commented out, so detection
+		// would fall back to the tempdir basename (e.g. "001"). Enable
+		// the name line so DetectProject returns "memory-cli-demo",
+		// matching the scaffolded agentctx directory.
+		markerPath := filepath.Join(projectRepo, ".vibe-vault.toml")
+		markerRaw, mErr := os.ReadFile(markerPath)
+		if mErr != nil {
+			t.Fatalf("read marker: %v", mErr)
+		}
+		enabled := strings.Replace(
+			string(markerRaw),
+			`# name = "memory-cli-demo"`,
+			`name = "memory-cli-demo"`,
+			1,
+		)
+		if enabled == string(markerRaw) {
+			t.Fatalf("marker did not contain expected commented name line:\n%s", string(markerRaw))
+		}
+		if err := os.WriteFile(markerPath, []byte(enabled), 0o644); err != nil {
+			t.Fatalf("rewrite marker: %v", err)
+		}
+
+		homeProjects := filepath.Join(fakeHome, ".claude", "projects")
+
+		// Dry-run link: reports but creates no symlink.
+		dryStdout := mustRunVV(t, e1Env, "memory", "link", "--working-dir", projectRepo, "--dry-run")
+		assertContains(t, dryStdout, "(dry-run)", "dry-run label in stdout")
+		assertContains(t, dryStdout, "memory-cli-demo", "dry-run mentions project")
+
+		if dirExists(homeProjects) {
+			entries, _ := os.ReadDir(homeProjects)
+			for _, entry := range entries {
+				candidate := filepath.Join(homeProjects, entry.Name(), "memory")
+				if isSymlink(candidate) {
+					t.Errorf("dry-run created symlink at %s", candidate)
+				}
+			}
+		}
+
+		// Real link: must create a symlink under
+		// {fakeHome}/.claude/projects/<slug>/memory pointing at
+		// {vaultPath}/Projects/memory-cli-demo/agentctx/memory.
+		linkStdout := mustRunVV(t, e1Env, "memory", "link", "--working-dir", projectRepo)
+		assertContains(t, linkStdout, "memory-cli-demo", "link mentions project")
+
+		entries, err := os.ReadDir(homeProjects)
+		if err != nil {
+			t.Fatalf("read projects dir: %v", err)
+		}
+		var linkPath string
+		for _, entry := range entries {
+			candidate := filepath.Join(homeProjects, entry.Name(), "memory")
+			if isSymlink(candidate) {
+				if linkPath != "" {
+					t.Fatalf("multiple memory symlinks found: %s and %s", linkPath, candidate)
+				}
+				linkPath = candidate
+			}
+		}
+		if linkPath == "" {
+			t.Fatal("no memory symlink created under fakeHome/.claude/projects/")
+		}
+
+		target, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("readlink %s: %v", linkPath, err)
+		}
+		wantTarget := filepath.Join(vaultPath, "Projects", "memory-cli-demo", "agentctx", "memory")
+		if target != wantTarget {
+			// On systems where /tmp is a symlink (e.g. /tmp -> /private/tmp
+			// on macOS), EvalSymlinks of the intended target may differ
+			// from the raw join.
+			resolved, rerr := filepath.EvalSymlinks(wantTarget)
+			if rerr != nil || target != resolved {
+				t.Errorf("symlink target = %s, want %s (or resolved %s)", target, wantTarget, resolved)
+			}
+		}
+
+		// Unlink: symlink must be gone afterwards.
+		unlinkStdout := mustRunVV(t, e1Env, "memory", "unlink", "--working-dir", projectRepo)
+		assertContains(t, unlinkStdout, "memory-cli-demo", "unlink mentions project")
+
+		if isSymlink(linkPath) {
+			t.Error("symlink still present after unlink")
+		}
+	})
 }
