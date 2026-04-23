@@ -149,10 +149,10 @@ and dependencies.
 
 #### 3. Self-Improvement Loop
 
-- After ANY correction from the user: update lessons with the pattern
+- After ANY correction from the user: save the pattern — to auto-memory (type: feedback) for personal preferences, or to `Knowledge/learnings/` for cross-project lessons
 - Write rules for yourself that prevent the same mistake
-- Ruthlessly iterate on these lessons until mistake rate drops
-- Review lessons at session start for relevant project
+- Ruthlessly iterate until the mistake rate drops
+- Auto-memory (`MEMORY.md`) loads automatically at session start; cross-project learnings are discoverable via `vv_list_learnings` / `vv_get_learning`
 
 #### 4. Verification Before Done
 
@@ -185,7 +185,7 @@ and dependencies.
 3. **Track Progress**: Use `vv_manage_task` with `action: update_status` as you go
 4. **Explain Changes**: High-level summary at each step in the task file
 5. **Document Results**: Add review section to the task file
-6. **Capture Lessons**: Capture lessons to improve project workflow and deliverables
+6. **Capture Learnings**: Save reusable patterns to auto-memory (personal) or `Knowledge/learnings/` (cross-project) to improve future sessions
 
 ## Core Principles
 
