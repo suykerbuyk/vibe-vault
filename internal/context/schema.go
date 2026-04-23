@@ -15,7 +15,7 @@ import (
 )
 
 // LatestSchemaVersion is the current agentctx schema version.
-const LatestSchemaVersion = 9
+const LatestSchemaVersion = 10
 
 // VersionFile represents the .version TOML file in an agentctx directory.
 type VersionFile struct {
@@ -89,6 +89,7 @@ var migrations = []Migration{
 	{From: 6, To: 7, Apply: migrate6to7},
 	{From: 7, To: 8, Apply: migrate7to8},
 	{From: 8, To: 9, Apply: migrate8to9},
+	{From: 9, To: 10, Apply: migrate9to10},
 }
 
 // migrationsFrom returns all migrations applicable from the given version.
@@ -113,6 +114,14 @@ func migrate0to1(ctx MigrationContext) ([]FileAction, error) {
 
 // migrate1to2 is implemented in sync.go (adds agentctx symlink, relative paths).
 // Placeholder here for the migration registry — the real implementation is in sync.go.
+
+// migrate9to10 is a no-op. v10 is a contract-marker bump: projects at v10 are
+// under the invariants-only Current State contract enforced by the synthesis
+// agent and vv_update_resume guard. The migration machinery runs the outer
+// .version bump automatically; no file-level changes are required.
+func migrate9to10(_ MigrationContext) ([]FileAction, error) {
+	return nil, nil
+}
 
 func vvVersion() string {
 	return "vv " + help.Version
