@@ -130,6 +130,195 @@ func TestUpdateResumePathTraversal(t *testing.T) {
 	}
 }
 
+// --- vv_update_resume v10 Current State guard tests ---
+
+const v10VersionFile = "schema_version = 10\n"
+
+// updateResumePayload builds a JSON payload for the vv_update_resume handler.
+// Content is escaped via json.Marshal to avoid hand-crafting escapes.
+func updateResumePayload(t *testing.T, project, section, content string) json.RawMessage {
+	t.Helper()
+	args := struct {
+		Project string `json:"project"`
+		Section string `json:"section"`
+		Content string `json:"content"`
+	}{project, section, content}
+	data, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	return data
+}
+
+func TestUpdateResumeV10CurrentStateValid(t *testing.T) {
+	resume := "# Resume\n\n## Current State\n\nOld body.\n"
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/resume.md": resume,
+		"Projects/testproj/agentctx/.version":  v10VersionFile,
+	})
+
+	body := "- **Tests:** 1409 across 36 packages.\n- **Lint:** clean.\n- **Schema:** v10.\n"
+	tool := NewUpdateResumeTool(cfg)
+	if _, err := tool.Handler(updateResumePayload(t, "testproj", "Current State", body)); err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(cfg.VaultPath, "Projects", "testproj", "agentctx", "resume.md"))
+	if !strings.Contains(string(data), "- **Tests:** 1409") {
+		t.Errorf("expected updated body, got:\n%s", string(data))
+	}
+}
+
+func TestUpdateResumeV10RejectsNarrative(t *testing.T) {
+	resume := "# Resume\n\n## Current State\n\nOld body.\n"
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/resume.md": resume,
+		"Projects/testproj/agentctx/.version":  v10VersionFile,
+	})
+
+	body := "This is a paragraph of project narrative that does not belong here."
+	tool := NewUpdateResumeTool(cfg)
+	_, err := tool.Handler(updateResumePayload(t, "testproj", "Current State", body))
+	if err == nil {
+		t.Fatal("expected error for narrative in v10 Current State")
+	}
+	if !strings.Contains(err.Error(), "features.md") {
+		t.Errorf("error should point to features.md, got: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(cfg.VaultPath, "Projects", "testproj", "agentctx", "resume.md"))
+	if !strings.Contains(string(data), "Old body.") {
+		t.Errorf("resume.md must be unchanged on rejection, got:\n%s", string(data))
+	}
+}
+
+func TestUpdateResumeV10RejectsNonWhitelistedKey(t *testing.T) {
+	resume := "# Resume\n\n## Current State\n\nOld body.\n"
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/resume.md": resume,
+		"Projects/testproj/agentctx/.version":  v10VersionFile,
+	})
+
+	body := "- **Frobnicator:** enabled.\n"
+	tool := NewUpdateResumeTool(cfg)
+	_, err := tool.Handler(updateResumePayload(t, "testproj", "Current State", body))
+	if err == nil {
+		t.Fatal("expected error for non-whitelisted key")
+	}
+	if !strings.Contains(err.Error(), "Frobnicator") {
+		t.Errorf("error should cite the rejected line, got: %v", err)
+	}
+}
+
+func TestUpdateResumeV10RejectsOverCapTrailing(t *testing.T) {
+	resume := "# Resume\n\n## Current State\n\nOld body.\n"
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/resume.md": resume,
+		"Projects/testproj/agentctx/.version":  v10VersionFile,
+	})
+
+	body := "- **Tests:** " + strings.Repeat("x", 201) + "\n"
+	tool := NewUpdateResumeTool(cfg)
+	_, err := tool.Handler(updateResumePayload(t, "testproj", "Current State", body))
+	if err == nil {
+		t.Fatal("expected error for over-cap trailing content")
+	}
+}
+
+func TestUpdateResumeV10MultilineCommentAllowed(t *testing.T) {
+	resume := "# Resume\n\n## Current State\n\nOld body.\n"
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/resume.md": resume,
+		"Projects/testproj/agentctx/.version":  v10VersionFile,
+	})
+
+	body := "- **Tests:** 1409.\n" +
+		"<!--\n" +
+		"  MCP count bumps whenever a new tool lands.\n" +
+		"-->\n" +
+		"- **MCP:** 20 tools + 1 prompt.\n"
+	tool := NewUpdateResumeTool(cfg)
+	if _, err := tool.Handler(updateResumePayload(t, "testproj", "Current State", body)); err != nil {
+		t.Fatalf("multi-line comment should be skipped, got error: %v", err)
+	}
+}
+
+func TestUpdateResumeV10GuardIsSectionSpecific(t *testing.T) {
+	resume := "# Resume\n\n## Open Threads\n\nOld threads.\n"
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/resume.md": resume,
+		"Projects/testproj/agentctx/.version":  v10VersionFile,
+	})
+
+	// Narrative prose is legitimate in Open Threads.
+	body := "This is a paragraph describing an unresolved question that needs follow-up."
+	tool := NewUpdateResumeTool(cfg)
+	if _, err := tool.Handler(updateResumePayload(t, "testproj", "Open Threads", body)); err != nil {
+		t.Fatalf("narrative in Open Threads must be accepted, got error: %v", err)
+	}
+}
+
+func TestUpdateResumePreV10NoVersionGrandfathered(t *testing.T) {
+	resume := "# Resume\n\n## Current State\n\nOld body.\n"
+	// No .version file → ReadVersion returns SchemaVersion=0 → guard skipped.
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/resume.md": resume,
+	})
+
+	body := "Arbitrary pre-v10 narrative that must be accepted."
+	tool := NewUpdateResumeTool(cfg)
+	if _, err := tool.Handler(updateResumePayload(t, "testproj", "Current State", body)); err != nil {
+		t.Fatalf("pre-v10 narrative must be accepted, got error: %v", err)
+	}
+}
+
+func TestUpdateResumePreV10V9Grandfathered(t *testing.T) {
+	resume := "# Resume\n\n## Current State\n\nOld body.\n"
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/resume.md": resume,
+		"Projects/testproj/agentctx/.version":  "schema_version = 9\n",
+	})
+
+	body := "Arbitrary v9 narrative that must be accepted."
+	tool := NewUpdateResumeTool(cfg)
+	if _, err := tool.Handler(updateResumePayload(t, "testproj", "Current State", body)); err != nil {
+		t.Fatalf("v9 narrative must be accepted, got error: %v", err)
+	}
+}
+
+func TestUpdateResumeMalformedVersionGrandfathered(t *testing.T) {
+	resume := "# Resume\n\n## Current State\n\nOld body.\n"
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/resume.md": resume,
+		"Projects/testproj/agentctx/.version":  "this is not valid TOML = = =\n",
+	})
+
+	body := "Narrative prose — malformed .version should silent-skip the guard."
+	tool := NewUpdateResumeTool(cfg)
+	if _, err := tool.Handler(updateResumePayload(t, "testproj", "Current State", body)); err != nil {
+		t.Fatalf("malformed .version must silent-skip guard, got error: %v", err)
+	}
+}
+
+func TestUpdateResumeV10ErrorMessageTruncated(t *testing.T) {
+	resume := "# Resume\n\n## Current State\n\nOld body.\n"
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/resume.md": resume,
+		"Projects/testproj/agentctx/.version":  v10VersionFile,
+	})
+
+	// Long narrative line — single paragraph with 300+ chars.
+	body := strings.Repeat("lorem ipsum dolor sit amet ", 20)
+	tool := NewUpdateResumeTool(cfg)
+	_, err := tool.Handler(updateResumePayload(t, "testproj", "Current State", body))
+	if err == nil {
+		t.Fatal("expected error for long narrative")
+	}
+	if !strings.Contains(err.Error(), "…") {
+		t.Errorf("error message should contain truncation ellipsis for long bad line, got: %v", err)
+	}
+}
+
 // --- vv_append_iteration tests ---
 
 func TestAppendIterationAutoIncrement(t *testing.T) {

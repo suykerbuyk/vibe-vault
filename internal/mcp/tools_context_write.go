@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
+	vvcontext "github.com/suykerbuyk/vibe-vault/internal/context"
 	"github.com/suykerbuyk/vibe-vault/internal/index"
 	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
 )
@@ -23,7 +24,7 @@ func NewUpdateResumeTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
 			Name:        "vv_update_resume",
-			Description: "Update a section of resume.md for a project. Replaces the body of an existing ## section.",
+			Description: "Update a section of resume.md for a project. Replaces the body of an existing ## section. On v10+ projects, writes to 'Current State' must contain only single-line invariant bullets (**Key:** value, ≤200 runes trailing, whitelisted first word); narrative or capability prose belongs in agentctx/features.md.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -33,7 +34,7 @@ func NewUpdateResumeTool(cfg config.Config) Tool {
 					},
 					"section": {
 						"type": "string",
-						"description": "The section heading to update (e.g. 'Current Focus'). Must already exist in resume.md."
+						"description": "The section heading to update (e.g. 'Current State' or 'Open Threads'). Must already exist in resume.md."
 					},
 					"content": {
 						"type": "string",
@@ -65,6 +66,25 @@ func NewUpdateResumeTool(cfg config.Config) Tool {
 				return "", err
 			}
 
+			// On v10+ projects, the Current State section is under the
+			// invariants-only contract. Reject narrative prose; route it to
+			// features.md. Pre-v10 projects are grandfathered via the silent
+			// skip on ReadVersion failure or SchemaVersion < 10.
+			if args.Section == vvcontext.CurrentStateSection {
+				agentctxDir := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx")
+				vf, verr := vvcontext.ReadVersion(agentctxDir)
+				if verr == nil && vf.SchemaVersion >= 10 {
+					if badLine, ok := vvcontext.ValidateCurrentStateBody(args.Content); !ok {
+						return "", fmt.Errorf(
+							"vv_update_resume: Current State under v10 contract accepts "+
+								"only single-line invariant bullets (**Key:** value, ≤200 "+
+								"runes trailing, whitelisted first word); rejected line: %q "+
+								"— route narrative or capability prose to agentctx/features.md",
+							truncateForError(badLine))
+					}
+				}
+			}
+
 			path := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx", "resume.md")
 			absPath, err := vaultPrefixCheck(path, cfg.VaultPath)
 			if err != nil {
@@ -91,6 +111,17 @@ func NewUpdateResumeTool(cfg config.Config) Tool {
 			return fmt.Sprintf("Updated section %q in resume.md for project %q", args.Section, project), nil
 		},
 	}
+}
+
+// truncateForError shortens a rejected-content line for inclusion in an error
+// message. Rune-based so UTF-8 content cannot split a code point.
+func truncateForError(s string) string {
+	const maxRunes = 120
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes]) + "…"
 }
 
 var iterationRegexp = regexp.MustCompile(`^### Iteration (\d+)`)

@@ -79,3 +79,97 @@ func TestIsInvariantBullet(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateCurrentStateBody(t *testing.T) {
+	overCap := "- **Tests:** " + strings.Repeat("x", 201)
+
+	tests := []struct {
+		name      string
+		body      string
+		wantOK    bool
+		wantBadIn string // substring that must appear in badLine when !wantOK
+	}{
+		{
+			name: "all valid bullets",
+			body: "- **Iterations:** 125 complete.\n" +
+				"- **Tests:** 1409 across 36 packages.\n" +
+				"- **Lint:** clean.\n" +
+				"- **Schema:** v10.\n" +
+				"- **Module:** `github.com/suykerbuyk/vibe-vault`.\n" +
+				"- **MCP:** 20 tools + 1 prompt.\n" +
+				"- **Embedded templates:** 20.\n",
+			wantOK: true,
+		},
+		{
+			name:   "blank lines between bullets",
+			body:   "\n- **Tests:** 1409.\n\n- **Lint:** clean.\n\n",
+			wantOK: true,
+		},
+		{
+			name:   "single-line HTML comment interleaved",
+			body:   "- **Tests:** 1409.\n<!-- inline note -->\n- **Lint:** clean.\n",
+			wantOK: true,
+		},
+		{
+			name: "multi-line HTML comment skipped",
+			body: "- **Tests:** 1409.\n" +
+				"<!--\n" +
+				"  Note: MCP count bumps whenever a new tool lands.\n" +
+				"  This comment must not trip the validator.\n" +
+				"-->\n" +
+				"- **MCP:** 20 tools + 1 prompt.\n",
+			wantOK: true,
+		},
+		{
+			name:   "markdown subheading skipped",
+			body:   "### Sub-topic\n- **Tests:** 1409.\n",
+			wantOK: true,
+		},
+		{
+			name:      "continuation line rejected",
+			body:      "- **Tests:** 1409 across\n  36 packages.\n",
+			wantOK:    false,
+			wantBadIn: "36 packages",
+		},
+		{
+			name:      "non-whitelisted key rejected",
+			body:      "- **Tests:** 1409.\n- **Frobnicator:** enabled.\n",
+			wantOK:    false,
+			wantBadIn: "Frobnicator",
+		},
+		{
+			name:      "trailing over 200 runes rejected",
+			body:      overCap + "\n",
+			wantOK:    false,
+			wantBadIn: "xxxx",
+		},
+		{
+			name:   "empty body passes",
+			body:   "",
+			wantOK: true,
+		},
+		{
+			name: "unclosed HTML comment silently skips rest",
+			body: "- **Tests:** 1409.\n" +
+				"<!-- start of comment with no terminator\n" +
+				"this paragraph would normally be rejected\n" +
+				"but is swallowed by the open comment region.\n",
+			wantOK: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bad, ok := ValidateCurrentStateBody(tc.body)
+			if ok != tc.wantOK {
+				t.Fatalf("ValidateCurrentStateBody ok = %v, want %v (bad = %q)", ok, tc.wantOK, bad)
+			}
+			if !tc.wantOK && !strings.Contains(bad, tc.wantBadIn) {
+				t.Errorf("badLine = %q, want substring %q", bad, tc.wantBadIn)
+			}
+			if tc.wantOK && bad != "" {
+				t.Errorf("expected empty badLine on success, got %q", bad)
+			}
+		})
+	}
+}
