@@ -94,6 +94,14 @@ func buildEnv(xdgConfigHome string) []string {
 	}
 }
 
+func buildEnvWithHome(xdgConfigHome, home string) []string {
+	return []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + home,
+		"XDG_CONFIG_HOME=" + xdgConfigHome,
+	}
+}
+
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
@@ -1064,7 +1072,147 @@ func TestIntegration(t *testing.T) {
 		}
 	})
 
-	// 10f. export
+	// 10f. check resume-invariants — CLI smoke test for the v10 Current
+	// State invariant lint. Exercises `vv check`'s `resume-invariants`
+	// result against three fake repos: clean-pass, dirty-warn, pre-v10
+	// (omitted). Sandboxes HOME so `CheckMemoryLink` — which calls
+	// `os.UserHomeDir()` — cannot read the developer's real ~/.claude/.
+	t.Run("check_resume_invariants", func(t *testing.T) {
+		// Sandbox HOME for this subtest; CheckMemoryLink (in the vv check
+		// pipeline) reads ~/.claude/ via os.UserHomeDir, which would
+		// otherwise escape the test sandbox.
+		sandboxedEnv := buildEnvWithHome(xdgConfigHome, t.TempDir())
+
+		// --- Case 1: clean v10 project scaffolded by `vv context init` ---
+		cleanRepo := t.TempDir()
+		writeFixture(t, cleanRepo, ".vibe-vault.toml",
+			"[project]\nname = \"resume-invariants-clean\"\n")
+		mustRunVVInDir(t, sandboxedEnv, cleanRepo,
+			"context", "init", "--project", "resume-invariants-clean")
+
+		cleanStdout, cleanStderr, cleanErr := runVVInDir(t, sandboxedEnv, cleanRepo, "check")
+		if cleanErr != nil {
+			t.Fatalf("vv check (clean) returned non-zero: %v\nstdout: %s\nstderr: %s",
+				cleanErr, cleanStdout, cleanStderr)
+		}
+		assertContains(t, cleanStdout, "resume-invariants",
+			"clean case: check output mentions resume-invariants")
+		// Report.Format() renders each row as "  %-4s  %-*s  %s\n" where
+		// the first %s is Status.String() — "pass" for Pass. Assert the
+		// row itself pairs the status with the check name.
+		cleanPassRow := false
+		for _, line := range strings.Split(cleanStdout, "\n") {
+			if strings.Contains(line, "resume-invariants") && strings.Contains(line, "pass") {
+				cleanPassRow = true
+				break
+			}
+		}
+		if !cleanPassRow {
+			t.Errorf("clean case: expected a row pairing 'pass' with 'resume-invariants'\nstdout: %s",
+				cleanStdout)
+		}
+
+		// --- Case 2: dirty v10 project — rewrite Current State body ---
+		dirtyRepo := t.TempDir()
+		writeFixture(t, dirtyRepo, ".vibe-vault.toml",
+			"[project]\nname = \"resume-invariants-dirty\"\n")
+		mustRunVVInDir(t, sandboxedEnv, dirtyRepo,
+			"context", "init", "--project", "resume-invariants-dirty")
+
+		dirtyResumePath := filepath.Join(vaultPath, "Projects",
+			"resume-invariants-dirty", "agentctx", "resume.md")
+		dirtyResume := readFile(t, dirtyResumePath)
+		// Replace the body under `## Current State` (up to the next `## `
+		// heading) with a single non-invariant bullet. Keep the heading
+		// itself intact; leave every other section untouched.
+		const csHeading = "## Current State"
+		headingIdx := strings.Index(dirtyResume, csHeading)
+		if headingIdx < 0 {
+			t.Fatalf("dirty case: scaffolded resume.md missing %q heading\n%s",
+				csHeading, dirtyResume)
+		}
+		bodyStart := headingIdx + len(csHeading)
+		// Find the next `## ` heading after the body starts.
+		rest := dirtyResume[bodyStart:]
+		nextHeadingRel := strings.Index(rest, "\n## ")
+		var nextHeadingAbs int
+		if nextHeadingRel < 0 {
+			nextHeadingAbs = len(dirtyResume)
+		} else {
+			nextHeadingAbs = bodyStart + nextHeadingRel
+		}
+		rewritten := dirtyResume[:bodyStart] +
+			"\n\n- **Phase:** narrative paragraph explaining in-flight work\n\n" +
+			dirtyResume[nextHeadingAbs:]
+		if err := os.WriteFile(dirtyResumePath, []byte(rewritten), 0o644); err != nil {
+			t.Fatalf("write dirty resume.md: %v", err)
+		}
+
+		dirtyStdout, dirtyStderr, dirtyErr := runVVInDir(t, sandboxedEnv, dirtyRepo, "check")
+		// Warn does NOT cause non-zero exit — only Fail does. A non-zero
+		// here indicates some other check failed; surface both streams.
+		if dirtyErr != nil {
+			t.Fatalf("vv check (dirty) returned non-zero: %v\nstdout: %s\nstderr: %s",
+				dirtyErr, dirtyStdout, dirtyStderr)
+		}
+		assertContains(t, dirtyStdout, "resume-invariants",
+			"dirty case: check output mentions resume-invariants")
+		dirtyWarnRow := false
+		for _, line := range strings.Split(dirtyStdout, "\n") {
+			if strings.Contains(line, "resume-invariants") && strings.Contains(line, "warn") {
+				dirtyWarnRow = true
+				break
+			}
+		}
+		if !dirtyWarnRow {
+			t.Errorf("dirty case: expected a row pairing 'warn' with 'resume-invariants'\nstdout: %s",
+				dirtyStdout)
+		}
+		// Detail for a non-invariant bullet includes the offending line
+		// (truncated). The bullet we injected starts with "**Phase:**".
+		assertContains(t, dirtyStdout, "Phase",
+			"dirty case: warn detail references the offending bullet key")
+
+		// --- Case 3: pre-v10 project — resume-invariants omitted entirely ---
+		preV10Repo := t.TempDir()
+		writeFixture(t, preV10Repo, ".vibe-vault.toml",
+			"[project]\nname = \"resume-invariants-prev10\"\n")
+		preV10Agentctx := filepath.Join(vaultPath, "Projects",
+			"resume-invariants-prev10", "agentctx")
+		if err := os.MkdirAll(preV10Agentctx, 0o755); err != nil {
+			t.Fatalf("mkdir pre-v10 agentctx: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(preV10Agentctx, ".version"),
+			[]byte("schema_version = 9\n"), 0o644); err != nil {
+			t.Fatalf("write pre-v10 .version: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(preV10Agentctx, "resume.md"),
+			[]byte("# resume-invariants-prev10\n\nMinimal resume with no Current State section.\n"),
+			0o644); err != nil {
+			t.Fatalf("write pre-v10 resume.md: %v", err)
+		}
+
+		preStdout, preStderr, preErr := runVVInDir(t, sandboxedEnv, preV10Repo, "check")
+		if preErr != nil {
+			t.Fatalf("vv check (pre-v10) returned non-zero: %v\nstdout: %s\nstderr: %s",
+				preErr, preStdout, preStderr)
+		}
+		// The result Name is literally "resume-invariants"; Format renders
+		// it as the middle column. Matching on that column specifically
+		// avoids false hits where the project name (which contains the
+		// substring) appears in the Detail column of other rows.
+		for _, line := range strings.Split(preStdout, "\n") {
+			// A row looks like: "  pass  resume-invariants  detail..."
+			fields := strings.Fields(line)
+			if len(fields) >= 2 && fields[1] == "resume-invariants" {
+				t.Errorf("pre-v10 case: resume-invariants check row must be omitted\nstdout: %s",
+					preStdout)
+				break
+			}
+		}
+	})
+
+	// 10g. export
 	t.Run("export", func(t *testing.T) {
 		// JSON export (all sessions)
 		jsonStdout := mustRunVV(t, env, "export")
