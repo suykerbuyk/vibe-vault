@@ -1387,4 +1387,172 @@ func TestIntegration(t *testing.T) {
 		assertContains(t, stderr, "tools/call: vv_list_projects", "stderr log")
 		assertContains(t, stderr, "tools/call: vv_get_project_context", "stderr log")
 	})
+
+	// 13. MCP learnings tools
+	t.Run("mcp_learnings", func(t *testing.T) {
+		// Seed three learning files, one per allowed type.
+		learningsDir := filepath.Join(vaultPath, "Knowledge", "learnings")
+		if err := os.MkdirAll(learningsDir, 0o755); err != nil {
+			t.Fatalf("mkdir learnings: %v", err)
+		}
+
+		userLearning := `---
+name: Sample User Learning
+description: User-type learning for integration testing
+type: user
+---
+
+Body content for the user-type sample learning.
+`
+		feedbackLearning := `---
+name: Sample Feedback Learning
+description: Feedback-type learning for integration testing
+type: feedback
+---
+
+Body content for the feedback-type sample learning.
+`
+		referenceLearning := `---
+name: Sample Reference Learning
+description: Reference-type learning for integration testing
+type: reference
+---
+
+Body content for the reference-type sample learning.
+`
+		writeFixture(t, learningsDir, "sample-user.md", userLearning)
+		writeFixture(t, learningsDir, "sample-feedback.md", feedbackLearning)
+		writeFixture(t, learningsDir, "sample-reference.md", referenceLearning)
+
+		requests := strings.Join([]string{
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test"}}}`,
+			`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"vv_list_learnings"}}`,
+			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"vv_list_learnings","arguments":{"filter_type":"feedback"}}}`,
+			`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"vv_get_learning","arguments":{"slug":"sample-user"}}}`,
+			`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"vv_get_learning","arguments":{"slug":"does-not-exist"}}}`,
+		}, "\n")
+
+		stdout, stderr, err := runVVWithStdin(t, env, requests, "mcp")
+		if err != nil {
+			t.Fatalf("vv mcp failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+		}
+
+		trimmed := strings.TrimSpace(stdout)
+		var lines []string
+		for line := range strings.SplitSeq(trimmed, "\n") {
+			lines = append(lines, line)
+		}
+		// 5 requests have an id → 5 responses; the notification is silent.
+		if len(lines) != 5 {
+			t.Fatalf("expected 5 response lines, got %d:\n%s", len(lines), stdout)
+		}
+
+		var responses []map[string]any
+		for i, line := range lines {
+			var resp map[string]any
+			if err := json.Unmarshal([]byte(line), &resp); err != nil {
+				t.Fatalf("response %d: invalid JSON: %v\nline: %s", i, err, line)
+			}
+			responses = append(responses, resp)
+		}
+
+		// Response 0: initialize — must have serverInfo.
+		initResult, initOK := responses[0]["result"].(map[string]any)
+		if !initOK {
+			t.Fatalf("initialize: missing result: %v", responses[0])
+		}
+		if initResult["serverInfo"] == nil {
+			t.Error("initialize: missing serverInfo")
+		}
+
+		// Helper to pull content[0].text out of a tool/call result.
+		extractText := func(idx int) string {
+			t.Helper()
+			result, ok := responses[idx]["result"].(map[string]any)
+			if !ok {
+				t.Fatalf("response %d: missing result: %v", idx, responses[idx])
+			}
+			content, ok := result["content"].([]any)
+			if !ok || len(content) == 0 {
+				t.Fatalf("response %d: missing content: %v", idx, result)
+			}
+			first, ok := content[0].(map[string]any)
+			if !ok {
+				t.Fatalf("response %d: content[0] wrong shape: %v", idx, content[0])
+			}
+			text, ok := first["text"].(string)
+			if !ok {
+				t.Fatalf("response %d: content[0].text not a string: %v", idx, first)
+			}
+			return text
+		}
+
+		// Response 1: list all — 3 entries with the expected slugs.
+		listAllText := extractText(1)
+		var listAll []map[string]any
+		if err := json.Unmarshal([]byte(listAllText), &listAll); err != nil {
+			t.Fatalf("vv_list_learnings (all): invalid JSON in text: %v\ntext: %s", err, listAllText)
+		}
+		if len(listAll) != 3 {
+			t.Errorf("vv_list_learnings (all): expected 3 entries, got %d (%v)", len(listAll), listAll)
+		}
+		gotSlugs := make(map[string]bool)
+		for _, entry := range listAll {
+			slug, _ := entry["slug"].(string)
+			gotSlugs[slug] = true
+		}
+		wantSlugs := []string{"sample-user", "sample-feedback", "sample-reference"}
+		for _, slug := range wantSlugs {
+			if !gotSlugs[slug] {
+				t.Errorf("vv_list_learnings (all): missing slug %q; got %v", slug, gotSlugs)
+			}
+		}
+		if len(gotSlugs) != len(wantSlugs) {
+			t.Errorf("vv_list_learnings (all): slug set mismatch, got %v want %v", gotSlugs, wantSlugs)
+		}
+
+		// Response 2: list filtered by feedback — 1 entry, slug sample-feedback.
+		listFilteredText := extractText(2)
+		var listFiltered []map[string]any
+		if err := json.Unmarshal([]byte(listFilteredText), &listFiltered); err != nil {
+			t.Fatalf("vv_list_learnings (feedback): invalid JSON in text: %v\ntext: %s", err, listFilteredText)
+		}
+		if len(listFiltered) != 1 {
+			t.Fatalf("vv_list_learnings (feedback): expected 1 entry, got %d (%v)", len(listFiltered), listFiltered)
+		}
+		if slug, _ := listFiltered[0]["slug"].(string); slug != "sample-feedback" {
+			t.Errorf("vv_list_learnings (feedback): slug = %q, want sample-feedback", slug)
+		}
+
+		// Response 3: get sample-user — full body + metadata.
+		getText := extractText(3)
+		var getParsed map[string]any
+		if err := json.Unmarshal([]byte(getText), &getParsed); err != nil {
+			t.Fatalf("vv_get_learning: invalid JSON in text: %v\ntext: %s", err, getText)
+		}
+		if slug, _ := getParsed["slug"].(string); slug != "sample-user" {
+			t.Errorf("vv_get_learning: slug = %v, want sample-user", getParsed["slug"])
+		}
+		if name, _ := getParsed["name"].(string); name != "Sample User Learning" {
+			t.Errorf("vv_get_learning: name = %v, want Sample User Learning", getParsed["name"])
+		}
+		body, _ := getParsed["content"].(string)
+		if !strings.Contains(body, "Body content for the user-type sample learning.") {
+			t.Errorf("vv_get_learning: body missing expected text; got %q", body)
+		}
+
+		// Response 4: get unknown slug — isError=true.
+		missResult, missOK := responses[4]["result"].(map[string]any)
+		if !missOK {
+			t.Fatalf("vv_get_learning (missing): missing result: %v", responses[4])
+		}
+		if missResult["isError"] != true {
+			t.Errorf("vv_get_learning (missing): expected isError=true, got %v", missResult["isError"])
+		}
+
+		// Stderr should show the tool calls.
+		assertContains(t, stderr, "tools/call: vv_list_learnings", "stderr log")
+		assertContains(t, stderr, "tools/call: vv_get_learning", "stderr log")
+	})
 }
