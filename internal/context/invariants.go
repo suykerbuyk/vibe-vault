@@ -80,17 +80,28 @@ func IsInvariantBullet(line string) bool {
 	return len([]rune(trailing)) <= invariantMaxTrailing
 }
 
+// italicPointerRe matches a line whose entire content is a single-asterisk
+// italic span, e.g., `*See agentctx/features.md for shipped-capability
+// index.*`. Such lines are emitted by `/wrap` and `/features-split` as
+// section footers — not bullets. The validator skips them.
+var italicPointerRe = regexp.MustCompile(`^\*[^*].*[^*]\*$`)
+
 // ValidateCurrentStateBody scans a Current-State section body line-by-line
-// against the v10 contract. It skips blank lines, markdown headings, and
-// HTML-comment regions (single-line or multi-line); every other line must
-// satisfy IsInvariantBullet. Returns the first failing line and false, or
-// ("", true) if all candidate lines pass.
+// against the v10 contract. It skips blank lines, markdown headings,
+// HTML-comment regions (single-line or multi-line), and italic pointer
+// lines; every other line must satisfy IsInvariantBullet. Returns the first
+// failing line and false, or ("", true) if all candidate lines pass.
 //
 // Multi-line HTML comments are handled via an inComment state flag — a line
 // containing `<!--` enters the region, a line containing `-->` exits it.
 // Lines inside the region are skipped regardless of content. An unclosed
 // comment silently skips all subsequent lines; document-level malformation
 // is not the validator's concern.
+//
+// Italic pointer lines (`*...*` wrapping the whole line) are emitted by
+// `/wrap` and `/features-split` as section footers (e.g., `*See
+// agentctx/features.md for shipped-capability index.*`) — they carry no
+// invariant state and are skipped.
 //
 // Continuation / wrapped-bullet lines (no `**Key:**` prefix) are rejected by
 // IsInvariantBullet: the v10 contract requires each bullet to fit on a
@@ -115,6 +126,9 @@ func ValidateCurrentStateBody(body string) (badLine string, ok bool) {
 			continue
 		}
 		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if italicPointerRe.MatchString(line) {
 			continue
 		}
 		if !IsInvariantBullet(raw) {

@@ -420,6 +420,9 @@ func runCheck() {
 			if result := check.CheckMemoryLink(cfg.VaultPath, project, cwd); result != nil {
 				report.Results = append(report.Results, *result)
 			}
+			if result := check.CheckCurrentStateInvariants(cfg.VaultPath, project); result != nil {
+				report.Results = append(report.Results, *result)
+			}
 		}
 	}
 

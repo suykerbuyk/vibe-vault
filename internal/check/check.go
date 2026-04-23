@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
+	vvcontext "github.com/suykerbuyk/vibe-vault/internal/context"
 	"github.com/suykerbuyk/vibe-vault/internal/plugin"
 )
 
@@ -451,6 +452,85 @@ func CheckMemoryLink(vaultPath, project, cwd string) *Result {
 		Status: Pass,
 		Detail: fmt.Sprintf("%s: linked → %s", project, config.CompressHome(target)),
 	}
+}
+
+// CheckCurrentStateInvariants validates a v10 project's resume.md Current
+// State section against the v10 invariant-bullet contract. Returns nil for
+// pre-v10 projects, missing agentctx dirs, or missing resume.md — the
+// contract doesn't apply yet. On v10 projects: Pass if every bullet
+// satisfies IsInvariantBullet; Warn if the Current State heading is missing
+// or any bullet fails classification.
+func CheckCurrentStateInvariants(vaultPath, project string) *Result {
+	agentctxDir := filepath.Join(vaultPath, "Projects", project, "agentctx")
+	if _, err := os.Stat(agentctxDir); os.IsNotExist(err) {
+		return nil
+	}
+	vf, err := vvcontext.ReadVersion(agentctxDir)
+	if err != nil || vf.SchemaVersion < 10 {
+		return nil
+	}
+	resumePath := filepath.Join(agentctxDir, "resume.md")
+	data, err := os.ReadFile(resumePath)
+	if err != nil {
+		return nil
+	}
+	body, found := extractCurrentStateBody(string(data))
+	if !found {
+		return &Result{
+			Name:   "resume-invariants",
+			Status: Warn,
+			Detail: fmt.Sprintf("%s: `## %s` section missing", project, vvcontext.CurrentStateSection),
+		}
+	}
+	if bad, ok := vvcontext.ValidateCurrentStateBody(body); !ok {
+		return &Result{
+			Name:   "resume-invariants",
+			Status: Warn,
+			Detail: fmt.Sprintf("%s: non-invariant bullet: %s", project, truncateLine(bad, 120)),
+		}
+	}
+	return &Result{
+		Name:   "resume-invariants",
+		Status: Pass,
+		Detail: fmt.Sprintf("%s: Current State invariants clean", project),
+	}
+}
+
+// extractCurrentStateBody returns the body of the `## Current State` section
+// — lines between that heading and the next `## ` heading (exclusive on both
+// ends). Returns ("", false) if the heading is missing.
+func extractCurrentStateBody(doc string) (string, bool) {
+	heading := "## " + vvcontext.CurrentStateSection
+	lines := strings.Split(doc, "\n")
+	start := -1
+	for i, line := range lines {
+		trimmed := strings.TrimRight(line, " \t")
+		if trimmed == heading {
+			start = i + 1
+			break
+		}
+	}
+	if start < 0 {
+		return "", false
+	}
+	end := len(lines)
+	for i := start; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "## ") {
+			end = i
+			break
+		}
+	}
+	return strings.Join(lines[start:end], "\n"), true
+}
+
+// truncateLine shortens a line to at most n runes, appending an ellipsis
+// when the line is longer. Rune-safe so multi-byte characters are not split.
+func truncateLine(s string, n int) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= n {
+		return string(r)
+	}
+	return string(r[:n]) + "…"
 }
 
 // CheckStaleSymlinks checks for leftover symlinks from pre-v5 schema.

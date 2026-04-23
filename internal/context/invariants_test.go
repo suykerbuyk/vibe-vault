@@ -156,6 +156,20 @@ func TestValidateCurrentStateBody(t *testing.T) {
 				"but is swallowed by the open comment region.\n",
 			wantOK: true,
 		},
+		{
+			name: "italic pointer footer skipped",
+			body: "- **Tests:** 1409.\n" +
+				"\n" +
+				"*See `agentctx/features.md` for shipped-capability index.*\n",
+			wantOK: true,
+		},
+		{
+			name: "italic line with only asterisks rejected (not a pointer)",
+			body: "- **Tests:** 1409.\n" +
+				"**Something bold**\n",
+			wantOK:    false,
+			wantBadIn: "Something bold",
+		},
 	}
 
 	for _, tc := range tests {

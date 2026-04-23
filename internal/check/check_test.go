@@ -2,6 +2,7 @@ package check
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -659,5 +660,162 @@ func TestCheckMemoryLink_Warn_WrongTarget(t *testing.T) {
 	}
 	if !strings.Contains(r.Detail, "points to") {
 		t.Errorf("expected 'points to' detail, got: %s", r.Detail)
+	}
+}
+
+// --- CheckCurrentStateInvariants ---
+
+// seedV10Project creates a vaultPath/Projects/<project>/agentctx/ with a
+// v10 .version file and the given resume.md body. Returns the vault path.
+func seedV10Project(t *testing.T, project, resumeBody string, schemaVersion int) string {
+	t.Helper()
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", project, "agentctx")
+	if err := os.MkdirAll(agentctxDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	versionTOML := []byte("schema_version = ")
+	versionTOML = append(versionTOML, []byte(fmt.Sprintf("%d\n", schemaVersion))...)
+	if err := os.WriteFile(filepath.Join(agentctxDir, ".version"), versionTOML, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if resumeBody != "" {
+		if err := os.WriteFile(filepath.Join(agentctxDir, "resume.md"), []byte(resumeBody), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return vault
+}
+
+func TestCheckCurrentStateInvariants_NilOnMissingAgentctx(t *testing.T) {
+	vault := t.TempDir()
+	if r := CheckCurrentStateInvariants(vault, "nonexistent"); r != nil {
+		t.Errorf("expected nil for missing agentctx, got %+v", r)
+	}
+}
+
+func TestCheckCurrentStateInvariants_NilOnPreV10(t *testing.T) {
+	vault := seedV10Project(t, "legacy", "## Current State\n\narbitrary content\n", 9)
+	if r := CheckCurrentStateInvariants(vault, "legacy"); r != nil {
+		t.Errorf("expected nil for schema v9, got %+v", r)
+	}
+}
+
+func TestCheckCurrentStateInvariants_NilOnMissingResume(t *testing.T) {
+	vault := seedV10Project(t, "empty", "", 10)
+	if r := CheckCurrentStateInvariants(vault, "empty"); r != nil {
+		t.Errorf("expected nil for missing resume.md, got %+v", r)
+	}
+}
+
+func TestCheckCurrentStateInvariants_WarnOnMissingHeading(t *testing.T) {
+	vault := seedV10Project(t, "noheading", "# Some project\n\n## Other\n\n- **Tests:** 5\n", 10)
+	r := CheckCurrentStateInvariants(vault, "noheading")
+	if r == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if r.Status != Warn {
+		t.Errorf("expected Warn, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "Current State") {
+		t.Errorf("expected detail to mention Current State, got: %s", r.Detail)
+	}
+}
+
+func TestCheckCurrentStateInvariants_PassOnCleanBody(t *testing.T) {
+	body := "# demo\n\n## Current State\n\n" +
+		"- **Iterations:** 42\n" +
+		"- **Tests:** 100 unit + 10 integration; coverage 85%.\n" +
+		"- **Lint:** clean.\n" +
+		"\n## Open Threads\n"
+	vault := seedV10Project(t, "demo", body, 10)
+	r := CheckCurrentStateInvariants(vault, "demo")
+	if r == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if r.Status != Pass {
+		t.Errorf("expected Pass, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "clean") {
+		t.Errorf("expected detail to mention 'clean', got: %s", r.Detail)
+	}
+}
+
+func TestCheckCurrentStateInvariants_WarnOnOffendingBullet(t *testing.T) {
+	body := "## Current State\n\n" +
+		"- **Iterations:** 42\n" +
+		"- **Phase:** narrative-style phase description that should be rejected\n" +
+		"\n## Open Threads\n"
+	vault := seedV10Project(t, "dirty", body, 10)
+	r := CheckCurrentStateInvariants(vault, "dirty")
+	if r == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if r.Status != Warn {
+		t.Errorf("expected Warn, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "Phase") {
+		t.Errorf("expected detail to mention offending 'Phase' bullet, got: %s", r.Detail)
+	}
+}
+
+func TestExtractCurrentStateBody(t *testing.T) {
+	tests := []struct {
+		name  string
+		doc   string
+		want  string
+		found bool
+	}{
+		{
+			name:  "missing heading",
+			doc:   "# Title\n\nno heading\n",
+			want:  "",
+			found: false,
+		},
+		{
+			name:  "heading to next section",
+			doc:   "## Current State\n\n- **Tests:** 5\n\n## Other\n\nelsewhere\n",
+			want:  "\n- **Tests:** 5\n",
+			found: true,
+		},
+		{
+			name:  "heading at end of doc",
+			doc:   "## Current State\n\n- **Tests:** 5\n",
+			want:  "\n- **Tests:** 5\n",
+			found: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, found := extractCurrentStateBody(tt.doc)
+			if found != tt.found {
+				t.Errorf("found = %v, want %v", found, tt.found)
+			}
+			if got != tt.want {
+				t.Errorf("body = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTruncateLine(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		n    int
+		want string
+	}{
+		{"short passthrough", "hello", 10, "hello"},
+		{"exact length", "hello", 5, "hello"},
+		{"truncate with ellipsis", "hello world", 5, "hello…"},
+		{"trims whitespace", "   hi   ", 10, "hi"},
+		{"rune-safe (multibyte)", "aé中bñ", 3, "aé中…"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := truncateLine(tt.in, tt.n); got != tt.want {
+				t.Errorf("truncateLine(%q, %d) = %q, want %q", tt.in, tt.n, got, tt.want)
+			}
+		})
 	}
 }
