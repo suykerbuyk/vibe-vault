@@ -42,15 +42,17 @@ type CaptureOpts struct {
 
 // CaptureResult holds the output of a capture operation.
 type CaptureResult struct {
-	NotePath      string
-	Project       string
-	Domain        string
-	Iteration     int
-	Title         string
-	Skipped       bool
-	Reason        string
-	FrictionScore int
-	FrictionAlert string
+	NotePath            string
+	Project             string
+	Domain              string
+	Iteration           int
+	Title               string
+	Skipped             bool
+	Reason              string
+	FrictionScore       int
+	FrictionAlert       string
+	EnrichmentAttempted bool // true if the enrichment LLM call was made (regardless of outcome)
+	EnrichmentApplied   bool // true when enrichment returned usable content and populated note fields
 }
 
 // Capture processes a transcript and writes a session note.
@@ -298,7 +300,9 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 
 	// LLM enrichment (graceful: skip on error or if disabled)
 	// Skip when prose extraction produced output — the prose subsumes enrichment's purpose.
+	var enrichmentAttempted, enrichmentApplied bool
 	if !opts.SkipEnrichment && opts.Provider != nil && noteData.ProseDialogue == "" {
+		enrichmentAttempted = true
 		var filesChanged []string
 		for f := range t.Stats.FilesWritten {
 			filesChanged = append(filesChanged, sanitize.CompressHome(f))
@@ -345,6 +349,7 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 			noteData.OpenThreads = enrichResult.OpenThreads
 			noteData.Tag = enrichResult.Tag
 			noteData.EnrichedBy = cfg.Enrichment.Model
+			enrichmentApplied = true
 		}
 	}
 
@@ -441,13 +446,15 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 	}
 
 	return &CaptureResult{
-		NotePath:      relPath,
-		Project:       info.Project,
-		Domain:        info.Domain,
-		Iteration:     iteration,
-		Title:         noteData.Title,
-		FrictionScore: frictionScore(frictionResult),
-		FrictionAlert: frictionAlert,
+		NotePath:            relPath,
+		Project:             info.Project,
+		Domain:              info.Domain,
+		Iteration:           iteration,
+		Title:               noteData.Title,
+		FrictionScore:       frictionScore(frictionResult),
+		FrictionAlert:       frictionAlert,
+		EnrichmentAttempted: enrichmentAttempted,
+		EnrichmentApplied:   enrichmentApplied,
 	}, nil
 }
 

@@ -175,14 +175,24 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 		return nil
 	}
 
-	// Report enrichment status in output.
+	// Report enrichment status in output. The "enriched by X" message is only
+	// printed when enrichment actually produced usable content — checking config
+	// validity alone is not enough, since a valid config can still 401/500/timeout
+	// at the HTTP layer and leave the note heuristic-only, and prose extraction
+	// deliberately short-circuits the LLM enrichment path when it has output.
+	providerName, model, reason := llm.Available(cfg.Enrichment)
 	var enrichTag string
-	if providerName, model, reason := llm.Available(cfg.Enrichment); reason == "" {
-		enrichTag = fmt.Sprintf("enriched by %s/%s", providerName, model)
-	} else if cfg.Enrichment.Enabled {
-		enrichTag = fmt.Sprintf("heuristic — LLM unavailable: %s", reason)
-	} else {
+	switch {
+	case !cfg.Enrichment.Enabled:
 		enrichTag = "heuristic — no LLM configured"
+	case reason != "":
+		enrichTag = fmt.Sprintf("heuristic — LLM unavailable: %s", reason)
+	case !result.EnrichmentAttempted:
+		enrichTag = "prose-extracted (LLM enrichment skipped by design)"
+	case result.EnrichmentApplied:
+		enrichTag = fmt.Sprintf("enriched by %s/%s", providerName, model)
+	default:
+		enrichTag = fmt.Sprintf("heuristic — LLM call failed (target: %s/%s; see warning above)", providerName, model)
 	}
 	fmt.Fprintf(os.Stderr, "vv: session captured → %s (%s)\n", result.NotePath, enrichTag)
 
@@ -201,7 +211,7 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 			} else {
 				synthTimeout := time.Duration(cfg.Synthesis.TimeoutSeconds) * time.Second
 				if synthTimeout == 0 {
-					synthTimeout = 15 * time.Second
+					synthTimeout = 60 * time.Second
 				}
 				synthCtx, synthCancel := context.WithTimeout(context.Background(), synthTimeout)
 				defer synthCancel()

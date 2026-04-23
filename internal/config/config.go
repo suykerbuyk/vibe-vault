@@ -131,7 +131,12 @@ func DefaultConfig() Config {
 			Provider:       "openai",
 			Model:          "grok-3-mini-fast",
 			APIKeyEnv:      "XAI_API_KEY",
-			BaseURL:        "https://api.x.ai/v1",
+			// BaseURL left empty — each provider's NewX constructor falls back
+			// to its own canonical URL (OpenAI → api.openai.com/v1,
+			// Anthropic → api.anthropic.com, Google → its default). A hardcoded
+			// xAI URL here was leaking into Anthropic/Google constructions when
+			// users switched Provider without also setting base_url.
+			BaseURL: "",
 		},
 		Archive: ArchiveConfig{
 			Compress: true,
@@ -157,7 +162,7 @@ func DefaultConfig() Config {
 		},
 		Synthesis: SynthesisConfig{
 			Enabled:        true,
-			TimeoutSeconds: 15,
+			TimeoutSeconds: 60,
 		},
 	}
 }

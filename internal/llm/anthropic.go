@@ -102,7 +102,35 @@ func (a *Anthropic) ChatCompletion(ctx context.Context, req Request) (*Response,
 		return nil, fmt.Errorf("no text content in response")
 	}
 
+	// Anthropic has no native JSON-mode flag (unlike OpenAI's response_format),
+	// so Claude tends to wrap JSON responses in ```json ... ``` markdown fences.
+	// Strip them when the caller requested JSON output; no-op otherwise.
+	if req.JSONMode {
+		text = stripJSONFence(text)
+	}
+
 	return &Response{Content: text}, nil
+}
+
+// stripJSONFence removes a surrounding ```json ... ``` or ``` ... ``` fence
+// if the text is wrapped in one. Returns the trimmed content. Safe on
+// unwrapped text (no-op). Used by the Anthropic provider to coerce raw JSON
+// output since Anthropic has no response_format equivalent.
+func stripJSONFence(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	// Drop the opening fence line (```json or bare ```).
+	if nl := strings.IndexByte(s, '\n'); nl >= 0 {
+		s = s[nl+1:]
+	} else {
+		// Single-line ```...``` edge case.
+		s = strings.TrimPrefix(s, "```json")
+		s = strings.TrimPrefix(s, "```")
+	}
+	s = strings.TrimSuffix(strings.TrimSpace(s), "```")
+	return strings.TrimSpace(s)
 }
 
 // Anthropic API types
