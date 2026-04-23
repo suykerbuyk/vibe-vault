@@ -5,9 +5,10 @@ package vaultsync
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/suykerbuyk/vibe-vault/internal/testutil/gitx"
 )
 
 func TestClassify(t *testing.T) {
@@ -49,78 +50,8 @@ func TestClassify(t *testing.T) {
 	}
 }
 
-// initTestRepo creates a git repo with an initial commit in a temp directory.
-func initTestRepo(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test",
-			"GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test",
-			"GIT_COMMITTER_EMAIL=test@test.com",
-		)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %s: %v", args, out, err)
-		}
-	}
-
-	run("init", "-b", "main")
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("init"), 0o644)
-	run("add", ".")
-	run("commit", "-m", "initial")
-
-	return dir
-}
-
-// initBareRemote creates a bare git repo suitable as a push/fetch target.
-func initBareRemote(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	cmd := exec.Command("git", "init", "--bare", "-b", "main")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git init --bare: %s: %v", out, err)
-	}
-	return dir
-}
-
-// addRemote adds a named remote to a repo.
-func addRemote(t *testing.T, repoDir, name, url string) {
-	t.Helper()
-	cmd := exec.Command("git", "remote", "add", name, url)
-	cmd.Dir = repoDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git remote add %s: %s: %v", name, out, err)
-	}
-}
-
-// gitRun runs a git command in the given directory.
-func gitRun(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=test",
-		"GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=test",
-		"GIT_COMMITTER_EMAIL=test@test.com",
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v: %s: %v", args, out, err)
-	}
-}
-
 func TestGetStatus_CleanRepo(t *testing.T) {
-	dir := initTestRepo(t)
+	dir := gitx.InitTestRepo(t)
 
 	s, err := GetStatus(dir)
 	if err != nil {
@@ -138,7 +69,7 @@ func TestGetStatus_CleanRepo(t *testing.T) {
 }
 
 func TestGetStatus_DirtyRepo(t *testing.T) {
-	dir := initTestRepo(t)
+	dir := gitx.InitTestRepo(t)
 
 	os.WriteFile(filepath.Join(dir, "new.txt"), []byte("dirty"), 0o644)
 
@@ -152,16 +83,16 @@ func TestGetStatus_DirtyRepo(t *testing.T) {
 }
 
 func TestGetStatus_MultipleRemotes(t *testing.T) {
-	dir := initTestRepo(t)
-	bare1 := initBareRemote(t)
-	bare2 := initBareRemote(t)
+	dir := gitx.InitTestRepo(t)
+	bare1 := gitx.InitBareRemote(t)
+	bare2 := gitx.InitBareRemote(t)
 
-	addRemote(t, dir, "github", bare1)
-	addRemote(t, dir, "vault", bare2)
+	gitx.AddRemote(t, dir, "github", bare1)
+	gitx.AddRemote(t, dir, "vault", bare2)
 
 	// Push to both so remote refs exist
-	gitRun(t, dir, "push", "github", "main")
-	gitRun(t, dir, "push", "vault", "main")
+	gitx.GitRun(t, dir, "push", "github", "main")
+	gitx.GitRun(t, dir, "push", "vault", "main")
 
 	s, err := GetStatus(dir)
 	if err != nil {
@@ -187,15 +118,15 @@ func TestGetStatus_MultipleRemotes(t *testing.T) {
 }
 
 func TestGetStatus_AheadBehind(t *testing.T) {
-	dir := initTestRepo(t)
-	bare := initBareRemote(t)
-	addRemote(t, dir, "github", bare)
-	gitRun(t, dir, "push", "github", "main")
+	dir := gitx.InitTestRepo(t)
+	bare := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "github", bare)
+	gitx.GitRun(t, dir, "push", "github", "main")
 
 	// Create a local commit (ahead by 1)
 	os.WriteFile(filepath.Join(dir, "local.txt"), []byte("local"), 0o644)
-	gitRun(t, dir, "add", ".")
-	gitRun(t, dir, "commit", "-m", "local change")
+	gitx.GitRun(t, dir, "add", ".")
+	gitx.GitRun(t, dir, "commit", "-m", "local change")
 
 	s, err := GetStatus(dir)
 	if err != nil {
@@ -210,7 +141,7 @@ func TestGetStatus_AheadBehind(t *testing.T) {
 }
 
 func TestListRemotes_None(t *testing.T) {
-	dir := initTestRepo(t)
+	dir := gitx.InitTestRepo(t)
 	remotes, err := listRemotes(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -221,9 +152,9 @@ func TestListRemotes_None(t *testing.T) {
 }
 
 func TestListRemotes_Multiple(t *testing.T) {
-	dir := initTestRepo(t)
-	addRemote(t, dir, "github", "https://example.com/a.git")
-	addRemote(t, dir, "vault", "https://example.com/b.git")
+	dir := gitx.InitTestRepo(t)
+	gitx.AddRemote(t, dir, "github", "https://example.com/a.git")
+	gitx.AddRemote(t, dir, "vault", "https://example.com/b.git")
 
 	remotes, err := listRemotes(dir)
 	if err != nil {
@@ -242,7 +173,7 @@ func TestListRemotes_Multiple(t *testing.T) {
 }
 
 func TestCommitAndPush_NoRemote(t *testing.T) {
-	dir := initTestRepo(t)
+	dir := gitx.InitTestRepo(t)
 
 	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("data"), 0o644)
 
@@ -256,8 +187,8 @@ func TestCommitAndPush_NoRemote(t *testing.T) {
 }
 
 func TestCommitAndPush_NothingToCommit(t *testing.T) {
-	dir := initTestRepo(t)
-	addRemote(t, dir, "github", "https://example.com/test.git")
+	dir := gitx.InitTestRepo(t)
+	gitx.AddRemote(t, dir, "github", "https://example.com/test.git")
 
 	result, err := CommitAndPush(dir, "empty")
 	if err != nil {
@@ -272,16 +203,16 @@ func TestCommitAndPush_NothingToCommit(t *testing.T) {
 }
 
 func TestCommitAndPush_MultipleRemotes(t *testing.T) {
-	dir := initTestRepo(t)
-	bare1 := initBareRemote(t)
-	bare2 := initBareRemote(t)
+	dir := gitx.InitTestRepo(t)
+	bare1 := gitx.InitBareRemote(t)
+	bare2 := gitx.InitBareRemote(t)
 
-	addRemote(t, dir, "github", bare1)
-	addRemote(t, dir, "vault", bare2)
+	gitx.AddRemote(t, dir, "github", bare1)
+	gitx.AddRemote(t, dir, "vault", bare2)
 
 	// Push initial commit to both so remote refs exist
-	gitRun(t, dir, "push", "github", "main")
-	gitRun(t, dir, "push", "vault", "main")
+	gitx.GitRun(t, dir, "push", "github", "main")
+	gitx.GitRun(t, dir, "push", "vault", "main")
 
 	// Create a new file to commit
 	os.WriteFile(filepath.Join(dir, "new.txt"), []byte("data"), 0o644)
@@ -307,7 +238,7 @@ func TestCommitAndPush_MultipleRemotes(t *testing.T) {
 }
 
 func TestPull_NoRemote(t *testing.T) {
-	dir := initTestRepo(t)
+	dir := gitx.InitTestRepo(t)
 
 	_, err := Pull(dir)
 	if err == nil {
@@ -319,13 +250,13 @@ func TestPull_NoRemote(t *testing.T) {
 }
 
 func TestEnsureRemote(t *testing.T) {
-	dir := initTestRepo(t)
+	dir := gitx.InitTestRepo(t)
 
 	if err := EnsureRemote(dir); err == nil {
 		t.Error("expected error when no remote")
 	}
 
-	addRemote(t, dir, "github", "https://example.com/test.git")
+	gitx.AddRemote(t, dir, "github", "https://example.com/test.git")
 
 	if err := EnsureRemote(dir); err != nil {
 		t.Errorf("unexpected error after adding remote: %v", err)
@@ -333,10 +264,10 @@ func TestEnsureRemote(t *testing.T) {
 }
 
 func TestEnsureRemote_NonOriginName(t *testing.T) {
-	dir := initTestRepo(t)
+	dir := gitx.InitTestRepo(t)
 
 	// Add a remote with a non-"origin" name — should still pass
-	addRemote(t, dir, "vault", "https://example.com/test.git")
+	gitx.AddRemote(t, dir, "vault", "https://example.com/test.git")
 
 	if err := EnsureRemote(dir); err != nil {
 		t.Errorf("unexpected error with non-origin remote: %v", err)
