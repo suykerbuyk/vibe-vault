@@ -1101,7 +1101,7 @@ func TestIntegration(t *testing.T) {
 		// the first %s is Status.String() — "pass" for Pass. Assert the
 		// row itself pairs the status with the check name.
 		cleanPassRow := false
-		for _, line := range strings.Split(cleanStdout, "\n") {
+		for line := range strings.SplitSeq(cleanStdout, "\n") {
 			if strings.Contains(line, "resume-invariants") && strings.Contains(line, "pass") {
 				cleanPassRow = true
 				break
@@ -1158,7 +1158,7 @@ func TestIntegration(t *testing.T) {
 		assertContains(t, dirtyStdout, "resume-invariants",
 			"dirty case: check output mentions resume-invariants")
 		dirtyWarnRow := false
-		for _, line := range strings.Split(dirtyStdout, "\n") {
+		for line := range strings.SplitSeq(dirtyStdout, "\n") {
 			if strings.Contains(line, "resume-invariants") && strings.Contains(line, "warn") {
 				dirtyWarnRow = true
 				break
@@ -1201,7 +1201,7 @@ func TestIntegration(t *testing.T) {
 		// it as the middle column. Matching on that column specifically
 		// avoids false hits where the project name (which contains the
 		// substring) appears in the Detail column of other rows.
-		for _, line := range strings.Split(preStdout, "\n") {
+		for line := range strings.SplitSeq(preStdout, "\n") {
 			// A row looks like: "  pass  resume-invariants  detail..."
 			fields := strings.Fields(line)
 			if len(fields) >= 2 && fields[1] == "resume-invariants" {
