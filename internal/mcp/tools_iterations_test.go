@@ -313,6 +313,82 @@ Body.
 	}
 }
 
+// TestParseIterationsStripsProvenanceTrailer is a regression gate on the
+// Phase 3 provenanceTrailerRE strip: the HTML-comment provenance trailer
+// vv_append_iteration writes into iterations.md must not appear in the
+// narrative returned by parseIterations. Without this the round-trip leaks
+// forensic metadata back into agent prompts.
+func TestParseIterationsStripsProvenanceTrailer(t *testing.T) {
+	content := "### Iteration 42 — Test (2026-04-24)\n\nBody text.\n\n<!-- recorded: host=foo user=bar -->\n"
+	got := parseIterations(content)
+	if len(got) != 1 {
+		t.Fatalf("parseIterations returned %d entries, want 1", len(got))
+	}
+	if got[0].Narrative != "Body text." {
+		t.Errorf("Narrative = %q, want %q", got[0].Narrative, "Body text.")
+	}
+	if got[0].Number != 42 {
+		t.Errorf("Number = %d, want 42", got[0].Number)
+	}
+	if got[0].Title != "Test" {
+		t.Errorf("Title = %q, want %q", got[0].Title, "Test")
+	}
+}
+
+// TestParseIterationsWithoutTrailer pins the no-op behaviour: an iteration
+// block that has never been stamped (legacy content) must round-trip
+// unchanged. If this breaks the strip regex has over-reached.
+func TestParseIterationsWithoutTrailer(t *testing.T) {
+	content := "### Iteration 7 — Legacy (2026-01-07)\n\nPlain body.\n\nSecond paragraph.\n"
+	got := parseIterations(content)
+	if len(got) != 1 {
+		t.Fatalf("parseIterations returned %d entries, want 1", len(got))
+	}
+	want := "Plain body.\n\nSecond paragraph."
+	if got[0].Narrative != want {
+		t.Errorf("Narrative = %q, want %q", got[0].Narrative, want)
+	}
+}
+
+// TestParseIterationsMalformedTrailer verifies the strip regex degrades
+// gracefully on malformed / mispositioned trailers:
+//   - a trailer-shaped comment in the middle of narrative survives
+//     (regex is anchored to \z),
+//   - an unterminated comment at the end does not match and is left in
+//     place — it may be ugly, but it must not panic.
+func TestParseIterationsMalformedTrailer(t *testing.T) {
+	t.Run("trailer_mid_narrative_not_stripped", func(t *testing.T) {
+		content := "### Iteration 8 — Mid (2026-01-08)\n\nBefore.\n\n<!-- recorded: host=x user=y -->\n\nAfter.\n"
+		got := parseIterations(content)
+		if len(got) != 1 {
+			t.Fatalf("parseIterations returned %d entries, want 1", len(got))
+		}
+		if !strings.Contains(got[0].Narrative, "<!-- recorded:") {
+			t.Errorf("mid-narrative trailer should remain; got %q", got[0].Narrative)
+		}
+		if !strings.Contains(got[0].Narrative, "After.") {
+			t.Errorf("content after mid-narrative trailer should remain; got %q", got[0].Narrative)
+		}
+	})
+
+	t.Run("unterminated_trailer_survives_without_panic", func(t *testing.T) {
+		// Defence in depth: the regex must not hang or panic on an
+		// unterminated comment. parseIterations returning normally is the
+		// assertion.
+		content := "### Iteration 9 — Broken (2026-01-09)\n\nBody.\n\n<!-- recorded: host=foo user=bar\n"
+		got := parseIterations(content)
+		if len(got) != 1 {
+			t.Fatalf("parseIterations returned %d entries, want 1", len(got))
+		}
+		// Unterminated comment doesn't match the anchored strip regex, so the
+		// fragment is retained inside the narrative. That's the reasonable
+		// fallback; we just assert no panic and a populated entry.
+		if got[0].Narrative == "" {
+			t.Errorf("narrative should contain body text on malformed trailer; got empty")
+		}
+	})
+}
+
 func TestGetIterationsEmptyVault(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
 		"Projects/testproj/agentctx/iterations.md": "# No iterations yet\n",
