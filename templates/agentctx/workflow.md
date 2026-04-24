@@ -25,7 +25,7 @@
 - **Plan Mode** for any non-trivial task (3+ steps or architectural decisions). If work goes sideways, stop and re-plan. After creating a plan, move it from `~/.claude/plans/` to `agentctx/tasks/` — plans live in the vault, not the ephemeral Claude plans directory.
 - **Subagents** for parallel exploration and research to keep main context clean. One concern per subagent.
 - **Self-improvement:** after any user correction, save the pattern — to auto-memory (type: feedback) for personal preferences, or to `Knowledge/learnings/` for cross-project lessons — so the mistake is not repeated.
-- **Verification before done:** prove it works with tests, logs, or demonstrations. No task is "done" until the user says so and commits. No warnings or diagnostics in committed code.
+- **Verification before done:** prove it works with tests, logs, or demonstrations. No task is "done" until the user says so and merges. Zero warnings or diagnostics are allowed to merge into `main`; intermediate commits on worktrees or an in-progress feature branch may carry transient diagnostics that clear as later phases land, but they must resolve before aggregate merge.
 - **Demand elegance:** for non-trivial changes, pause to ask "is there a more elegant way?" Skip for simple obvious fixes.
 - **Bug fixing:** generate a plan from logs, errors, and failing tests — review before coding. Never fix a test without understanding the root cause.
 
