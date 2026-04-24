@@ -27,6 +27,10 @@ type Provenance struct {
 // deterministically. Tests may replace this; production uses os.Hostname.
 var hostnameFunc = os.Hostname
 
+// cwdFunc is the test seam for exercising os.Getwd() failure paths
+// deterministically. Tests may replace this; production uses os.Getwd.
+var cwdFunc = os.Getwd
+
 // Stamp resolves host, user, and cwd at the moment of the call. Safe on
 // all failure paths — never panics, never returns an error.
 func Stamp() Provenance {
@@ -70,10 +74,16 @@ func user() string {
 	return u.Username
 }
 
-// cwd resolves the current working directory. Returns empty string if the
-// cwd has been deleted underneath us or the lookup otherwise fails.
+// cwd resolves the current working directory, preferring the
+// VIBE_VAULT_CWD env override so integration tests and operators
+// can pin a deterministic value without monkey-patching. Mirrors
+// the hostname() precedent. Returns empty string if the cwd has
+// been deleted underneath us or the lookup otherwise fails.
 func cwd() string {
-	d, err := os.Getwd()
+	if v := os.Getenv("VIBE_VAULT_CWD"); v != "" {
+		return v
+	}
+	d, err := cwdFunc()
 	if err != nil {
 		return ""
 	}

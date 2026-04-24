@@ -125,6 +125,7 @@ func buildEnvWithHomeUser(xdgConfigHome, home, user string) []string {
 		"USER=" + user,
 		"LOGNAME=" + user,
 		"VIBE_VAULT_HOSTNAME=vibe-vault-test",
+		"VIBE_VAULT_CWD=/vibe-vault-test-cwd",
 	}
 }
 
