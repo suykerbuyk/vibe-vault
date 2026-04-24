@@ -515,7 +515,7 @@ func TestIntegration(t *testing.T) {
 		if !ok {
 			t.Error("session-narr-001 not in index")
 		}
-		if commits, ok := narrEntry["commits"].([]interface{}); ok {
+		if commits, ok := narrEntry["commits"].([]any); ok {
 			if len(commits) != 1 || commits[0] != "abc1234" {
 				t.Errorf("index commits = %v, want [abc1234]", commits)
 			}
@@ -543,7 +543,7 @@ func TestIntegration(t *testing.T) {
 		// Commits survive rebuild
 		narrEntry, ok := idx["session-narr-001"]
 		if ok {
-			if commits, ok := narrEntry["commits"].([]interface{}); ok {
+			if commits, ok := narrEntry["commits"].([]any); ok {
 				if len(commits) != 1 || commits[0] != "abc1234" {
 					t.Errorf("rebuilt index commits = %v, want [abc1234]", commits)
 				}
@@ -819,7 +819,7 @@ func TestIntegration(t *testing.T) {
 
 		// JSON format
 		jsonStdout := mustRunVV(t, env, "inject", "--project", "myproject", "--format", "json")
-		var parsed map[string]interface{}
+		var parsed map[string]any
 		if err := json.Unmarshal([]byte(jsonStdout), &parsed); err != nil {
 			t.Fatalf("invalid JSON from inject: %v\noutput: %s", err, jsonStdout)
 		}
@@ -1321,7 +1321,7 @@ func TestIntegration(t *testing.T) {
 	t.Run("export", func(t *testing.T) {
 		// JSON export (all sessions)
 		jsonStdout := mustRunVV(t, env, "export")
-		var jsonData []map[string]interface{}
+		var jsonData []map[string]any
 		if err := json.Unmarshal([]byte(jsonStdout), &jsonData); err != nil {
 			t.Fatalf("invalid JSON from export: %v\noutput: %s", err, jsonStdout)
 		}
@@ -1331,7 +1331,7 @@ func TestIntegration(t *testing.T) {
 
 		// JSON export filtered by project
 		projStdout := mustRunVV(t, env, "export", "--project", "myproject")
-		var projData []map[string]interface{}
+		var projData []map[string]any
 		if err := json.Unmarshal([]byte(projStdout), &projData); err != nil {
 			t.Fatalf("invalid JSON from filtered export: %v", err)
 		}
@@ -1419,9 +1419,9 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("expected 6 response lines, got %d:\n%s", len(lines), stdout)
 		}
 
-		var responses []map[string]interface{}
+		var responses []map[string]any
 		for i, line := range lines {
-			var resp map[string]interface{}
+			var resp map[string]any
 			if err := json.Unmarshal([]byte(line), &resp); err != nil {
 				t.Fatalf("response %d: invalid JSON: %v\nline: %s", i, err, line)
 			}
@@ -1429,19 +1429,19 @@ func TestIntegration(t *testing.T) {
 		}
 
 		// Response 0: initialize — should have serverInfo
-		if r := responses[0]["result"].(map[string]interface{}); r["serverInfo"] == nil {
+		if r := responses[0]["result"].(map[string]any); r["serverInfo"] == nil {
 			t.Error("initialize: missing serverInfo")
 		}
 
 		// Response 1: tools/list — should have tools array
-		toolsResult := responses[1]["result"].(map[string]interface{})
-		tools := toolsResult["tools"].([]interface{})
+		toolsResult := responses[1]["result"].(map[string]any)
+		tools := toolsResult["tools"].([]any)
 		if len(tools) != 20 {
 			t.Errorf("tools/list: expected 20 tools, got %d", len(tools))
 		}
 		toolNames := make(map[string]bool)
 		for _, tool := range tools {
-			toolNames[tool.(map[string]interface{})["name"].(string)] = true
+			toolNames[tool.(map[string]any)["name"].(string)] = true
 		}
 		if !toolNames["vv_get_project_context"] {
 			t.Error("tools/list: missing vv_get_project_context")
@@ -1451,13 +1451,13 @@ func TestIntegration(t *testing.T) {
 		}
 
 		// Response 2: vv_list_projects — should return project data
-		listResult := responses[2]["result"].(map[string]interface{})
-		content := listResult["content"].([]interface{})
+		listResult := responses[2]["result"].(map[string]any)
+		content := listResult["content"].([]any)
 		if len(content) == 0 {
 			t.Fatal("vv_list_projects: empty content")
 		}
-		listText := content[0].(map[string]interface{})["text"].(string)
-		var projects []map[string]interface{}
+		listText := content[0].(map[string]any)["text"].(string)
+		var projects []map[string]any
 		if err := json.Unmarshal([]byte(listText), &projects); err != nil {
 			t.Fatalf("vv_list_projects: invalid JSON in text: %v", err)
 		}
@@ -1466,10 +1466,10 @@ func TestIntegration(t *testing.T) {
 		}
 
 		// Response 3: vv_get_project_context — should return context for myproject
-		ctxResult := responses[3]["result"].(map[string]interface{})
-		ctxContent := ctxResult["content"].([]interface{})
-		ctxText := ctxContent[0].(map[string]interface{})["text"].(string)
-		var ctxParsed map[string]interface{}
+		ctxResult := responses[3]["result"].(map[string]any)
+		ctxContent := ctxResult["content"].([]any)
+		ctxText := ctxContent[0].(map[string]any)["text"].(string)
+		var ctxParsed map[string]any
 		if err := json.Unmarshal([]byte(ctxText), &ctxParsed); err != nil {
 			t.Fatalf("vv_get_project_context: invalid JSON: %v", err)
 		}
@@ -1478,7 +1478,7 @@ func TestIntegration(t *testing.T) {
 		}
 
 		// Response 4: unknown tool — should have isError
-		unknownResult := responses[4]["result"].(map[string]interface{})
+		unknownResult := responses[4]["result"].(map[string]any)
 		if unknownResult["isError"] != true {
 			t.Error("unknown tool: expected isError=true")
 		}
