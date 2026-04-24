@@ -20,6 +20,13 @@ func InitTestRepo(t *testing.T) string {
 	dir := t.TempDir()
 
 	GitRun(t, dir, "init", "-b", "main")
+	// Write identity into repo-local config so any git invocation in this
+	// dir — including subprocess ones from production code under test —
+	// finds a committer identity. GitRun's env-var injection only covers
+	// commands it runs itself; code paths like vaultsync.gitCmd need the
+	// identity in .git/config. CI runners have no global identity.
+	GitRun(t, dir, "config", "user.email", "test@test.com")
+	GitRun(t, dir, "config", "user.name", "test")
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("init"), 0o644); err != nil {
 		t.Fatalf("write README.md: %v", err)
 	}

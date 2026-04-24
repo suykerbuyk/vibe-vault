@@ -74,7 +74,7 @@ uninstall: ## Remove installed binary and man pages
 
 ##@ Workflow
 .PHONY: pre-commit hooks
-pre-commit: vet test integration ## Run vet + test + integration (pre-commit check)
+pre-commit: vet lint test integration ## Run vet + lint + test + integration (pre-commit check)
 
 hooks: ## Configure git hooks path
 	git config core.hooksPath .githooks
