@@ -112,6 +112,23 @@ func buildEnvWithHome(xdgConfigHome, home string) []string {
 	}
 }
 
+// buildEnvWithHomeUser builds an env slice with HOME, USER, LOGNAME, and the
+// VIBE_VAULT_HOSTNAME sentinel set. The first caller lands in Phase 4 of
+// vault-write-provenance (provenance_in_vault_writes subtest); until then the
+// helper is intentionally unused.
+//
+//nolint:unused // Phase 4 of vault-write-provenance will add the first caller.
+func buildEnvWithHomeUser(xdgConfigHome, home, user string) []string {
+	return []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + home,
+		"XDG_CONFIG_HOME=" + xdgConfigHome,
+		"USER=" + user,
+		"LOGNAME=" + user,
+		"VIBE_VAULT_HOSTNAME=vibe-vault-test",
+	}
+}
+
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
