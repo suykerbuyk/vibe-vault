@@ -199,6 +199,10 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 	p := meta.Stamp()
 	noteData.Host = p.Host
 	noteData.User = p.User
+	noteData.CWD = meta.SanitizeCWDForEmit(p.CWD, cfg.VaultPath)
+	if noteData.CWD != "" {
+		noteData.OriginProject = DetectProject(p.CWD)
+	}
 
 	// Fix source-aware fallback summary (e.g. "Zed agent session" instead of "Claude Code session")
 	if opts.Source != "" && noteData.Summary == "Claude Code session" {

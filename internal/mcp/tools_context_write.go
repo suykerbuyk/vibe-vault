@@ -18,6 +18,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/index"
 	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
 	"github.com/suykerbuyk/vibe-vault/internal/meta"
+	"github.com/suykerbuyk/vibe-vault/internal/session"
 )
 
 // NewUpdateResumeTool creates the vv_update_resume tool.
@@ -133,13 +134,33 @@ func iterationHeading(num int, title, date string) string {
 }
 
 // provenanceTrailer returns an HTML-comment trailer suitable for appending
-// after an iteration narrative, or "" if both host and user are empty.
-// Format: "\n\n<!-- recorded: host=HOST user=USER -->"
-func provenanceTrailer(p meta.Provenance) string {
-	if p.Host == "" && p.User == "" {
+// after an iteration narrative, or "" if all stamped fields are empty.
+// Format: "\n\n<!-- recorded: host=H user=U cwd=C origin=P -->" with each
+// token omitted when its value is empty.
+func provenanceTrailer(p meta.Provenance, vaultPath string) string {
+	cwd := meta.SanitizeCWDForEmit(p.CWD, vaultPath)
+	var origin string
+	if cwd != "" {
+		origin = session.DetectProject(p.CWD)
+	}
+
+	var parts []string
+	if p.Host != "" {
+		parts = append(parts, "host="+p.Host)
+	}
+	if p.User != "" {
+		parts = append(parts, "user="+p.User)
+	}
+	if cwd != "" {
+		parts = append(parts, "cwd="+cwd)
+	}
+	if origin != "" {
+		parts = append(parts, "origin="+origin)
+	}
+	if len(parts) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("\n\n<!-- recorded: host=%s user=%s -->", p.Host, p.User)
+	return "\n\n<!-- recorded: " + strings.Join(parts, " ") + " -->"
 }
 
 // scanIterationNumbers parses all iteration numbers from an iterations.md body.
@@ -262,7 +283,7 @@ func NewAppendIterationTool(cfg config.Config) Tool {
 			// Build the iteration block
 			heading := iterationHeading(iterNum, args.Title, date)
 			narrative := strings.TrimRight(args.Narrative, "\n")
-			trailer := provenanceTrailer(meta.Stamp())
+			trailer := provenanceTrailer(meta.Stamp(), cfg.VaultPath)
 			block := fmt.Sprintf("\n%s\n\n%s%s\n", heading, narrative, trailer)
 
 			// Ensure content ends with newline before appending

@@ -79,6 +79,8 @@ type NoteData struct {
 	Source              string   // source identifier ("zed", etc.; empty = claude-code)
 	Host                string   // hostname captured at write time (empty = resolver failed)
 	User                string   // acting user captured at write time (empty = resolver failed)
+	CWD                 string   // cwd captured at write time, home-compressed + sanitized (empty = resolver failed or inside vault)
+	OriginProject       string   // project resolved from stamp cwd (empty = DetectProject saw no cwd)
 }
 
 // SessionNote renders a full Obsidian markdown note from NoteData.
@@ -172,6 +174,12 @@ func SessionNote(d NoteData) string {
 	}
 	if d.User != "" {
 		fmt.Fprintf(&b, "user: %s\n", d.User)
+	}
+	if d.CWD != "" {
+		fmt.Fprintf(&b, "cwd: %s\n", d.CWD)
+	}
+	if d.OriginProject != "" {
+		fmt.Fprintf(&b, "origin_project: %s\n", d.OriginProject)
 	}
 	fmt.Fprintf(&b, "summary: \"%s\"\n", escapeYAML(d.Summary))
 	if d.PreviousNote != "" {
