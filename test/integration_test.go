@@ -1870,15 +1870,23 @@ Body content for the reference-type sample learning.
 		// would hide exactly what we're asserting).
 		iterPath := filepath.Join(vaultPath, "Projects", "ctx-project", "agentctx", "iterations.md")
 		iterBody := readFile(t, iterPath)
-		wantTrailer := "<!-- recorded: host=vibe-vault-test user=vibe-vault-user -->"
+		// Phase 6.1 widened the trailer to the four-token "host user cwd origin"
+		// shape. Under buildEnvWithHomeUser the sentinels produce:
+		//   - host: VIBE_VAULT_HOSTNAME="vibe-vault-test"
+		//   - user: USER="vibe-vault-user"
+		//   - cwd:  VIBE_VAULT_CWD="/vibe-vault-test-cwd" (SanitizeCWDForEmit
+		//     leaves absolute non-home paths unchanged; not inside the test vault)
+		//   - origin: DetectProject("/vibe-vault-test-cwd") → "vibe-vault-test-cwd"
+		//     (basename fallback — no identity file, no git remote)
+		wantTrailer := "<!-- recorded: host=vibe-vault-test user=vibe-vault-user cwd=/vibe-vault-test-cwd origin=vibe-vault-test-cwd -->"
 		if !strings.Contains(iterBody, wantTrailer) {
 			t.Errorf("iterations.md missing provenance trailer %q:\n%s", wantTrailer, iterBody)
 		}
 		trimmedIter := strings.TrimRight(iterBody, "\n")
 		if !strings.HasSuffix(trimmedIter, wantTrailer) {
 			tail := trimmedIter
-			if len(tail) > 120 {
-				tail = tail[len(tail)-120:]
+			if len(tail) > 200 {
+				tail = tail[len(tail)-200:]
 			}
 			t.Errorf("iterations.md: trailer not at end-of-file; tail = %q", tail)
 		}
@@ -1907,9 +1915,27 @@ Body content for the reference-type sample learning.
 		for _, it := range getParsed.Iterations {
 			if it.Title == "Provenance integration check" {
 				foundOurs = true
-				if strings.Contains(it.Narrative, "<!-- recorded:") {
-					t.Errorf("vv_get_iterations: narrative still carries trailer after strip: %q",
-						it.Narrative)
+				// Parser-strip gate: the narrative returned by vv_get_iterations
+				// must carry zero provenance leakage against the four-token
+				// trailer shape. Each leak token is a distinct regression class:
+				//   - "<!-- recorded:" — whole-trailer strip failure
+				//   - "cwd=" / "origin=" — strip matched but truncated partway
+				//   - "VIBE_VAULT_CWD" — env var name leaked (would indicate the
+				//     stamper swallowed its own key, not plausible but cheap gate)
+				//   - "vibe-vault-test-cwd" — the sentinel path or origin value
+				//     escaped the strip region.
+				leakTokens := []string{
+					"<!-- recorded:",
+					"cwd=",
+					"origin=",
+					"VIBE_VAULT_CWD",
+					"vibe-vault-test-cwd",
+				}
+				for _, leak := range leakTokens {
+					if strings.Contains(it.Narrative, leak) {
+						t.Errorf("vv_get_iterations: narrative leaked %q after strip: %q",
+							leak, it.Narrative)
+					}
 				}
 				if !strings.Contains(it.Narrative,
 					"Body of the iteration narrative for provenance test.") {
@@ -2047,6 +2073,20 @@ Body content for the reference-type sample learning.
 		}
 		if !strings.Contains(beforeSummary, "user: vibe-vault-user") {
 			t.Errorf("session note: user: line missing or after summary:; frontmatter:\n%s",
+				frontmatter)
+		}
+		// Phase 6.1 extension: cwd: and origin_project: are emitted between
+		// user: and summary: in the NoteData → SessionNote rendering block.
+		// Under buildEnvWithHomeUser the VIBE_VAULT_CWD sentinel pins cwd to
+		// "/vibe-vault-test-cwd" (SanitizeCWDForEmit leaves absolute paths
+		// outside $HOME and outside cfg.VaultPath unchanged) and DetectProject
+		// resolves that path to "vibe-vault-test-cwd" via basename fallback.
+		if !strings.Contains(beforeSummary, "cwd: /vibe-vault-test-cwd") {
+			t.Errorf("session note: cwd: line missing or after summary:; frontmatter:\n%s",
+				frontmatter)
+		}
+		if !strings.Contains(beforeSummary, "origin_project: vibe-vault-test-cwd") {
+			t.Errorf("session note: origin_project: line missing or after summary:; frontmatter:\n%s",
 				frontmatter)
 		}
 
@@ -2335,9 +2375,18 @@ Body content for the reference-type sample learning.
 		// doesn't match — verified against the real vault at commit time.
 		// This keeps the entire vault watched without directory-level
 		// blind spots.
+		//
+		// Phase 6.4 adds complementary cwd-sentinel patterns for the
+		// VIBE_VAULT_CWD="/vibe-vault-test-cwd" stamp. Any leak now trips
+		// at least one of three independent signals: mtime/sha snapshot,
+		// hostname grep, cwd grep. The cwd patterns mirror the hostname
+		// patterns' anchoring (line-anchored, column-0) so quoted prose
+		// in human-authored docs doesn't false-positive.
 		sentinelREs := []*regexp.Regexp{
 			regexp.MustCompile(`(?m)^host: vibe-vault-test\b`),
 			regexp.MustCompile(`(?m)^<!--\s*recorded:\s*host=vibe-vault-test\b`),
+			regexp.MustCompile(`(?m)^cwd:\s*/vibe-vault-test-cwd\b`),
+			regexp.MustCompile(`(?m)^<!--\s*recorded:[^\n]*cwd=/vibe-vault-test-cwd\b`),
 		}
 		// Reuse the same protected-root list the snapshot pass walked.
 		// Any sentinel hit under these roots is already accounted for by

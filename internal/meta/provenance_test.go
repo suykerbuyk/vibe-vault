@@ -122,6 +122,68 @@ func TestStampHostnameFailure(t *testing.T) {
 	}
 }
 
+// TestStampCWDOverride asserts VIBE_VAULT_CWD short-circuits the cwdFunc
+// call entirely, mirroring the VIBE_VAULT_HOSTNAME pattern. We install a
+// cwdFunc that would fail the test if it were reached.
+func TestStampCWDOverride(t *testing.T) {
+	t.Setenv("VIBE_VAULT_CWD", "/sentinel")
+	t.Setenv("VIBE_VAULT_HOSTNAME", "host-pin")
+	t.Setenv("USER", "user-pin")
+
+	original := cwdFunc
+	t.Cleanup(func() { cwdFunc = original })
+	cwdFunc = func() (string, error) {
+		t.Fatalf("cwdFunc should not be called when VIBE_VAULT_CWD is set")
+		return "", nil
+	}
+
+	got := Stamp()
+	if got.CWD != "/sentinel" {
+		t.Errorf("CWD = %q, want %q", got.CWD, "/sentinel")
+	}
+}
+
+// TestStampCWDFallback asserts that when VIBE_VAULT_CWD is empty the resolver
+// falls through to cwdFunc and returns its value verbatim. Covers the
+// happy path of the testability seam added in Phase 6.0.
+func TestStampCWDFallback(t *testing.T) {
+	t.Setenv("VIBE_VAULT_CWD", "")
+	t.Setenv("VIBE_VAULT_HOSTNAME", "host-pin")
+	t.Setenv("USER", "user-pin")
+
+	original := cwdFunc
+	t.Cleanup(func() { cwdFunc = original })
+	cwdFunc = func() (string, error) {
+		return "/fake-cwd", nil
+	}
+
+	got := Stamp()
+	if got.CWD != "/fake-cwd" {
+		t.Errorf("CWD = %q, want %q", got.CWD, "/fake-cwd")
+	}
+}
+
+// TestStampCWDFailure replaces cwdFunc with a failing func and clears
+// VIBE_VAULT_CWD so the env override doesn't short-circuit the error path.
+// Stamp must degrade to CWD="" without panicking — symmetric to the
+// hostname-failure contract.
+func TestStampCWDFailure(t *testing.T) {
+	t.Setenv("VIBE_VAULT_CWD", "")
+	t.Setenv("VIBE_VAULT_HOSTNAME", "host-pin")
+	t.Setenv("USER", "user-pin")
+
+	original := cwdFunc
+	t.Cleanup(func() { cwdFunc = original })
+	cwdFunc = func() (string, error) {
+		return "", errors.New("boom")
+	}
+
+	got := Stamp()
+	if got.CWD != "" {
+		t.Errorf("CWD = %q, want \"\" on cwdFunc failure", got.CWD)
+	}
+}
+
 // TestStampCWDDeleted exercises the cwd()-failure path by chdir-ing into a
 // tempdir and removing it before calling Stamp. On Linux os.Getwd returns an
 // error (or a path suffixed with " (deleted)") once the inode is gone — both

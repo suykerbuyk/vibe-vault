@@ -389,6 +389,83 @@ func TestParseIterationsMalformedTrailer(t *testing.T) {
 	})
 }
 
+// TestParseIterationsStripsFourTokenTrailer is the Phase 6.4 regression gate
+// for the extended trailer shape introduced in Phase 6.1: the strip regex
+// must handle the four-token "host=H user=U cwd=C origin=P" form without
+// leaking any token back into the narrative.
+func TestParseIterationsStripsFourTokenTrailer(t *testing.T) {
+	content := "### Iteration 100 — Four token (2026-04-24)\n\nBody text for four-token trailer.\n\n<!-- recorded: host=H user=U cwd=/some/cwd origin=myproj -->\n"
+	got := parseIterations(content)
+	if len(got) != 1 {
+		t.Fatalf("parseIterations returned %d entries, want 1", len(got))
+	}
+	if got[0].Narrative != "Body text for four-token trailer." {
+		t.Errorf("Narrative = %q, want %q", got[0].Narrative, "Body text for four-token trailer.")
+	}
+	for _, leak := range []string{"cwd=", "origin=", "<!-- recorded:", "host=", "user=", "/some/cwd", "myproj"} {
+		if strings.Contains(got[0].Narrative, leak) {
+			t.Errorf("Narrative leaked %q: %q", leak, got[0].Narrative)
+		}
+	}
+}
+
+// TestParseIterationsStripsPartialTrailer exercises the space-separated
+// conditional-token format. Phase 6.1's provenanceTrailer omits individual
+// tokens when their value is empty, so real trailers may carry any subset
+// of host/user/cwd/origin. The strip regex is value-agnostic ([^\n]*) —
+// this test pins that it stays value-agnostic regardless of token subset.
+func TestParseIterationsStripsPartialTrailer(t *testing.T) {
+	cases := []struct {
+		name    string
+		trailer string
+	}{
+		{"only_cwd_and_origin", "<!-- recorded: cwd=/only/cwd origin=onlyorigin -->"},
+		{"only_host_and_cwd", "<!-- recorded: host=H cwd=/host/cwd -->"},
+		{"only_origin", "<!-- recorded: origin=solo -->"},
+		{"only_cwd", "<!-- recorded: cwd=/only -->"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			content := "### Iteration 101 — Partial (2026-04-24)\n\nPartial body.\n\n" + tc.trailer + "\n"
+			got := parseIterations(content)
+			if len(got) != 1 {
+				t.Fatalf("parseIterations returned %d entries, want 1", len(got))
+			}
+			if got[0].Narrative != "Partial body." {
+				t.Errorf("Narrative = %q, want %q", got[0].Narrative, "Partial body.")
+			}
+			for _, leak := range []string{"cwd=", "origin=", "host=", "user=", "<!-- recorded:"} {
+				if strings.Contains(got[0].Narrative, leak) {
+					t.Errorf("%s: Narrative leaked %q: %q", tc.name, leak, got[0].Narrative)
+				}
+			}
+		})
+	}
+}
+
+// TestParseIterationsStripsTrailerWithMultilineBody regresses the end-of-string
+// anchor: a multi-paragraph narrative preceding the four-token trailer must be
+// preserved verbatim while only the trailer is excised. If the strip regex
+// ever drops its \z anchor, interior paragraphs (which contain no "<!-- recorded:"
+// fragments) would still be safe — but this test adds belt-and-suspenders
+// coverage against future tightening that might swallow the final paragraph.
+func TestParseIterationsStripsTrailerWithMultilineBody(t *testing.T) {
+	content := "### Iteration 102 — Multiline (2026-04-24)\n\nFirst paragraph of body.\n\nSecond paragraph, with detail.\n\nThird paragraph — final thought.\n\n<!-- recorded: host=H user=U cwd=/multi/cwd origin=multiproj -->\n"
+	got := parseIterations(content)
+	if len(got) != 1 {
+		t.Fatalf("parseIterations returned %d entries, want 1", len(got))
+	}
+	wantNarr := "First paragraph of body.\n\nSecond paragraph, with detail.\n\nThird paragraph — final thought."
+	if got[0].Narrative != wantNarr {
+		t.Errorf("Narrative = %q, want %q", got[0].Narrative, wantNarr)
+	}
+	for _, leak := range []string{"cwd=", "origin=", "<!-- recorded:", "/multi/cwd", "multiproj"} {
+		if strings.Contains(got[0].Narrative, leak) {
+			t.Errorf("Narrative leaked %q: %q", leak, got[0].Narrative)
+		}
+	}
+}
+
 func TestGetIterationsEmptyVault(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
 		"Projects/testproj/agentctx/iterations.md": "# No iterations yet\n",
