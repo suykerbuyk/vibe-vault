@@ -121,7 +121,7 @@ func listRemotes(vaultPath string) ([]string, error) {
 		return nil, nil
 	}
 	var remotes []string
-	for _, r := range strings.Split(out, "\n") {
+	for r := range strings.SplitSeq(out, "\n") {
 		r = strings.TrimSpace(r)
 		if r != "" {
 			remotes = append(remotes, r)
@@ -352,8 +352,7 @@ func resolveConflicts(vaultPath string, result *PullResult) (bool, error) {
 		return false, nil
 	}
 
-	files := strings.Split(out, "\n")
-	for _, f := range files {
+	for f := range strings.SplitSeq(out, "\n") {
 		f = strings.TrimSpace(f)
 		if f == "" {
 			continue
