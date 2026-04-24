@@ -23,6 +23,11 @@ import (
 // parentheses is the anchor and the title capture is non-greedy.
 var iterationHeadingRegexp = regexp.MustCompile(`^### Iteration (\d+)\s*—\s*(.+?)\s*\((\d{4}-\d{2}-\d{2})\)\s*$`)
 
+// provenanceTrailerRE matches the HTML-comment provenance trailer appended by
+// vv_append_iteration to an iteration narrative. Anchored to end-of-string so
+// the strip is a no-op on blocks without a trailer.
+var provenanceTrailerRE = regexp.MustCompile(`\n*<!-- recorded:[^\n]*-->\s*\z`)
+
 // Iteration is one parsed entry from iterations.md. Narrative uses omitempty
 // so the compact "table" response format can drop narrative bodies cleanly.
 type Iteration struct {
@@ -46,7 +51,9 @@ func parseIterations(content string) []Iteration {
 		if current == nil {
 			return
 		}
-		current.Narrative = strings.TrimSpace(buf.String())
+		narr := strings.TrimSpace(buf.String())
+		narr = provenanceTrailerRE.ReplaceAllString(narr, "")
+		current.Narrative = strings.TrimRight(narr, "\n")
 		out = append(out, *current)
 		buf.Reset()
 		current = nil

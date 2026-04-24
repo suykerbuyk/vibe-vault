@@ -17,6 +17,7 @@ import (
 	vvcontext "github.com/suykerbuyk/vibe-vault/internal/context"
 	"github.com/suykerbuyk/vibe-vault/internal/index"
 	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
+	"github.com/suykerbuyk/vibe-vault/internal/meta"
 )
 
 // NewUpdateResumeTool creates the vv_update_resume tool.
@@ -129,6 +130,16 @@ var iterationRegexp = regexp.MustCompile(`^### Iteration (\d+)`)
 // iterationHeading builds the canonical heading line for an iteration.
 func iterationHeading(num int, title, date string) string {
 	return fmt.Sprintf("### Iteration %d — %s (%s)", num, title, date)
+}
+
+// provenanceTrailer returns an HTML-comment trailer suitable for appending
+// after an iteration narrative, or "" if both host and user are empty.
+// Format: "\n\n<!-- recorded: host=HOST user=USER -->"
+func provenanceTrailer(p meta.Provenance) string {
+	if p.Host == "" && p.User == "" {
+		return ""
+	}
+	return fmt.Sprintf("\n\n<!-- recorded: host=%s user=%s -->", p.Host, p.User)
 }
 
 // scanIterationNumbers parses all iteration numbers from an iterations.md body.
@@ -250,8 +261,9 @@ func NewAppendIterationTool(cfg config.Config) Tool {
 
 			// Build the iteration block
 			heading := iterationHeading(iterNum, args.Title, date)
-			block := fmt.Sprintf("\n%s\n\n%s\n",
-				heading, strings.TrimRight(args.Narrative, "\n"))
+			narrative := strings.TrimRight(args.Narrative, "\n")
+			trailer := provenanceTrailer(meta.Stamp())
+			block := fmt.Sprintf("\n%s\n\n%s%s\n", heading, narrative, trailer)
 
 			// Ensure content ends with newline before appending
 			if !strings.HasSuffix(content, "\n") {
