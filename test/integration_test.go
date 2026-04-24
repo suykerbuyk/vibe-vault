@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -2326,24 +2327,21 @@ Body content for the reference-type sample learning.
 		if canaryRealVault == "" {
 			return
 		}
-		sentinels := []string{
-			"host: vibe-vault-test",
-			"host=vibe-vault-test",
+		// Line-anchored patterns matching ONLY what the provenance writers
+		// produce: a bare `host: vibe-vault-test` YAML line, or a full
+		// iteration trailer starting at column 0. Human-authored prose
+		// that quotes these strings (in code spans, inline, indented)
+		// doesn't match — verified against the real vault at commit time.
+		// This keeps the entire vault watched without directory-level
+		// blind spots.
+		sentinelREs := []*regexp.Regexp{
+			regexp.MustCompile(`(?m)^host: vibe-vault-test\b`),
+			regexp.MustCompile(`(?m)^<!--\s*recorded:\s*host=vibe-vault-test\b`),
 		}
 		// Reuse the same protected-root list the snapshot pass walked.
 		// Any sentinel hit under these roots is already accounted for by
 		// the snapshot — suppress it here so we only flag true escapes.
 		skipRoots := canaryProtectedRoots(canaryRealVault)
-		// Additional documentation-prose exception: vibe-vault's own
-		// agentctx/tasks/ and sessions/ trees contain planning docs that
-		// legitimately quote the sentinel strings (e.g. the plan for this
-		// very feature). These are human-authored markdown, not outputs
-		// of the binary under test.
-		docSkipRoots := []string{
-			filepath.Join(canaryRealVault, "Projects", "vibe-vault", "agentctx", "tasks"),
-			filepath.Join(canaryRealVault, "Projects", "vibe-vault", "sessions"),
-		}
-		skipRoots = append(skipRoots, docSkipRoots...)
 		// Extensions that are obviously binary and not worth reading.
 		skipExts := map[string]struct{}{
 			".zst": {}, ".gz": {}, ".png": {}, ".jpg": {}, ".jpeg": {},
@@ -2384,16 +2382,16 @@ Body content for the reference-type sample learning.
 			n, _ := io.ReadFull(f, buf)
 			_ = f.Close()
 			data := buf[:n]
-			for _, sentinel := range sentinels {
-				idx := bytes.Index(data, []byte(sentinel))
-				if idx < 0 {
+			for _, re := range sentinelREs {
+				loc := re.FindIndex(data)
+				if loc == nil {
 					continue
 				}
-				// Report relative path + the matched line for debugging.
 				rel, relErr := filepath.Rel(canaryRealVault, path)
 				if relErr != nil {
 					rel = path
 				}
+				idx := loc[0]
 				lineStart := bytes.LastIndexByte(data[:idx], '\n') + 1
 				lineEnd := bytes.IndexByte(data[idx:], '\n')
 				var line string
@@ -2402,8 +2400,8 @@ Body content for the reference-type sample learning.
 				} else {
 					line = string(data[lineStart : idx+lineEnd])
 				}
-				t.Errorf("sentinel canary: %s matched in real vault at %s: %q",
-					sentinel, rel, strings.TrimSpace(line))
+				t.Errorf("sentinel canary: pattern %q matched in real vault at %s: %q",
+					re.String(), rel, strings.TrimSpace(line))
 				break
 			}
 			return nil
