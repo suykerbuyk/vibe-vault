@@ -2480,6 +2480,17 @@ type canarySnapshot struct {
 	// configFile is the snapshot of $HOME/.config/vibe-vault/config.toml, or
 	// nil if the operator config was not present.
 	configFile *canaryFileInfo
+	// homeSingleFiles captures per-path snapshots of operator-private files
+	// under $HOME that are category-C write targets (see the HOME-sandbox
+	// classification comment near buildEnv). Keys are absolute paths; a nil
+	// value means the file did not exist at snapshot time. Covers:
+	//   - ~/.claude/settings.json            (hook.Install/Uninstall,
+	//                                         hook.InstallMCP/UninstallMCP,
+	//                                         hook.InstallClaudePlugin/Uninstall)
+	//   - ~/.config/zed/settings.json        (hook.InstallMCPZed/Uninstall)
+	//   - ~/.claude/plugins/known_marketplaces.json (plugin registry)
+	//   - ~/.claude/plugins/installed_plugins.json  (plugin registry)
+	homeSingleFiles map[string]*canaryFileInfo
 }
 
 // readOperatorConfigVaultPath parses the operator's real config directly —
@@ -2560,6 +2571,51 @@ func canaryShouldSkipFile(rel string) bool {
 		return true
 	}
 	return false
+}
+
+// canaryHomePrivateSingleFiles returns the list of absolute paths the canary
+// monitors as single files under $HOME. These correspond to category-C write
+// targets (see HOME-sandbox classification near buildEnv) — if any of these
+// files appears, disappears, or has its contents change across a
+// TestIntegration run, a subtest leaked writes to the operator's real
+// config. Returns an empty slice if $HOME cannot be resolved.
+func canaryHomePrivateSingleFiles() []string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	return []string{
+		filepath.Join(home, ".claude", "settings.json"),
+		filepath.Join(home, ".config", "zed", "settings.json"),
+		filepath.Join(home, ".claude", "plugins", "known_marketplaces.json"),
+		filepath.Join(home, ".claude", "plugins", "installed_plugins.json"),
+	}
+}
+
+// canaryHomePrivateRoots returns the list of directory roots under $HOME the
+// canary walks. Scoped narrowly to ~/.claude/plugins/cache/vibe-vault-local/
+// — Claude Code itself writes to other subtrees of ~/.claude/plugins/ during
+// normal operation (other plugins' caches, unrelated marketplace entries), so
+// a broader watch would false-positive on operator activity between the pre-
+// and post-snapshot. If noise appears, add entries to canaryShouldSkipFile
+// rather than widening scope. Missing paths are dropped so the caller has a
+// clean list.
+func canaryHomePrivateRoots() []string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	candidates := []string{
+		filepath.Join(home, ".claude", "plugins", "cache", "vibe-vault-local"),
+	}
+	var out []string
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // snapshotRoot walks a single root and returns a (relPath → info) map. If the
@@ -2644,6 +2700,32 @@ func snapshotConfigFile(configPath string) (*canaryFileInfo, error) {
 	}, nil
 }
 
+// snapshotSingleFile is the generalized form of snapshotConfigFile: capture
+// the mtime+sha of an arbitrary single regular file by absolute path, or
+// return nil if the file does not exist. Used for the category-C home-
+// private write-target snapshots (~/.claude/settings.json,
+// ~/.config/zed/settings.json, ~/.claude/plugins/*.json).
+func snapshotSingleFile(path string) (*canaryFileInfo, error) {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil
+	}
+	sum, err := sha256File(path)
+	if err != nil {
+		return nil, err
+	}
+	return &canaryFileInfo{
+		relPath: path,
+		mtime:   info.ModTime(),
+		sha256:  sum,
+	}, nil
+}
+
 // vaultCanarySnapshot is the entry point used at TestIntegration start. It
 // reads the operator config, discovers the real vault, and snapshots
 // protected paths. Returns (nil, "", "") if no operator config is present —
@@ -2663,12 +2745,28 @@ func vaultCanarySnapshot(t *testing.T) (*canarySnapshot, string, string) {
 
 // vaultCanarySnapshotAt takes a snapshot using an already-known config path
 // and real vault path (used for the "after" snapshot so we don't re-resolve).
+// Covers three distinct surfaces:
+//   - vault-rooted project subtrees (canaryProtectedRoots)
+//   - the operator's ~/.config/vibe-vault/config.toml (snap.configFile)
+//   - category-C home-private write targets: ~/.claude/settings.json,
+//     ~/.config/zed/settings.json, ~/.claude/plugins/{known_marketplaces,
+//     installed_plugins}.json (snap.homeSingleFiles), and the directory
+//     tree ~/.claude/plugins/cache/vibe-vault-local/ (added into
+//     snap.roots alongside the vault-rooted ones).
 func vaultCanarySnapshotAt(t *testing.T, configPath, realVault string) (*canarySnapshot, string, string) {
 	t.Helper()
 	snap := &canarySnapshot{
-		roots: make(map[string]map[string]canaryFileInfo),
+		roots:           make(map[string]map[string]canaryFileInfo),
+		homeSingleFiles: make(map[string]*canaryFileInfo),
 	}
 	for _, root := range canaryProtectedRoots(realVault) {
+		files, err := snapshotRoot(root)
+		if err != nil {
+			t.Fatalf("canary: snapshot %s: %v", root, err)
+		}
+		snap.roots[root] = files
+	}
+	for _, root := range canaryHomePrivateRoots() {
 		files, err := snapshotRoot(root)
 		if err != nil {
 			t.Fatalf("canary: snapshot %s: %v", root, err)
@@ -2680,6 +2778,13 @@ func vaultCanarySnapshotAt(t *testing.T, configPath, realVault string) (*canaryS
 		t.Fatalf("canary: snapshot config %s: %v", configPath, err)
 	}
 	snap.configFile = cfg
+	for _, path := range canaryHomePrivateSingleFiles() {
+		info, err := snapshotSingleFile(path)
+		if err != nil {
+			t.Fatalf("canary: snapshot %s: %v", path, err)
+		}
+		snap.homeSingleFiles[path] = info
+	}
 	return snap, configPath, realVault
 }
 
@@ -2702,6 +2807,41 @@ func vaultCanaryDiff(before, after *canarySnapshot) []string {
 				before.configFile.relPath,
 				before.configFile.mtime.Format(time.RFC3339Nano),
 				after.configFile.mtime.Format(time.RFC3339Nano)))
+		}
+	}
+
+	// Home-private single-file diffs (category-C write targets). Union the
+	// keys across before/after so a newly snapshotted path on a future run
+	// still reports cleanly. Paths absent from both maps contribute nothing.
+	homePathSet := make(map[string]struct{})
+	for p := range before.homeSingleFiles {
+		homePathSet[p] = struct{}{}
+	}
+	for p := range after.homeSingleFiles {
+		homePathSet[p] = struct{}{}
+	}
+	homePaths := make([]string, 0, len(homePathSet))
+	for p := range homePathSet {
+		homePaths = append(homePaths, p)
+	}
+	sort.Strings(homePaths)
+	for _, path := range homePaths {
+		bf := before.homeSingleFiles[path]
+		af := after.homeSingleFiles[path]
+		switch {
+		case bf == nil && af != nil:
+			out = append(out, fmt.Sprintf("ADDED    home-private: %s", path))
+		case bf != nil && af == nil:
+			out = append(out, fmt.Sprintf("REMOVED  home-private: %s", path))
+		case bf != nil && af != nil:
+			if bf.sha256 != af.sha256 {
+				out = append(out, fmt.Sprintf(
+					"MODIFIED home-private: %s  (mtime %s → %s, sha %s → %s)",
+					path,
+					bf.mtime.Format(time.RFC3339Nano),
+					af.mtime.Format(time.RFC3339Nano),
+					bf.sha256[:8], af.sha256[:8]))
+			}
 		}
 	}
 
