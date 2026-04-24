@@ -113,11 +113,9 @@ func buildEnvWithHome(xdgConfigHome, home string) []string {
 }
 
 // buildEnvWithHomeUser builds an env slice with HOME, USER, LOGNAME, and the
-// VIBE_VAULT_HOSTNAME sentinel set. The first caller lands in Phase 4 of
-// vault-write-provenance (provenance_in_vault_writes subtest); until then the
-// helper is intentionally unused.
-//
-//nolint:unused // Phase 4 of vault-write-provenance will add the first caller.
+// VIBE_VAULT_HOSTNAME sentinel set. Callers get a deterministic provenance
+// pair ("vibe-vault-test", user) so assertions against YAML frontmatter or
+// iteration trailers do not depend on the operator's real hostname / login.
 func buildEnvWithHomeUser(xdgConfigHome, home, user string) []string {
 	return []string{
 		"PATH=" + os.Getenv("PATH"),
@@ -1756,6 +1754,305 @@ Body content for the reference-type sample learning.
 		assertContains(t, stderr, "tools/call: vv_update_resume", "stderr log")
 	})
 
+	// provenance_in_vault_writes exercises the three provenance touchpoints
+	// (vv_append_iteration trailer, vv_get_iterations strip, vv_capture_session
+	// YAML frontmatter) end-to-end through the stdio MCP harness. All three
+	// touchpoints resolve host/user via meta.Stamp(), which this subtest pins
+	// to deterministic values via VIBE_VAULT_HOSTNAME and USER/LOGNAME.
+	//
+	// ctx-project was scaffolded at v10 by context_init_and_migrate, so
+	// {vaultPath}/Projects/ctx-project/agentctx/iterations.md already exists
+	// from the template and is safe to append to.
+	t.Run("provenance_in_vault_writes", func(t *testing.T) {
+		provHome := t.TempDir()
+		provEnv := buildEnvWithHomeUser(xdgConfigHome, provHome, "vibe-vault-user")
+
+		// --- (1) vv_append_iteration: trailer must land on disk ---
+		appendArgs, err := json.Marshal(struct {
+			Project   string `json:"project"`
+			Title     string `json:"title"`
+			Narrative string `json:"narrative"`
+		}{
+			Project:   "ctx-project",
+			Title:     "Provenance integration check",
+			Narrative: "Body of the iteration narrative for provenance test.",
+		})
+		if err != nil {
+			t.Fatalf("marshal append args: %v", err)
+		}
+		appendParams, err := json.Marshal(map[string]any{
+			"name":      "vv_append_iteration",
+			"arguments": json.RawMessage(appendArgs),
+		})
+		if err != nil {
+			t.Fatalf("marshal append params: %v", err)
+		}
+		appendReq, err := json.Marshal(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      2,
+			"method":  "tools/call",
+			"params":  json.RawMessage(appendParams),
+		})
+		if err != nil {
+			t.Fatalf("marshal append request: %v", err)
+		}
+
+		// vv_get_iterations for the same project in full format so we can
+		// verify the parser-side strip.
+		getArgs, err := json.Marshal(struct {
+			Project string `json:"project"`
+			Format  string `json:"format"`
+			Limit   int    `json:"limit"`
+		}{
+			Project: "ctx-project",
+			Format:  "full",
+			Limit:   5,
+		})
+		if err != nil {
+			t.Fatalf("marshal get args: %v", err)
+		}
+		getParams, err := json.Marshal(map[string]any{
+			"name":      "vv_get_iterations",
+			"arguments": json.RawMessage(getArgs),
+		})
+		if err != nil {
+			t.Fatalf("marshal get params: %v", err)
+		}
+		getReq, err := json.Marshal(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      3,
+			"method":  "tools/call",
+			"params":  json.RawMessage(getParams),
+		})
+		if err != nil {
+			t.Fatalf("marshal get request: %v", err)
+		}
+
+		iterRequests := strings.Join([]string{
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test"}}}`,
+			`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+			string(appendReq),
+			string(getReq),
+		}, "\n")
+
+		iterStdout, iterStderr, err := runVVWithStdin(t, provEnv, iterRequests, "mcp")
+		if err != nil {
+			t.Fatalf("vv mcp (iteration path) failed: %v\nstdout: %s\nstderr: %s",
+				err, iterStdout, iterStderr)
+		}
+
+		iterLines := strings.Split(strings.TrimSpace(iterStdout), "\n")
+		if len(iterLines) != 3 {
+			t.Fatalf("iteration path: expected 3 response lines, got %d:\n%s",
+				len(iterLines), iterStdout)
+		}
+		var iterResponses []map[string]any
+		for i, line := range iterLines {
+			var resp map[string]any
+			if jerr := json.Unmarshal([]byte(line), &resp); jerr != nil {
+				t.Fatalf("iteration response %d: invalid JSON: %v\nline: %s", i, jerr, line)
+			}
+			iterResponses = append(iterResponses, resp)
+		}
+
+		// Response 1: vv_append_iteration success.
+		appendResult, ok := iterResponses[1]["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("vv_append_iteration: missing result: %v", iterResponses[1])
+		}
+		if isErr, _ := appendResult["isError"].(bool); isErr {
+			t.Fatalf("vv_append_iteration: unexpected isError=true: %v", appendResult)
+		}
+
+		// Read iterations.md from disk (NOT via vv_get_iterations — the strip
+		// would hide exactly what we're asserting).
+		iterPath := filepath.Join(vaultPath, "Projects", "ctx-project", "agentctx", "iterations.md")
+		iterBody := readFile(t, iterPath)
+		wantTrailer := "<!-- recorded: host=vibe-vault-test user=vibe-vault-user -->"
+		if !strings.Contains(iterBody, wantTrailer) {
+			t.Errorf("iterations.md missing provenance trailer %q:\n%s", wantTrailer, iterBody)
+		}
+		trimmedIter := strings.TrimRight(iterBody, "\n")
+		if !strings.HasSuffix(trimmedIter, wantTrailer) {
+			tail := trimmedIter
+			if len(tail) > 120 {
+				tail = tail[len(tail)-120:]
+			}
+			t.Errorf("iterations.md: trailer not at end-of-file; tail = %q", tail)
+		}
+
+		// Response 2: vv_get_iterations narrative must NOT contain the trailer.
+		getResult, ok := iterResponses[2]["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("vv_get_iterations: missing result: %v", iterResponses[2])
+		}
+		getContent, ok := getResult["content"].([]any)
+		if !ok || len(getContent) == 0 {
+			t.Fatalf("vv_get_iterations: missing content: %v", getResult)
+		}
+		getText, _ := getContent[0].(map[string]any)["text"].(string)
+		var getParsed struct {
+			Iterations []struct {
+				Number    int    `json:"number"`
+				Title     string `json:"title"`
+				Narrative string `json:"narrative"`
+			} `json:"iterations"`
+		}
+		if jerr := json.Unmarshal([]byte(getText), &getParsed); jerr != nil {
+			t.Fatalf("vv_get_iterations: invalid JSON: %v\ntext: %s", jerr, getText)
+		}
+		var foundOurs bool
+		for _, it := range getParsed.Iterations {
+			if it.Title == "Provenance integration check" {
+				foundOurs = true
+				if strings.Contains(it.Narrative, "<!-- recorded:") {
+					t.Errorf("vv_get_iterations: narrative still carries trailer after strip: %q",
+						it.Narrative)
+				}
+				if !strings.Contains(it.Narrative,
+					"Body of the iteration narrative for provenance test.") {
+					t.Errorf("vv_get_iterations: narrative body missing expected text: %q",
+						it.Narrative)
+				}
+				break
+			}
+		}
+		if !foundOurs {
+			t.Errorf("vv_get_iterations: newly appended iteration not returned; got %d entries",
+				len(getParsed.Iterations))
+		}
+
+		// --- (2) vv_capture_session: frontmatter must carry host/user ---
+		// vv_capture_session resolves the project via session.DetectProject(cwd).
+		// Use a tempdir whose basename matches a distinct test-owned project
+		// name so the session note lands at a predictable vault path.
+		captureParent := t.TempDir()
+		captureProject := "provenance-capture"
+		captureCwd := filepath.Join(captureParent, captureProject)
+		if merr := os.MkdirAll(captureCwd, 0o755); merr != nil {
+			t.Fatalf("mkdir capture cwd: %v", merr)
+		}
+
+		capArgs, err := json.Marshal(struct {
+			Summary string `json:"summary"`
+			Tag     string `json:"tag"`
+		}{
+			Summary: "Provenance capture smoke test. Confirms host and user are stamped on the session note YAML frontmatter.",
+			Tag:     "review",
+		})
+		if err != nil {
+			t.Fatalf("marshal capture args: %v", err)
+		}
+		capParams, err := json.Marshal(map[string]any{
+			"name":      "vv_capture_session",
+			"arguments": json.RawMessage(capArgs),
+		})
+		if err != nil {
+			t.Fatalf("marshal capture params: %v", err)
+		}
+		capReq, err := json.Marshal(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      2,
+			"method":  "tools/call",
+			"params":  json.RawMessage(capParams),
+		})
+		if err != nil {
+			t.Fatalf("marshal capture request: %v", err)
+		}
+
+		capRequests := strings.Join([]string{
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test"}}}`,
+			`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+			string(capReq),
+		}, "\n")
+
+		// Inline subprocess invocation so we can pin cmd.Dir (the existing
+		// runVVWithStdin helper does not accept a working directory, and the
+		// brief forbids adding new test helpers).
+		capCmd := exec.Command(vvBinary, "mcp")
+		capCmd.Env = provEnv
+		capCmd.Dir = captureCwd
+		capCmd.Stdin = strings.NewReader(capRequests)
+		var capOut, capErr strings.Builder
+		capCmd.Stdout = &capOut
+		capCmd.Stderr = &capErr
+		if rerr := capCmd.Run(); rerr != nil {
+			t.Fatalf("vv mcp (capture path) failed: %v\nstdout: %s\nstderr: %s",
+				rerr, capOut.String(), capErr.String())
+		}
+
+		capLines := strings.Split(strings.TrimSpace(capOut.String()), "\n")
+		if len(capLines) != 2 {
+			t.Fatalf("capture path: expected 2 response lines, got %d:\n%s",
+				len(capLines), capOut.String())
+		}
+		var capResp map[string]any
+		if jerr := json.Unmarshal([]byte(capLines[1]), &capResp); jerr != nil {
+			t.Fatalf("vv_capture_session: invalid response JSON: %v\nline: %s",
+				jerr, capLines[1])
+		}
+		capResult, ok := capResp["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("vv_capture_session: missing result: %v", capResp)
+		}
+		if isErr, _ := capResult["isError"].(bool); isErr {
+			t.Fatalf("vv_capture_session: unexpected isError=true: %v", capResult)
+		}
+		capContent, ok := capResult["content"].([]any)
+		if !ok || len(capContent) == 0 {
+			t.Fatalf("vv_capture_session: missing content: %v", capResult)
+		}
+		capText, _ := capContent[0].(map[string]any)["text"].(string)
+		var capParsed struct {
+			Status   string `json:"status"`
+			Project  string `json:"project"`
+			NotePath string `json:"note_path"`
+		}
+		if jerr := json.Unmarshal([]byte(capText), &capParsed); jerr != nil {
+			t.Fatalf("vv_capture_session: invalid text JSON: %v\ntext: %s", jerr, capText)
+		}
+		if capParsed.Status != "captured" {
+			t.Fatalf("vv_capture_session: status=%q want captured; full response: %s",
+				capParsed.Status, capText)
+		}
+		if capParsed.Project != captureProject {
+			t.Errorf("vv_capture_session: project=%q want %q",
+				capParsed.Project, captureProject)
+		}
+
+		// note_path may be absolute or relative to vault — normalize.
+		notePath := capParsed.NotePath
+		if !filepath.IsAbs(notePath) {
+			notePath = filepath.Join(vaultPath, notePath)
+		}
+		noteBody := readFile(t, notePath)
+
+		// Verify YAML frontmatter carries host + user, both appearing before
+		// the summary: line (which marks the tail of our stamped fields).
+		fmEnd := strings.Index(noteBody, "\n---\n")
+		if fmEnd < 0 {
+			t.Fatalf("session note missing YAML frontmatter terminator:\n%s", noteBody)
+		}
+		frontmatter := noteBody[:fmEnd]
+		summaryIdx := strings.Index(frontmatter, "\nsummary:")
+		if summaryIdx < 0 {
+			t.Fatalf("session note frontmatter missing summary: key:\n%s", frontmatter)
+		}
+		beforeSummary := frontmatter[:summaryIdx]
+		if !strings.Contains(beforeSummary, "host: vibe-vault-test") {
+			t.Errorf("session note: host: line missing or after summary:; frontmatter:\n%s",
+				frontmatter)
+		}
+		if !strings.Contains(beforeSummary, "user: vibe-vault-user") {
+			t.Errorf("session note: user: line missing or after summary:; frontmatter:\n%s",
+				frontmatter)
+		}
+
+		assertContains(t, iterStderr, "tools/call: vv_append_iteration", "iter stderr log")
+		assertContains(t, iterStderr, "tools/call: vv_get_iterations", "iter stderr log")
+		assertContains(t, capErr.String(), "tools/call: vv_capture_session", "capture stderr log")
+	})
+
 	// context_sync_t1_t2_cascade verifies that `vv context sync` refreshes
 	// the Tier-2 vault template cache from the embedded Tier-1 source.
 	//
@@ -2000,20 +2297,117 @@ Body content for the reference-type sample learning.
 		}
 		postSnapshot, _, _ := vaultCanarySnapshotAt(t, canaryRealConfigPath, canaryRealVault)
 		diffs := vaultCanaryDiff(preCanarySnapshot, postSnapshot)
-		if len(diffs) == 0 {
+		if len(diffs) != 0 {
+			var b strings.Builder
+			fmt.Fprintf(&b, "real vault was mutated by TestIntegration (%d path(s)):\n",
+				len(diffs))
+			fmt.Fprintf(&b, "  realVault:  %s\n", canaryRealVault)
+			fmt.Fprintf(&b, "  realConfig: %s\n", canaryRealConfigPath)
+			for _, d := range diffs {
+				b.WriteString("  - ")
+				b.WriteString(d)
+				b.WriteString("\n")
+			}
+			t.Fatal(b.String())
+		}
+
+		// Post-snapshot sentinel grep: catches writes to real-vault paths
+		// that fell outside the protected-roots list above (e.g. a brand
+		// new Project directory created mid-run, or a stray markdown file
+		// dropped outside any snapshotted root). Subtests that stamp
+		// provenance run under VIBE_VAULT_HOSTNAME=vibe-vault-test and
+		// USER=vibe-vault-user, so any match on the real vault outside
+		// test-owned project subtrees indicates a HOME/XDG-sandbox escape.
+		//
+		// This grep is complementary to the mtime/sha snapshot: the
+		// snapshot would have caught mutations to files that already
+		// existed; the grep catches net-new files the snapshot never
+		// enumerated.
+		if canaryRealVault == "" {
 			return
 		}
-		var b strings.Builder
-		fmt.Fprintf(&b, "real vault was mutated by TestIntegration (%d path(s)):\n",
-			len(diffs))
-		fmt.Fprintf(&b, "  realVault:  %s\n", canaryRealVault)
-		fmt.Fprintf(&b, "  realConfig: %s\n", canaryRealConfigPath)
-		for _, d := range diffs {
-			b.WriteString("  - ")
-			b.WriteString(d)
-			b.WriteString("\n")
+		sentinels := []string{
+			"host: vibe-vault-test",
+			"host=vibe-vault-test",
 		}
-		t.Fatal(b.String())
+		// Reuse the same protected-root list the snapshot pass walked.
+		// Any sentinel hit under these roots is already accounted for by
+		// the snapshot — suppress it here so we only flag true escapes.
+		skipRoots := canaryProtectedRoots(canaryRealVault)
+		// Additional documentation-prose exception: vibe-vault's own
+		// agentctx/tasks/ and sessions/ trees contain planning docs that
+		// legitimately quote the sentinel strings (e.g. the plan for this
+		// very feature). These are human-authored markdown, not outputs
+		// of the binary under test.
+		docSkipRoots := []string{
+			filepath.Join(canaryRealVault, "Projects", "vibe-vault", "agentctx", "tasks"),
+			filepath.Join(canaryRealVault, "Projects", "vibe-vault", "sessions"),
+		}
+		skipRoots = append(skipRoots, docSkipRoots...)
+		// Extensions that are obviously binary and not worth reading.
+		skipExts := map[string]struct{}{
+			".zst": {}, ".gz": {}, ".png": {}, ".jpg": {}, ".jpeg": {},
+			".gif": {}, ".webp": {}, ".pdf": {}, ".bin": {}, ".so": {},
+			".dylib": {}, ".a": {}, ".o": {},
+		}
+		const maxReadBytes = 512 * 1024
+
+		_ = filepath.WalkDir(canaryRealVault, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil
+			}
+			if d.IsDir() {
+				// Skip VCS / editor metadata.
+				if strings.HasPrefix(d.Name(), ".git") || d.Name() == ".obsidian" {
+					return filepath.SkipDir
+				}
+				// Skip protected test-owned subtrees — snapshot pass covers them.
+				for _, p := range skipRoots {
+					if path == p || strings.HasPrefix(path, p+string(filepath.Separator)) {
+						return filepath.SkipDir
+					}
+				}
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil || !info.Mode().IsRegular() {
+				return nil
+			}
+			if _, skip := skipExts[strings.ToLower(filepath.Ext(path))]; skip {
+				return nil
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				return nil
+			}
+			buf := make([]byte, maxReadBytes)
+			n, _ := io.ReadFull(f, buf)
+			_ = f.Close()
+			data := buf[:n]
+			for _, sentinel := range sentinels {
+				idx := bytes.Index(data, []byte(sentinel))
+				if idx < 0 {
+					continue
+				}
+				// Report relative path + the matched line for debugging.
+				rel, relErr := filepath.Rel(canaryRealVault, path)
+				if relErr != nil {
+					rel = path
+				}
+				lineStart := bytes.LastIndexByte(data[:idx], '\n') + 1
+				lineEnd := bytes.IndexByte(data[idx:], '\n')
+				var line string
+				if lineEnd < 0 {
+					line = string(data[lineStart:])
+				} else {
+					line = string(data[lineStart : idx+lineEnd])
+				}
+				t.Errorf("sentinel canary: %s matched in real vault at %s: %q",
+					sentinel, rel, strings.TrimSpace(line))
+				break
+			}
+			return nil
+		})
 	})
 }
 
