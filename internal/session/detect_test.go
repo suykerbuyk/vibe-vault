@@ -243,3 +243,47 @@ func TestDetect_MissingIdentityFallsThrough(t *testing.T) {
 		t.Errorf("DetectProject = %q, want fallback-dir", got)
 	}
 }
+
+// TestDetectProject_OriginProjectContract pins the behaviors Phase 6.1's
+// write-time provenance stamper relies on for origin_project emission.
+// Breaking any of these cases would corrupt cross-project forensic
+// signal in session notes and iteration trailers.
+func TestDetectProject_OriginProjectContract(t *testing.T) {
+	// Case 1: non-existent path — basename fallback still produces a
+	// usable project name. The integration test sentinel
+	// /vibe-vault-test-cwd rides this branch.
+	if got := DetectProject("/vibe-vault-test-cwd"); got != "vibe-vault-test-cwd" {
+		t.Errorf("DetectProject(%q) = %q, want %q",
+			"/vibe-vault-test-cwd", got, "vibe-vault-test-cwd")
+	}
+
+	// Case 2: empty input returns the "_unknown" sentinel. The caller
+	// (Phase 6.1) is expected to guard against this — either by
+	// checking the cwd stamp for empty first, or by normalizing
+	// "_unknown" to "" before setting origin_project. This test pins
+	// the sentinel value so the caller's guard stays correct.
+	if got := DetectProject(""); got != "_unknown" {
+		t.Errorf("DetectProject(%q) = %q, want %q", "", got, "_unknown")
+	}
+
+	// Case 3: a real non-project path (e.g., /tmp) resolves to the
+	// directory basename, not empty. Phase 6.1 will emit this as
+	// origin_project: tmp. That's acceptable per D2 — the stamp
+	// records what cwd resolved to, not a curated project list.
+	if got := DetectProject("/tmp"); got != "tmp" {
+		t.Errorf("DetectProject(%q) = %q, want %q", "/tmp", got, "tmp")
+	}
+
+	// Case 4: stability under double-invocation. The write-time
+	// stamper may be called once per session note and many times per
+	// iteration block across a long-running MCP server. Verify
+	// idempotence for a path where git subprocess is NOT invoked
+	// (non-git temp dir).
+	tmp := t.TempDir()
+	first := DetectProject(tmp)
+	second := DetectProject(tmp)
+	if first != second {
+		t.Errorf("DetectProject not idempotent: first=%q second=%q",
+			first, second)
+	}
+}

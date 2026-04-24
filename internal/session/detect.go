@@ -53,6 +53,18 @@ func Detect(cwd, gitBranch, model, sessionID string, cfg config.Config) Info {
 
 // DetectProject extracts the project name from the working directory.
 // Priority: identity file > git remote origin > directory basename.
+//
+// Returns "_unknown" if cwd is empty or resolves to a meaningless basename
+// (".", "/", empty). Callers that need empty-string semantics for
+// "unknown" (e.g., the write-time provenance stamper in
+// internal/session/capture.go and internal/mcp for origin_project
+// frontmatter/trailer emission) must either guard the call or map
+// "_unknown" to "" themselves.
+//
+// Side effects: reads identity file from cwd (and parents) if present,
+// and may invoke `git remote get-url origin` with a 1s timeout when no
+// identity file is found. Both are acceptable at write time — identity
+// lookup is a fast stat chain and the git invocation is bounded.
 func DetectProject(cwd string) string {
 	if cwd == "" {
 		return "_unknown"
