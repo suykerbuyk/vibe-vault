@@ -77,6 +77,8 @@ type NoteData struct {
 	ParentSession       string   // parent entry UUID (non-empty = /continue session)
 	SessionTags         []string // pre-built tag list (e.g. ["vv-session", "implementation"])
 	Source              string   // source identifier ("zed", etc.; empty = claude-code)
+	Host                string   // hostname captured at write time (empty = resolver failed)
+	User                string   // acting user captured at write time (empty = resolver failed)
 }
 
 // SessionNote renders a full Obsidian markdown note from NoteData.
@@ -164,6 +166,12 @@ func SessionNote(d NoteData) string {
 		fmt.Fprintf(&b, "tags: [vv-session, %s]\n", d.Tag)
 	} else {
 		b.WriteString("tags: [vv-session]\n")
+	}
+	if d.Host != "" {
+		fmt.Fprintf(&b, "host: %s\n", d.Host)
+	}
+	if d.User != "" {
+		fmt.Fprintf(&b, "user: %s\n", d.User)
 	}
 	fmt.Fprintf(&b, "summary: \"%s\"\n", escapeYAML(d.Summary))
 	if d.PreviousNote != "" {

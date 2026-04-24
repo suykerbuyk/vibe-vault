@@ -18,6 +18,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/friction"
 	"github.com/suykerbuyk/vibe-vault/internal/index"
 	"github.com/suykerbuyk/vibe-vault/internal/llm"
+	"github.com/suykerbuyk/vibe-vault/internal/meta"
 	"github.com/suykerbuyk/vibe-vault/internal/narrative"
 	"github.com/suykerbuyk/vibe-vault/internal/prose"
 	"github.com/suykerbuyk/vibe-vault/internal/render"
@@ -195,6 +196,9 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 	// Build note data
 	noteData := render.NoteDataFromTranscript(t, info.Project, info.Domain, info.Branch, sessionID, iteration, previousNote)
 	noteData.Source = opts.Source
+	p := meta.Stamp()
+	noteData.Host = p.Host
+	noteData.User = p.User
 
 	// Fix source-aware fallback summary (e.g. "Zed agent session" instead of "Claude Code session")
 	if opts.Source != "" && noteData.Summary == "Claude Code session" {
