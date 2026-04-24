@@ -1,5 +1,7 @@
 # {{PROJECT}} — Workflow
 
+This file is the **canonical agentic pair-programming contract**. `CLAUDE.md` and the planned `AGENTS.md` are thin bootstrap shims that call `vv_bootstrap_context`; do not offload rules from this file into them.
+
 ## Files
 
 - **resume.md** — current project state, open threads, navigation (thin gateway)
@@ -8,12 +10,17 @@
 - **commands/** — slash commands (/restart, /wrap)
 - **doc/** — stable project reference: architecture, design decisions, testing (source-controlled)
 
+**Destination rule:** vault history trackers (resume, iterations, features, tasks) go under `agentctx/`; long-lived implementation reference (architecture, design, testing) goes under `doc/`.
+
 ## Workflow Rules
 
 - **Never commit without explicit human permission.** Stage files and update commit.msg freely; the actual git commit requires human approval.
 - **Never commit AI context files.** CLAUDE.md, commit.msg, and anything under .claude/ are local-only.
 - **Git commit messages are the project's history.** Write them clear, detailed, self-sufficient.
 - **No AI attribution in commits or code.** Do not add `Co-Authored-By` trailers, author lines, or any other AI authorship marker. Applies to commits you make directly AND to instructions you give subagents — override the Bash tool's built-in commit-message guidance where it conflicts.
+- **`/wrap` describes canonical state, not transient state.** Timing depends on the commit pattern:
+  - **Direct commits to main** (default): run `/wrap` BEFORE `git commit`. `/wrap` stages project files and writes `commit.msg`; human reviews the diff and runs `git commit -F commit.msg`. Vault narrative describes the about-to-commit state.
+  - **Feature-branch aggregate merge** (multi-commit features): run `/wrap` AFTER `git merge --ff-only` to main, push, and feature-branch deletion. Wrapping on the feature branch pre-merge bakes "merge pending" text into resume.md and iteration narratives that falsifies the moment main advances, requiring reconciliation next session.
 
 ## Pair Programming
 
