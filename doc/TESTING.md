@@ -90,3 +90,119 @@ exercising the full pipeline as subprocess calls. Uses XDG_CONFIG_HOME isolation
 temp directories. 8 JSONL fixtures loaded from `test/testdata/*.jsonl` via `readTestdata()`: normal session, same-day iteration,
 trivial (skipped), different project, UUID-named backfill, checkpoint session, narrative session (with tool results), friction session (with correction patterns). The
 `index_knowledge_seeding` subtest verifies per-project `knowledge.md` files are seeded during index generation. The `inject` subtest tests markdown/JSON output, sections filter, max-tokens truncation, help flag, and unknown project warning. The `export` subtest tests JSON output, project filter, CSV format, and help flag. The `context_sync` subtest verifies schema migration (0→2), shared command propagation, dry-run mode, and idempotent re-sync. Skipped in `-short` mode.
+
+## HOME-Sandbox Classification
+
+Every first-party caller of `os.UserHomeDir()` / `os.Getenv("HOME")` /
+`os.Getenv("USER")` outside `internal/config/` is classified into one of
+three categories at the **call-site** level (a helper like
+`plugin.ClaudePluginsDir` feeds both read-only and write-path callers,
+which classify independently). Production-code authors adding a new such
+call site must place it into this table and confirm it is covered by
+either a HOME-sandboxed integration subtest or the canary below.
+
+### Category A — Safe, no I/O on `$HOME`
+
+Pure string/path computation. No sandboxing needed for correctness or
+determinism.
+
+| Site | Function | What it does |
+|------|----------|--------------|
+| `internal/sanitize/path.go:13` | `CompressHome` | String prefix swap (`$HOME/x` → `~/x`) |
+| `internal/zed/detect.go:187` | `commonProjectRoot` | Depth-gate arithmetic on `os.UserHomeDir()` output |
+| `internal/zed/detect.go:189` | `commonProjectRoot` fallback | `os.Getenv("USER")` fallback inside `UserHomeDir` error branch |
+| `internal/meta/provenance.go:64` | `user()` | Env metadata fallback, no I/O |
+| `cmd/vv/main.go:1367` (pure-compute callers) | `defaultTranscriptDir` | Pure string path; callers gate on non-empty |
+
+### Category B — Read-only operator-private access
+
+Reads files or lstats under `$HOME/.claude/`, `$HOME/.config/`,
+`$HOME/.local/share/`, or `$HOME/.cache/` but never writes. Sandboxing
+required for **test determinism** (output depends on operator state),
+but no data-loss risk if unsandboxed.
+
+| Site | Function | Path read |
+|------|----------|-----------|
+| `internal/check/check.go:278` | `CheckHook` | `~/.claude/settings.json` |
+| `internal/check/check.go:299` | `CheckMCP` | `~/.claude/settings.json` |
+| `internal/check/check.go:411` | `CheckMemoryLink` | `~/.claude/projects/<slug>/memory` (lstat) |
+| `internal/hook/setup.go:27` via `claudeDetected` (L552) | `claudeDetected` | stat `~/.claude/` |
+| `internal/hook/setup.go:168` via `zedDetected` (L562) | `zedDetected` | stat `~/.config/zed/` |
+| `internal/plugin/plugin.go:51` via `AnyCacheInstalled` / `IsInstalled` | (plugin readers) | `~/.claude/plugins/cache/...` |
+| `internal/zed/parser.go:21` | `DefaultDBPath` | `~/.local/share/zed/threads/threads.db` (opened `?mode=ro`) |
+| `cmd/vv/main.go:1367` via `runBackfill` / `runReprocess` / `runZed` | `defaultTranscriptDir` | `~/.claude/projects/` (read-only scan) |
+
+### Category C — Sandbox-needed (writes to operator-private paths)
+
+**HIGHEST blast radius.** Any test regression that reaches one of these
+sites without HOME-sandboxing mutates the operator's real config. Every
+entry MUST have either a HOME-sandboxed integration subtest OR canary
+snapshot coverage — never both zero.
+
+| Caller | CLI entrypoint | Write target | Coverage |
+|--------|----------------|--------------|----------|
+| `hook.Install` (L37) | `vv hook install` | `~/.claude/settings.json` | canary |
+| `hook.Uninstall` (L69) | `vv hook uninstall` | `~/.claude/settings.json` | canary |
+| `hook.InstallMCP` (L104) | `vv mcp install` / `--claude-only` | `~/.claude/settings.json` | canary |
+| `hook.UninstallMCP` (L137) | `vv mcp uninstall` / `--claude-only` | `~/.claude/settings.json` | canary |
+| `hook.InstallClaudePlugin` (L637) | `vv mcp install --claude-plugin` | `~/.claude/settings.json` | canary |
+| `hook.UninstallClaudePlugin` (L690) | `vv mcp uninstall --claude-plugin` | `~/.claude/settings.json` | canary |
+| `hook.InstallMCPZed` (L178) | `vv mcp install --zed-only` | `~/.config/zed/settings.json` | canary |
+| `hook.UninstallMCPZed` (L211) | `vv mcp uninstall --zed-only` | `~/.config/zed/settings.json` | canary |
+| `plugin.InstallToCache` / `plugin.RegisterKnownMarketplace` / `plugin.RegisterInstalledPlugin` / `plugin.Remove` | `vv mcp install`/`uninstall` `--claude-plugin` | `~/.claude/plugins/cache/vibe-vault-local/`, `~/.claude/plugins/known_marketplaces.json`, `~/.claude/plugins/installed_plugins.json` | canary |
+| `memory.Link` / `memory.Unlink` (`resolve()` when `opts.HomeDir==""`) | `vv memory link` / `vv memory unlink` | `~/.claude/projects/<slug>/memory` | sandboxed via `buildEnvWithHome` (`memory_link_cli`) |
+
+### Env-builders (`test/integration_test.go:100–130`)
+
+Three helpers live next to the `buildEnv` comment block — test authors
+must pick one based on what the subtest reaches:
+
+- **`buildEnv`** — vault-only subtests that do not reach any category-B
+  read or category-C write. The real `$HOME` is passed through for
+  stdlib compatibility (`user.Current`, etc.), but no operator-private
+  path is touched.
+- **`buildEnvWithHome`** — any subtest that invokes a category-B read
+  or a category-C write. Currently used by `memory_link_cli`,
+  `check_resume_invariants`, `vault_push_multi_remote`.
+- **`buildEnvWithHomeUser`** — subtests that assert on provenance-
+  stamped fields (`host` / `user` / `cwd` / `origin_project` in session
+  notes or iteration trailers). Sets `VIBE_VAULT_HOSTNAME`,
+  `VIBE_VAULT_CWD`, `USER`, `LOGNAME` to deterministic sentinels.
+  Currently used by the provenance subtest.
+
+### Canary coverage (`no_real_vault_mutation` subtest)
+
+The canary snapshots several surfaces before any subtest runs and
+re-snapshots after the last subtest, failing the run on any mutation:
+
+- **Vault-rooted project subtrees** — `canaryProtectedRoots` enumerates
+  the per-subtest project directories under the operator's real vault.
+- **Operator config** — `~/.config/vibe-vault/config.toml`
+  (`snap.configFile`).
+- **Category-C home-private single files** (`snap.homeSingleFiles`):
+  `~/.claude/settings.json`, `~/.config/zed/settings.json`,
+  `~/.claude/plugins/known_marketplaces.json`,
+  `~/.claude/plugins/installed_plugins.json`.
+- **Category-C home-private directory tree** (`canaryHomePrivateRoots`):
+  `~/.claude/plugins/cache/vibe-vault-local/` — scoped narrowly because
+  Claude Code itself writes to other `~/.claude/plugins/` subtrees
+  during normal operation.
+
+A path that does not exist at pre-snapshot time is only flagged if the
+test run *creates* it. An existing path is flagged on any
+mtime-or-content mutation. If false positives appear on the narrowed
+cache walk, add skip rules to `canaryShouldSkipFile` rather than
+widening scope.
+
+### `expandHome()` leak warning
+
+`buildEnv` passes the real `$HOME` through to the subprocess. Any test
+that writes a `~/...` string into a config value (e.g. `vault_path` in
+a generated `config.toml`) resolves it against the operator's real
+`$HOME` via `config/config.go`'s `expandHome`. No current test does
+this, but a regression would leak writes outside the tempdir sandbox.
+When in doubt, use `buildEnvWithHome` with a tempdir `HOME`.
+
+(Originally audited via the `home-sandbox-audit` task — canary
+regression gate established iter 136, extended for operator-private
+write paths iter 141.)

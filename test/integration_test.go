@@ -97,6 +97,78 @@ func writeFixture(t *testing.T, dir, filename, content string) string {
 	return path
 }
 
+// HOME-sandbox classification (home-sandbox-audit, iter 141).
+//
+// Every first-party caller of os.UserHomeDir() / os.Getenv("HOME") /
+// os.Getenv("USER") outside internal/config/ falls into one of three
+// categories at the CALL-SITE level (not the helper level — a helper
+// like plugin.ClaudePluginsDir feeds both read-only and write-path
+// callers, which get classified independently):
+//
+//   A. Safe — pure string/path computation, no I/O on $HOME. No
+//      sandboxing needed. Examples: sanitize.CompressHome (prefix
+//      swap), zed.commonProjectRoot (depth-gate arithmetic),
+//      meta.user (env fallback, no read).
+//   B. Read-only operator-private — reads files or lstats under
+//      ~/.claude/, ~/.config/, ~/.local/share/, or ~/.cache/ but
+//      never writes. Sandboxing is required for test determinism
+//      (output depends on operator machine state) but there is no
+//      data-loss risk. Examples: check.CheckHook, check.CheckMCP,
+//      check.CheckMemoryLink, hook.claudeDetected, hook.zedDetected,
+//      plugin.AnyCacheInstalled / plugin.IsInstalled,
+//      zed.DefaultDBPath (opened with ?mode=ro), cmd/vv.
+//      defaultTranscriptDir (transcript discovery scan).
+//   C. Sandbox-needed — WRITES to operator-private paths. HIGHEST
+//      blast radius: any unsandboxed test reaching a category-C
+//      site mutates the operator's real config. Sites:
+//
+//        hook.Install, hook.Uninstall,
+//        hook.InstallMCP, hook.UninstallMCP,
+//        hook.InstallClaudePlugin, hook.UninstallClaudePlugin
+//          → write ~/.claude/settings.json
+//        hook.InstallMCPZed, hook.UninstallMCPZed
+//          → write ~/.config/zed/settings.json
+//        plugin.InstallToCache, plugin.RegisterKnownMarketplace,
+//        plugin.RegisterInstalledPlugin, plugin.Remove
+//          → write ~/.claude/plugins/cache/vibe-vault-local/,
+//            ~/.claude/plugins/known_marketplaces.json,
+//            ~/.claude/plugins/installed_plugins.json
+//        memory.Link / memory.Unlink (when opts.HomeDir=="")
+//          → write ~/.claude/projects/<slug>/memory
+//          [sandboxed via buildEnvWithHome in memory_link_cli]
+//
+// No integration subtest currently invokes any hook/plugin category-C
+// entrypoint. The no_real_vault_mutation canary snapshots the
+// category-C write targets (~/.claude/settings.json,
+// ~/.config/zed/settings.json, ~/.claude/plugins/{cache/vibe-vault-
+// local, known_marketplaces.json, installed_plugins.json}) pre/post
+// and fails the run on any mutation — the regression gate for
+// adding a new subtest that reaches those paths without sandboxing.
+//
+// When to use which env-builder:
+//   - buildEnv: vault-only subtests that do not invoke any
+//     ~/.claude/*, ~/.config/zed/*, or ~/.local/share/zed/* path.
+//     The real $HOME is passed through for stdlib compatibility
+//     (user.Current, etc.), but no category-B or C site is reached.
+//   - buildEnvWithHome: any subtest that invokes a category-B read
+//     (check.CheckHook, check.CheckMemoryLink, zed-transcript
+//     discovery, etc.) or a category-C write (hook install,
+//     memory.Link). Used today by check_resume_invariants,
+//     memory_link_cli, vault_push_multi_remote.
+//   - buildEnvWithHomeUser: subtests that assert on provenance-
+//     stamped fields (host/user/cwd/origin_project in session
+//     notes or iteration trailers). Sets VIBE_VAULT_HOSTNAME,
+//     VIBE_VAULT_CWD, USER, LOGNAME to the test sentinels.
+//
+// expandHome() leak warning: buildEnv passes the real $HOME
+// through, so any test that writes a "~/..." string into a config
+// value (e.g. vault_path) resolves it against the operator's real
+// HOME via config/config.go expandHome. No current test does this,
+// but a regression would leak writes outside the tempdir sandbox.
+// When in doubt, use buildEnvWithHome and a tempdir HOME.
+//
+// See doc/TESTING.md for the authoritative classification table
+// and the list of sandboxed subtests.
 func buildEnv(xdgConfigHome string) []string {
 	return []string{
 		"PATH=" + os.Getenv("PATH"),
