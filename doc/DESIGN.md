@@ -738,28 +738,82 @@ Key architectural and design decisions in vibe-vault, with rationale.
     for iteration provenance. One stamp call per convergence point
     covers every call path upstream.
 
-    **Why `cwd` is deferred to Phase 6.** The MCP-path `os.Getwd()`
-    returns the MCP server process's cwd (wherever the agent
-    invoked `vv mcp`, often not the repo being worked on). The hook
-    path receives a Claude-Code-supplied cwd via JSON input — the
-    cwd where Claude Code was launched, which may itself be a
-    worktree, subdirectory, or unrelated shell. These two values
-    answer different forensic questions ("where did the server run"
-    vs. "where did the session start"), and shipping one of them
-    under the same `cwd:` key would encode that ambiguity into
-    written output permanently. Phase 6 revisits the decision once
-    the initial `host` + `user` shipment operates in practice and
-    we have real traffic to reason about.
+    **Phase 6 amendment — `cwd` + `origin_project` ship as process
+    cwd at write time.** The original Phase 5 deferral argued that
+    the MCP-path `os.Getwd()` ("where did the server run") and the
+    hook-path JSON-supplied cwd ("where did the session start")
+    answered different forensic questions and risked encoding that
+    ambiguity under a single `cwd:` key. The 2026-04-24 `/review-plan`
+    session reversed that framing: under real Claude Code + MCP +
+    hook semantics, both paths resolve to a cwd that represents the
+    originating session. The hook subprocess inherits cwd from
+    Claude Code (the user's work cwd in practice), and the MCP server
+    runs in whichever directory Claude Code was launched from. Both
+    answer the same question — *"which project's session produced
+    this write?"* — so one field with one meaning covers both paths.
+    `meta.Stamp().CWD` therefore resolves to `os.Getwd()` of the
+    acting process (Option A from the review; Option B threading
+    `opts.CWD` through the call chain would produce identical output
+    under normal operation for a signature change with zero gain).
+
+    **Decision (Phase 6).** Session notes gain a `cwd:` line in YAML
+    frontmatter immediately after `user:` and before `summary:`, and
+    iteration-block trailers gain space-separated `cwd=C origin=P`
+    tokens after the existing `host=H user=U` pair — full trailer
+    shape `<!-- recorded: host=H user=U cwd=C origin=P -->`. Each
+    token is conditional: empty values are omitted entirely rather
+    than emitted as `cwd= ` or `origin= `. `origin_project` is
+    computed at stamp time via `session.DetectProject` against the
+    stamped cwd and emitted alongside in both sites, giving
+    machine-readable cross-project attribution without forcing
+    future consumers to re-derive the project from a cwd string.
+    For session notes `origin_project` usually equals the target
+    `project:` field (session-note project is itself cwd-derived);
+    for MCP iteration-block appends the two routinely differ — the
+    target project is the explicit `project` argument to
+    `vv_append_iteration`, and the origin project is the server's
+    cwd-derived project. That divergence is the forensic payload.
+
+    **Cross-project workflow driver.** The motivating pattern is
+    the operator discovering an issue in project A (e.g., `recmeet`,
+    `rezbldr`) during an A-rooted session and reaching across to
+    modify project B (typically `vibe-vault` embedded templates or
+    workflow docs) without `cd`-ing out of A. The resulting vault
+    writes land in B's subtree but forensically belong to an
+    A-originating session. Without `cwd` + `origin_project`, `host`
+    + `user` alone cannot distinguish "vibe-vault write from a
+    vibe-vault session" from "vibe-vault write from a recmeet
+    session" — every edit from the same workstation looks identical
+    in the metadata. The Phase 6 stamp closes that gap and leaves a
+    greppable trail without bisecting git history.
+
+    **Privacy.** `internal/meta/sanitize.go`'s `SanitizeCWDForEmit`
+    is applied at both stamp sites: (1) if the resolved cwd is
+    inside `cfg.VaultPath`, emit empty (the target path already
+    appears in the `project:` field, so a vault-rooted cwd is
+    noise); (2) otherwise `sanitize.CompressHome` strips the
+    `/home/<user>/` prefix to `~/...`, keeping the
+    project-identifying tail as the forensic payload; (3)
+    trailer-unsafe byte sequences (`-->`, `\n`) are neutralized
+    (`-->` → `--`, newline → space) so a crafted cwd cannot truncate
+    the `provenanceTrailerRE` match and leak bytes back into parsed
+    narrative. Linux `os.Getwd()` in practice never returns such
+    paths, but write-side sanitization means the parser regex at
+    `internal/mcp/tools_iterations.go:29` stays unchanged.
 
     **Testability.** `os.Hostname()` calls `uname(2)` and cannot be
     overridden via `$HOSTNAME`, so a package-level `hostnameFunc`
     var provides a test seam — unit tests swap it out;
     `$VIBE_VAULT_HOSTNAME` gives operators a production override
-    via the same code path the tests exercise. Integration tests
-    use `VIBE_VAULT_HOSTNAME=vibe-vault-test` as a sentinel that
-    the extended `no_real_vault_mutation` canary greps for across
-    every written note and iteration block — belt-and-suspenders
-    insurance beyond the existing mtime/sha snapshot. A stray write
-    with an unexpected real hostname now fails the canary
+    via the same code path the tests exercise. Phase 6 mirrors that
+    pattern exactly: a package-level `cwdFunc = os.Getwd` with a
+    `$VIBE_VAULT_CWD` env override checked first in `cwd()`. One
+    precedent, two fields, one test-seam mechanism. Integration
+    tests use `VIBE_VAULT_HOSTNAME=vibe-vault-test` and
+    `VIBE_VAULT_CWD=/vibe-vault-test-cwd` as sentinels that the
+    extended `no_real_vault_mutation` canary greps for across every
+    written note and iteration block — belt-and-suspenders insurance
+    beyond the existing mtime/sha snapshot. A stray write with an
+    unexpected real hostname or cwd now fails the canary
     immediately, regardless of whether the snapshot happens to
     match.
