@@ -5,7 +5,9 @@ package vaultsync
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/suykerbuyk/vibe-vault/internal/testutil/gitx"
@@ -234,6 +236,41 @@ func TestCommitAndPush_MultipleRemotes(t *testing.T) {
 		if pushErr != nil {
 			t.Errorf("remote %s: unexpected error: %v", name, pushErr)
 		}
+	}
+}
+
+func TestCommitAndPush_NoIdentity(t *testing.T) {
+	gitx.SandboxNoIdentity(t)
+	dir := gitx.InitTestRepoNoIdentity(t)
+
+	// Create a file so there's something stage-able. Probe should
+	// fail before staging anyway, but having a file proves no commit
+	// was created post-failure.
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := CommitAndPush(dir, "should fail")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "no git identity") {
+		t.Errorf("error missing 'no git identity': %q", msg)
+	}
+	if !strings.Contains(msg, "git config --global user.email") {
+		t.Errorf("error missing remediation hint: %q", msg)
+	}
+
+	// Verify no commit was created. `git log` on a repo with no
+	// commits exits non-zero with "does not have any commits yet".
+	// Use exec.Command directly to avoid gitx.GitRun's identity injection.
+	cmd := exec.Command("git", "-C", dir, "log", "--oneline")
+	cmd.Env = []string{"HOME=" + t.TempDir()}
+	out, _ := cmd.CombinedOutput()
+	if len(out) > 0 && !strings.Contains(string(out), "does not have any commits") &&
+		!strings.Contains(string(out), "bad default revision") {
+		t.Errorf("expected no commits, got: %s", out)
 	}
 }
 

@@ -61,6 +61,45 @@ func AddRemote(t *testing.T, repoDir, name, url string) {
 	}
 }
 
+// InitTestRepoNoIdentity creates a repo at a tempdir with NO
+// committer identity configured anywhere — used to test fail-fast
+// identity-probe paths. Pairs with SandboxNoIdentity to fully
+// isolate the test from the operator's git config.
+func InitTestRepoNoIdentity(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	GitRun(t, dir, "init", "-b", "main")
+	return dir
+}
+
+// SandboxNoIdentity scrubs all four git-identity env vars and
+// redirects HOME / XDG_CONFIG_HOME / GIT_CONFIG_GLOBAL /
+// GIT_CONFIG_SYSTEM so subprocess `git` invocations cannot
+// resolve any identity. Restores prior values via t.Cleanup.
+//
+// Required because t.Setenv only SETS values; it does not unset.
+// Empty-string env values are not equivalent to unset for git's
+// identity-resolution path.
+func SandboxNoIdentity(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{
+		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL",
+		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
+	} {
+		prev, ok := os.LookupEnv(k)
+		os.Unsetenv(k)
+		if ok {
+			key := k
+			val := prev
+			t.Cleanup(func() { os.Setenv(key, val) })
+		}
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "xdg"))
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+}
+
 // GitRun runs a git command in the given directory with deterministic
 // identity env vars. Returns combined output; fatals on error.
 func GitRun(t *testing.T, dir string, args ...string) string {

@@ -280,6 +280,10 @@ func Pull(vaultPath string) (*PullResult, error) {
 func CommitAndPush(vaultPath, message string) (*PushResult, error) {
 	result := &PushResult{}
 
+	if err := checkIdentity(vaultPath); err != nil {
+		return nil, err
+	}
+
 	remotes, err := listRemotes(vaultPath)
 	if err != nil {
 		return nil, fmt.Errorf("listing remotes: %w", err)
@@ -384,6 +388,24 @@ func resolveConflicts(vaultPath string, result *PullResult) (bool, error) {
 	return err == nil, err
 }
 
+
+// checkIdentity returns nil if git can resolve a committer identity
+// from any source (.git/config, ~/.gitconfig, system gitconfig,
+// $XDG_CONFIG_HOME/git/config, or GIT_AUTHOR_*/GIT_COMMITTER_* env
+// vars). Returns an actionable error otherwise. Uses `git var
+// GIT_AUTHOR_IDENT` — git's own identity-resolution check, mirroring
+// what `git commit` does internally.
+func checkIdentity(vaultPath string) error {
+	if _, err := gitCmd(vaultPath, 5*time.Second, "var", "GIT_AUTHOR_IDENT"); err != nil {
+		return fmt.Errorf(
+			"no git identity configured for vault commits (HOME=%s). "+
+				"Set with: git config --global user.email <addr> && "+
+				"git config --global user.name <name>",
+			os.Getenv("HOME"),
+		)
+	}
+	return nil
+}
 
 // gitCmd runs a git command in the vault directory with a timeout.
 func gitCmd(dir string, timeout time.Duration, args ...string) (string, error) {
