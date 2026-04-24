@@ -44,11 +44,22 @@ detect.go    │   │   │   │
         friction/        │    Correction detection, composite friction scoring (0-100)
         analyze.go       │    (from dialogue + narrative + token efficiency + threads)
                          ▼
+            meta/             Provenance stamping: meta.Stamp() fills
+            provenance.go     NoteData.Host + NoteData.User immediately after
+                              NoteDataFromTranscript returns. Host resolves via
+                              $VIBE_VAULT_HOSTNAME → os.Hostname(); User resolves
+                              via $USER → $LOGNAME → user.Current(). Single
+                              convergence point covers all three capture paths
+                              (MCP vv_capture_session, hook Stop/SessionEnd,
+                              zed-reprocess). cwd is intentionally NOT stamped
+                              yet — deferred pending MCP-vs-hook cwd semantics.
+                         ▼
             index/            Score related sessions (shared files, threads, branch, tag)
             related.go
                          ▼
             render/           Build NoteData, render frontmatter + markdown body
-            markdown.go       (includes Work Performed + related sessions)
+            markdown.go       (host/user emitted in YAML before summary;
+                              includes Work Performed + related sessions)
                          ▼
                     os.WriteFile    Projects/{project}/sessions/YYYY-MM-DD-NN.md
                     index.Save()   .vibe-vault/session-index.json
@@ -176,6 +187,15 @@ Claude Code / AI agent
         ├─── vv_get_friction_trends  → trends.Compute() → format
         ├─── vv_get_effectiveness    → effectiveness analysis
         ├─── vv_capture_session      → session.CaptureFromParsed()
+        │                            → (stamps Host/User via meta.Stamp(),
+        │                               see Data Flow diagram above)
+        ├─── vv_append_iteration     → assemble iteration block
+        │                            → append provenanceTrailer(meta.Stamp())
+        │                               HTML-comment trailer into the block
+        │                               (tools_context_write.go:~254);
+        │                               vv_get_iterations strips it via
+        │                               parseIterations before returning
+        │                               narrative to callers.
         │
         └─── prompt: vv_session_guidelines → agent instructions for capture
 ```

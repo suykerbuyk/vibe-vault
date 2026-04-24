@@ -704,3 +704,62 @@ Key architectural and design decisions in vibe-vault, with rationale.
     `vv context sync --force --project <name>` — emits `UPDATE` and
     seeds `workflow.md.baseline`. Payload savings realized on this
     project: ~714 B from compression plus proper substitution.
+
+53. **Provenance metadata is stamped algorithmically at write time in
+    Go, not passed as MCP arguments.** Iter 136's three-pass
+    bisection of `integration-test-harness-vault-leak` couldn't
+    distinguish test-caused from operator-caused vault pollution
+    because no provenance metadata survived in any write. Git's
+    committer field is too coarse: a single `vv vault push` bundles
+    writes from many `vv` invocations across potentially multiple
+    machines, so the commit author identifies who synced, not who
+    produced each individual session note or iteration block.
+
+    **Decision.** `internal/meta/Stamp()` resolves `host` (via
+    `$VIBE_VAULT_HOSTNAME` or `os.Hostname()`) and `user` (via
+    `$USER` → `$LOGNAME` → `user.Current()`) at write time in the Go
+    binary. The values flow into `render.NoteData.Host`/`.User` for
+    session notes (emitted in YAML frontmatter before `summary:`) and
+    into an HTML-comment trailer appended to each iteration block.
+    MCP tool schemas do **not** gain `host`/`user`/`cwd` parameters —
+    agents stay oblivious and the feature is algorithmic to how
+    `vv capture` and `vv_append_iteration` work.
+
+    **Rationale.** Three goals align: (1) keep agents oblivious — no
+    per-call boilerplate for callers to pass context metadata, and
+    no way for a buggy or misbehaving agent to forge a fake host;
+    (2) don't burn context tokens — the feature adds zero input
+    surface to MCP tools, so the bootstrap payload and every
+    subsequent call stay the same size; (3) single convergence
+    points — `session.CaptureFromParsed` is the one function all
+    three session-capture paths (MCP `vv_capture_session`, hook
+    Stop/SessionEnd, zed-reprocess) route through, and
+    `vv_append_iteration`'s block-assembly step is the single site
+    for iteration provenance. One stamp call per convergence point
+    covers every call path upstream.
+
+    **Why `cwd` is deferred to Phase 6.** The MCP-path `os.Getwd()`
+    returns the MCP server process's cwd (wherever the agent
+    invoked `vv mcp`, often not the repo being worked on). The hook
+    path receives a Claude-Code-supplied cwd via JSON input — the
+    cwd where Claude Code was launched, which may itself be a
+    worktree, subdirectory, or unrelated shell. These two values
+    answer different forensic questions ("where did the server run"
+    vs. "where did the session start"), and shipping one of them
+    under the same `cwd:` key would encode that ambiguity into
+    written output permanently. Phase 6 revisits the decision once
+    the initial `host` + `user` shipment operates in practice and
+    we have real traffic to reason about.
+
+    **Testability.** `os.Hostname()` calls `uname(2)` and cannot be
+    overridden via `$HOSTNAME`, so a package-level `hostnameFunc`
+    var provides a test seam — unit tests swap it out;
+    `$VIBE_VAULT_HOSTNAME` gives operators a production override
+    via the same code path the tests exercise. Integration tests
+    use `VIBE_VAULT_HOSTNAME=vibe-vault-test` as a sentinel that
+    the extended `no_real_vault_mutation` canary greps for across
+    every written note and iteration block — belt-and-suspenders
+    insurance beyond the existing mtime/sha snapshot. A stray write
+    with an unexpected real hostname now fails the canary
+    immediately, regardless of whether the snapshot happens to
+    match.
