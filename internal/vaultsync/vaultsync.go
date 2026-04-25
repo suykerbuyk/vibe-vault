@@ -193,6 +193,10 @@ func EnsureRemote(vaultPath string) error {
 func Pull(vaultPath string) (*PullResult, error) {
 	result := &PullResult{}
 
+	if err := checkIdentity(vaultPath); err != nil {
+		return nil, err
+	}
+
 	remotes, err := listRemotes(vaultPath)
 	if err != nil {
 		return nil, fmt.Errorf("listing remotes: %w", err)
