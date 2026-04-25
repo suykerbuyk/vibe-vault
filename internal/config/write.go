@@ -11,6 +11,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/suykerbuyk/vibe-vault/internal/meta"
 	"github.com/suykerbuyk/vibe-vault/internal/sanitize"
 )
 
@@ -20,7 +21,7 @@ func ConfigDir() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return filepath.Join(xdg, "vibe-vault")
 	}
-	home, _ := os.UserHomeDir()
+	home, _ := meta.HomeDir()
 	return filepath.Join(home, ".config", "vibe-vault")
 }
 
@@ -30,7 +31,7 @@ func DataDir() string {
 	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
 		return filepath.Join(xdg, "vibe-vault")
 	}
-	home, _ := os.UserHomeDir()
+	home, _ := meta.HomeDir()
 	return filepath.Join(home, ".local", "share", "vibe-vault")
 }
 

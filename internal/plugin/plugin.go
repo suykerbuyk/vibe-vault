@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/meta"
 )
 
 const (
@@ -48,7 +49,7 @@ func MCPConfigPath() string {
 
 // ClaudePluginsDir returns the Claude Code plugins directory (~/.claude/plugins/).
 func ClaudePluginsDir() string {
-	home, _ := os.UserHomeDir()
+	home, _ := meta.HomeDir()
 	return filepath.Join(home, ".claude", "plugins")
 }
 
