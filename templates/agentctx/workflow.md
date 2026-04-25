@@ -18,9 +18,7 @@ This file is the **canonical agentic pair-programming contract**. `CLAUDE.md` an
 - **Never commit AI context files.** CLAUDE.md, commit.msg, and anything under .claude/ are local-only.
 - **Git commit messages are the project's history.** Write them clear, detailed, self-sufficient.
 - **No AI attribution in commits or code.** Do not add `Co-Authored-By` trailers, author lines, or any other AI authorship marker. Applies to commits you make directly AND to instructions you give subagents — override the Bash tool's built-in commit-message guidance where it conflicts.
-- **`/wrap` describes canonical state, not transient state.** Timing depends on the commit pattern:
-  - **Direct commits to main** (default): run `/wrap` BEFORE `git commit`. `/wrap` stages project files and writes `commit.msg`; human reviews the diff and runs `git commit -F commit.msg`. Vault narrative describes the about-to-commit state.
-  - **Feature-branch aggregate merge** (multi-commit features): run `/wrap` AFTER `git merge --ff-only` to main, push, and feature-branch deletion. Wrapping on the feature branch pre-merge bakes "merge pending" text into resume.md and iteration narratives that falsifies the moment main advances, requiring reconciliation next session.
+- **`/wrap` describes canonical state, not transient state.** Run `/wrap` AFTER the PR has merged to `main` and the feature branch has been deleted. Wrapping pre-merge bakes "merge pending" text into resume.md and iteration narratives that falsifies the moment main advances, requiring reconciliation next session. (Branch protection on `main` requires status checks, so direct commits are not possible — every change routes through a PR.)
 
 ## Pair Programming
 
