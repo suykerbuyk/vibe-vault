@@ -24,7 +24,9 @@ func testServer() *Server {
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"msg":{"type":"string"}}}`),
 		},
 		Handler: func(params json.RawMessage) (string, error) {
-			var args struct{ Msg string `json:"msg"` }
+			var args struct {
+				Msg string `json:"msg"`
+			}
 			if len(params) > 0 {
 				json.Unmarshal(params, &args)
 			}

@@ -59,7 +59,7 @@ func TestHandleInput_SessionEnd(t *testing.T) {
 	}
 
 	// Verify the note was written
-	projDir :=filepath.Join(cfg.VaultPath, "Projects")
+	projDir := filepath.Join(cfg.VaultPath, "Projects")
 	entries, err := os.ReadDir(projDir)
 	if err != nil {
 		t.Fatalf("read projects dir: %v", err)
@@ -132,7 +132,7 @@ func TestHandleInput_StopEvent(t *testing.T) {
 	}
 
 	// Verify a checkpoint note was created
-	projDir :=filepath.Join(cfg.VaultPath, "Projects")
+	projDir := filepath.Join(cfg.VaultPath, "Projects")
 	entries, err := os.ReadDir(projDir)
 	if err != nil {
 		t.Fatalf("read projects dir: %v", err)
@@ -170,7 +170,7 @@ func TestHandleInput_StopThenSessionEnd(t *testing.T) {
 
 	// Verify only one session note file exists (overwritten, not duplicated)
 	// Only count .md files inside sessions/ dirs (history.md is at project root)
-	projDir :=filepath.Join(cfg.VaultPath, "Projects")
+	projDir := filepath.Join(cfg.VaultPath, "Projects")
 	var noteFiles []string
 	filepath.Walk(projDir, func(path string, info os.FileInfo, err error) error {
 		if err == nil && !info.IsDir() && filepath.Ext(path) == ".md" &&

@@ -14,43 +14,43 @@ import (
 
 // SessionEntry represents one session in the index.
 type SessionEntry struct {
-	SessionID   string    `json:"session_id"`
-	NotePath    string    `json:"note_path"`              // Relative to vault root
-	Project     string    `json:"project"`
-	Domain      string    `json:"domain"`
-	Date        string    `json:"date"`                   // YYYY-MM-DD
-	Iteration   int       `json:"iteration"`              // Day iteration counter
-	Title       string    `json:"title"`
-	Model       string    `json:"model,omitempty"`
-	Duration    int       `json:"duration_minutes,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	Summary     string   `json:"summary,omitempty"`
-	Decisions   []string `json:"decisions,omitempty"`
-	OpenThreads []string `json:"open_threads,omitempty"`
-	Tag         string   `json:"tag,omitempty"`
-	FilesChanged []string `json:"files_changed,omitempty"`
-	Commits        []string       `json:"commits,omitempty"`
-	Branch         string         `json:"branch,omitempty"`
-	TranscriptPath string         `json:"transcript_path,omitempty"`
-	Checkpoint     bool           `json:"checkpoint,omitempty"`
-	ToolCounts     map[string]int `json:"tool_counts,omitempty"`
-	ToolUses       int            `json:"tool_uses,omitempty"`
-	TokensIn       int            `json:"tokens_in,omitempty"`
-	TokensOut      int            `json:"tokens_out,omitempty"`
-	Messages       int            `json:"messages,omitempty"`
-	Corrections    int            `json:"corrections,omitempty"`
-	FrictionScore  int            `json:"friction_score,omitempty"`
-	EstimatedCostUSD float64        `json:"estimated_cost_usd,omitempty"`
-	ParentUUID       string         `json:"parent_uuid,omitempty"` // external entry UUID (continuation)
-	Source           string         `json:"source,omitempty"`      // "zed", etc.; empty = "claude-code"
-	Context          *ContextAvailable `json:"context,omitempty"`  // what context was available at capture time
+	SessionID        string            `json:"session_id"`
+	NotePath         string            `json:"note_path"` // Relative to vault root
+	Project          string            `json:"project"`
+	Domain           string            `json:"domain"`
+	Date             string            `json:"date"`      // YYYY-MM-DD
+	Iteration        int               `json:"iteration"` // Day iteration counter
+	Title            string            `json:"title"`
+	Model            string            `json:"model,omitempty"`
+	Duration         int               `json:"duration_minutes,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
+	Summary          string            `json:"summary,omitempty"`
+	Decisions        []string          `json:"decisions,omitempty"`
+	OpenThreads      []string          `json:"open_threads,omitempty"`
+	Tag              string            `json:"tag,omitempty"`
+	FilesChanged     []string          `json:"files_changed,omitempty"`
+	Commits          []string          `json:"commits,omitempty"`
+	Branch           string            `json:"branch,omitempty"`
+	TranscriptPath   string            `json:"transcript_path,omitempty"`
+	Checkpoint       bool              `json:"checkpoint,omitempty"`
+	ToolCounts       map[string]int    `json:"tool_counts,omitempty"`
+	ToolUses         int               `json:"tool_uses,omitempty"`
+	TokensIn         int               `json:"tokens_in,omitempty"`
+	TokensOut        int               `json:"tokens_out,omitempty"`
+	Messages         int               `json:"messages,omitempty"`
+	Corrections      int               `json:"corrections,omitempty"`
+	FrictionScore    int               `json:"friction_score,omitempty"`
+	EstimatedCostUSD float64           `json:"estimated_cost_usd,omitempty"`
+	ParentUUID       string            `json:"parent_uuid,omitempty"` // external entry UUID (continuation)
+	Source           string            `json:"source,omitempty"`      // "zed", etc.; empty = "claude-code"
+	Context          *ContextAvailable `json:"context,omitempty"`     // what context was available at capture time
 }
 
 // ContextAvailable records what project context existed when a session was captured.
 // Used for measuring whether context availability correlates with session outcomes.
 type ContextAvailable struct {
-	HasHistory      bool `json:"has_history"`               // history.md existed for the project
-	HasKnowledge    bool `json:"has_knowledge"`             // knowledge.md existed and was non-empty
+	HasHistory      bool `json:"has_history"`                // history.md existed for the project
+	HasKnowledge    bool `json:"has_knowledge"`              // knowledge.md existed and was non-empty
 	HistorySessions int  `json:"history_sessions,omitempty"` // number of sessions in the index for this project at capture time
 }
 

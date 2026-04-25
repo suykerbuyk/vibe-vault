@@ -33,10 +33,10 @@ func TestAnalyze_CorrectionsOnly(t *testing.T) {
 		},
 	}
 	stats := transcript.Stats{
-		UserMessages:      5,
-		InputTokens:       1000,
-		OutputTokens:      500,
-		FilesWritten:      map[string]bool{"a.go": true},
+		UserMessages: 5,
+		InputTokens:  1000,
+		OutputTokens: 500,
+		FilesWritten: map[string]bool{"a.go": true},
 	}
 
 	result := Analyze(dialogue, nil, stats, nil)

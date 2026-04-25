@@ -319,8 +319,8 @@ func extractUserText(e transcript.Entry) string {
 
 // --- Helpers ---
 
-func inputStr(input interface{}, key string) string {
-	m, ok := input.(map[string]interface{})
+func inputStr(input any, key string) string {
+	m, ok := input.(map[string]any)
 	if !ok {
 		return ""
 	}

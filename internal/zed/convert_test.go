@@ -80,15 +80,15 @@ func TestConvert_ToolNormalization(t *testing.T) {
 		withRawMessages(
 			rawUserMsg(t, "Fix this file"),
 			rawAgentMsgWithTools(t, "I'll fix that.",
-				[]interface{}{
-					rawToolUse("terminal", "tu-1", map[string]interface{}{"command": "ls"}),
-					rawToolUse("read_file", "tu-2", map[string]interface{}{"file_path": "main.go"}),
-					rawToolUse("edit_file", "tu-3", map[string]interface{}{"file_path": "main.go"}),
-					rawToolUse("find_path", "tu-4", map[string]interface{}{"pattern": "*.go"}),
-					rawToolUse("list_directory", "tu-5", map[string]interface{}{"path": "."}),
-					rawToolUse("create_file", "tu-6", map[string]interface{}{"file_path": "new.go"}),
+				[]any{
+					rawToolUse("terminal", "tu-1", map[string]any{"command": "ls"}),
+					rawToolUse("read_file", "tu-2", map[string]any{"file_path": "main.go"}),
+					rawToolUse("edit_file", "tu-3", map[string]any{"file_path": "main.go"}),
+					rawToolUse("find_path", "tu-4", map[string]any{"pattern": "*.go"}),
+					rawToolUse("list_directory", "tu-5", map[string]any{"path": "."}),
+					rawToolUse("create_file", "tu-6", map[string]any{"file_path": "new.go"}),
 				},
-				map[string]interface{}{},
+				map[string]any{},
 			),
 		),
 	)
@@ -304,10 +304,10 @@ func TestConvert_ToolResultsOnAgentMessage(t *testing.T) {
 		withRawMessages(
 			rawUserMsg(t, "Edit main.go"),
 			rawAgentMsgWithTools(t, "Editing.",
-				[]interface{}{
-					rawToolUse("edit_file", "tu-1", map[string]interface{}{"file_path": "main.go"}),
+				[]any{
+					rawToolUse("edit_file", "tu-1", map[string]any{"file_path": "main.go"}),
 				},
-				map[string]interface{}{
+				map[string]any{
 					"tu-1": rawToolResult("tu-1", "edit_file", "Applied edit", false),
 				},
 			),

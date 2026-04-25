@@ -40,7 +40,7 @@ func ParseDB(dbPath string, opts ParseOpts) ([]Thread, error) {
 	defer db.Close()
 
 	query := `SELECT id, COALESCE(summary, ''), COALESCE(updated_at, ''), COALESCE(worktree_branch, ''), COALESCE(parent_id, ''), data FROM threads`
-	var args []interface{}
+	var args []any
 
 	if !opts.Since.IsZero() {
 		query += ` WHERE updated_at >= ?`

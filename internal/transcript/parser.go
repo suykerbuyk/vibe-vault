@@ -69,10 +69,10 @@ func ContentBlocks(msg *Message) []ContentBlock {
 	switch c := msg.Content.(type) {
 	case string:
 		return []ContentBlock{{Type: "text", Text: c}}
-	case []interface{}:
+	case []any:
 		var blocks []ContentBlock
 		for _, item := range c {
-			m, ok := item.(map[string]interface{})
+			m, ok := item.(map[string]any)
 			if !ok {
 				continue
 			}

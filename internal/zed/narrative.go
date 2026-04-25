@@ -311,8 +311,8 @@ func inferTagFromActivities(activities []narrative.Activity) string {
 
 // --- helpers ---
 
-func inputStr(input interface{}, key string) string {
-	m, ok := input.(map[string]interface{})
+func inputStr(input any, key string) string {
+	m, ok := input.(map[string]any)
 	if !ok {
 		return ""
 	}

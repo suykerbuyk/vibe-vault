@@ -66,9 +66,9 @@ type MCPConfig struct {
 
 // HistoryConfig controls history.md pruning and decay behavior.
 type HistoryConfig struct {
-	TimelineRecentDays   int `toml:"timeline_recent_days"`   // full detail (default 7)
-	TimelineWindowDays   int `toml:"timeline_window_days"`   // condensed (default 30)
-	DecisionStaleDays    int `toml:"decision_stale_days"`    // decay threshold (default 90)
+	TimelineRecentDays   int `toml:"timeline_recent_days"`    // full detail (default 7)
+	TimelineWindowDays   int `toml:"timeline_window_days"`    // condensed (default 30)
+	DecisionStaleDays    int `toml:"decision_stale_days"`     // decay threshold (default 90)
 	KeyFilesRecencyBoost int `toml:"key_files_recency_boost"` // multiplier for recent sessions (default 3)
 }
 
@@ -109,10 +109,10 @@ type PricingConfig struct {
 
 // PricingModel defines token rates for a model name pattern.
 type PricingModel struct {
-	Pattern             string  `toml:"pattern"`              // glob pattern, e.g. "claude-*"
-	InputPerMillion     float64 `toml:"input_per_million"`    // USD per 1M input tokens
-	OutputPerMillion    float64 `toml:"output_per_million"`   // USD per 1M output tokens
-	CacheReadPerMillion float64 `toml:"cache_read_per_million"`
+	Pattern              string  `toml:"pattern"`            // glob pattern, e.g. "claude-*"
+	InputPerMillion      float64 `toml:"input_per_million"`  // USD per 1M input tokens
+	OutputPerMillion     float64 `toml:"output_per_million"` // USD per 1M output tokens
+	CacheReadPerMillion  float64 `toml:"cache_read_per_million"`
 	CacheWritePerMillion float64 `toml:"cache_write_per_million"`
 }
 

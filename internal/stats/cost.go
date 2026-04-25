@@ -11,11 +11,11 @@ import (
 
 // CostInput holds the token counts needed for cost estimation.
 type CostInput struct {
-	Model       string
-	InputTokens int
+	Model        string
+	InputTokens  int
 	OutputTokens int
-	CacheReads  int
-	CacheWrites int
+	CacheReads   int
+	CacheWrites  int
 }
 
 // EstimateCost computes the estimated USD cost for a session based on pricing config.

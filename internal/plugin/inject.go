@@ -116,12 +116,12 @@ func RegisterInstalledPlugin(installPath, version string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	data[QualifiedName] = []any{
 		map[string]any{
-			"scope":         "user",
-			"installPath":   installPath,
-			"version":       version,
-			"installedAt":   now,
-			"lastUpdated":   now,
-			"gitCommitSha":  "",
+			"scope":        "user",
+			"installPath":  installPath,
+			"version":      version,
+			"installedAt":  now,
+			"lastUpdated":  now,
+			"gitCommitSha": "",
 		},
 	}
 

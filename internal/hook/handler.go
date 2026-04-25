@@ -23,13 +23,13 @@ import (
 
 // Input is the JSON object Claude Code sends to hooks via stdin.
 type Input struct {
-	SessionID           string `json:"session_id"`
-	TranscriptPath      string `json:"transcript_path"`
-	HookEventName       string `json:"hook_event_name"`
-	CWD                 string `json:"cwd"`
-	Reason              string `json:"reason,omitempty"`
+	SessionID            string `json:"session_id"`
+	TranscriptPath       string `json:"transcript_path"`
+	HookEventName        string `json:"hook_event_name"`
+	CWD                  string `json:"cwd"`
+	Reason               string `json:"reason,omitempty"`
 	LastAssistantMessage string `json:"last_assistant_message,omitempty"`
-	PermissionMode      string `json:"permission_mode,omitempty"`
+	PermissionMode       string `json:"permission_mode,omitempty"`
 }
 
 // Handle reads hook input from stdin and processes it.

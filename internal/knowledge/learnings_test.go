@@ -58,9 +58,9 @@ func TestListMissingDirectoryReturnsEmptySlice(t *testing.T) {
 
 func TestListSortsAlphabeticallyBySlug(t *testing.T) {
 	root := writeVault(t, map[string]string{
-		"Knowledge/learnings/zeta.md": validLearning("Zeta", "last", "user"),
+		"Knowledge/learnings/zeta.md":  validLearning("Zeta", "last", "user"),
 		"Knowledge/learnings/alpha.md": validLearning("Alpha", "first", "user"),
-		"Knowledge/learnings/mid.md":  validLearning("Mid", "middle", "user"),
+		"Knowledge/learnings/mid.md":   validLearning("Mid", "middle", "user"),
 	})
 	got, err := List(root, "")
 	if err != nil {
@@ -138,10 +138,10 @@ func TestListRejectsUnknownType(t *testing.T) {
 
 func TestListSkipsMalformedFrontmatter(t *testing.T) {
 	root := writeVault(t, map[string]string{
-		"Knowledge/learnings/nofm.md":   "No frontmatter here, just a body.\n",
-		"Knowledge/learnings/unterm.md": "---\nname: X\ndescription: Y\ntype: user\n",
+		"Knowledge/learnings/nofm.md":    "No frontmatter here, just a body.\n",
+		"Knowledge/learnings/unterm.md":  "---\nname: X\ndescription: Y\ntype: user\n",
 		"Knowledge/learnings/missing.md": "---\nname: X\n---\n\nbody\n",
-		"Knowledge/learnings/ok.md":     validLearning("OK", "good", "user"),
+		"Knowledge/learnings/ok.md":      validLearning("OK", "good", "user"),
 	})
 	var warn bytes.Buffer
 	got, err := listWithWarn(root, "", &warn)

@@ -10,11 +10,11 @@ import (
 func TestBuildPrompt_AllSections(t *testing.T) {
 	input := &Input{
 		SessionNote: &noteparse.Note{
-			Date:        "2026-03-27",
-			Summary:     "Implemented synthesis agent",
-			Tag:         "implementation",
-			Decisions:   []string{"Use single LLM call"},
-			OpenThreads: []string{"Need integration tests"},
+			Date:         "2026-03-27",
+			Summary:      "Implemented synthesis agent",
+			Tag:          "implementation",
+			Decisions:    []string{"Use single LLM call"},
+			OpenThreads:  []string{"Need integration tests"},
 			FilesChanged: []string{"internal/synthesis/prompt.go"},
 		},
 		GitDiff:     "+func buildUserPrompt() {}\n",

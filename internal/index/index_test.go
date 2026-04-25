@@ -372,7 +372,7 @@ func TestIndexParentUUIDOmitEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var raw map[string]map[string]interface{}
+	var raw map[string]map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
@@ -1316,7 +1316,7 @@ func TestProjectContextAllOldSessions(t *testing.T) {
 			SessionID: id, Project: "proj",
 			Date:      fmt.Sprintf("2026-01-%02d", i+1),
 			Iteration: 1, NotePath: fmt.Sprintf("Projects/proj/sessions/2026-01-%02d-01.md", i+1),
-			Summary:   fmt.Sprintf("Old session %d", i),
+			Summary: fmt.Sprintf("Old session %d", i),
 		}
 	}
 

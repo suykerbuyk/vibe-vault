@@ -28,10 +28,10 @@ type Options struct {
 type vaultState int
 
 const (
-	vaultNone        vaultState = iota // nothing exists
-	vaultVibeVault                     // .obsidian/ + Projects/ — an existing vibe-vault
-	vaultObsidian                      // .obsidian/ only — not a vibe-vault
-	vaultStateDir                      // .vibe-vault/ only — state dir exists
+	vaultNone      vaultState = iota // nothing exists
+	vaultVibeVault                   // .obsidian/ + Projects/ — an existing vibe-vault
+	vaultObsidian                    // .obsidian/ only — not a vibe-vault
+	vaultStateDir                    // .vibe-vault/ only — state dir exists
 )
 
 // detectVault inspects targetPath and returns its vault state.

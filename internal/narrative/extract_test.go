@@ -8,13 +8,13 @@ import (
 )
 
 func makeEntry(role, content string, toolUses ...transcript.ContentBlock) transcript.Entry {
-	var msgContent interface{} = content
+	var msgContent any = content
 	if len(toolUses) > 0 {
-		blocks := []interface{}{
-			map[string]interface{}{"type": "text", "text": content},
+		blocks := []any{
+			map[string]any{"type": "text", "text": content},
 		}
 		for _, tu := range toolUses {
-			blocks = append(blocks, map[string]interface{}{
+			blocks = append(blocks, map[string]any{
 				"type":  "tool_use",
 				"id":    tu.ID,
 				"name":  tu.Name,
@@ -41,8 +41,8 @@ func makeToolResult(toolUseID string, isError bool, content string) transcript.E
 		Timestamp: time.Date(2027, 6, 15, 10, 0, 1, 0, time.UTC),
 		Message: &transcript.Message{
 			Role: "user",
-			Content: []interface{}{
-				map[string]interface{}{
+			Content: []any{
+				map[string]any{
 					"type":        "tool_result",
 					"tool_use_id": toolUseID,
 					"is_error":    isError,
@@ -72,7 +72,7 @@ func TestClassifyToolUse_Write(t *testing.T) {
 		Type: "tool_use",
 		ID:   "tu1",
 		Name: "Write",
-		Input: map[string]interface{}{
+		Input: map[string]any{
 			"file_path": "/home/dev/project/src/handler.go",
 		},
 	}
@@ -93,7 +93,7 @@ func TestClassifyToolUse_Edit(t *testing.T) {
 		Type: "tool_use",
 		ID:   "tu1",
 		Name: "Edit",
-		Input: map[string]interface{}{
+		Input: map[string]any{
 			"file_path": "/home/dev/project/src/handler.go",
 		},
 	}
@@ -144,9 +144,9 @@ func TestClassifyToolUse_AskUserQuestion(t *testing.T) {
 		Type: "tool_use",
 		ID:   "tu1",
 		Name: "AskUserQuestion",
-		Input: map[string]interface{}{
-			"questions": []interface{}{
-				map[string]interface{}{
+		Input: map[string]any{
+			"questions": []any{
+				map[string]any{
 					"question": "Which database should we use?",
 				},
 			},
@@ -169,7 +169,7 @@ func TestClassifyToolUse_Task(t *testing.T) {
 		Type: "tool_use",
 		ID:   "tu1",
 		Name: "Task",
-		Input: map[string]interface{}{
+		Input: map[string]any{
 			"description": "Research auth patterns",
 		},
 	}
@@ -402,7 +402,7 @@ func TestExtractActivitiesWithHistory_WriteToKnownFile(t *testing.T) {
 	entries := []transcript.Entry{
 		makeEntry("assistant", "Updating file.", transcript.ContentBlock{
 			Type: "tool_use", ID: "tu1", Name: "Write",
-			Input: map[string]interface{}{"file_path": "/home/dev/project/src/handler.go"},
+			Input: map[string]any{"file_path": "/home/dev/project/src/handler.go"},
 		}),
 		makeToolResult("tu1", false, "ok"),
 	}
@@ -420,7 +420,7 @@ func TestExtractActivitiesWithHistory_WriteToNewFile(t *testing.T) {
 	entries := []transcript.Entry{
 		makeEntry("assistant", "Creating file.", transcript.ContentBlock{
 			Type: "tool_use", ID: "tu1", Name: "Write",
-			Input: map[string]interface{}{"file_path": "/home/dev/project/src/new_file.go"},
+			Input: map[string]any{"file_path": "/home/dev/project/src/new_file.go"},
 		}),
 		makeToolResult("tu1", false, "ok"),
 	}
@@ -437,12 +437,12 @@ func TestExtractActivitiesWithHistory_SecondWriteSameFile(t *testing.T) {
 	entries := []transcript.Entry{
 		makeEntry("assistant", "First write.", transcript.ContentBlock{
 			Type: "tool_use", ID: "tu1", Name: "Write",
-			Input: map[string]interface{}{"file_path": "/home/dev/project/src/new.go"},
+			Input: map[string]any{"file_path": "/home/dev/project/src/new.go"},
 		}),
 		makeToolResult("tu1", false, "ok"),
 		makeEntry("assistant", "Second write.", transcript.ContentBlock{
 			Type: "tool_use", ID: "tu2", Name: "Write",
-			Input: map[string]interface{}{"file_path": "/home/dev/project/src/new.go"},
+			Input: map[string]any{"file_path": "/home/dev/project/src/new.go"},
 		}),
 		makeToolResult("tu2", false, "ok"),
 	}
@@ -464,10 +464,10 @@ func TestExtractKnownFiles(t *testing.T) {
 			Type: "file-history-snapshot",
 			Message: &transcript.Message{
 				Role: "user",
-				Content: []interface{}{
-					map[string]interface{}{
+				Content: []any{
+					map[string]any{
 						"type": "text",
-						"input": map[string]interface{}{
+						"input": map[string]any{
 							"/home/dev/project/a.go": "content-a",
 							"/home/dev/project/b.go": "content-b",
 						},
@@ -557,7 +557,7 @@ func TestExtractCommits(t *testing.T) {
 			Type:  "tool_use",
 			ID:    "c1",
 			Name:  "Bash",
-			Input: map[string]interface{}{"command": `git commit -m "feat: add auth"`},
+			Input: map[string]any{"command": `git commit -m "feat: add auth"`},
 		}),
 		makeToolResult("c1", false, "[feat/auth abc1234] feat: add auth\n 1 file changed"),
 	}
@@ -579,7 +579,7 @@ func TestExtractCommits_FailedCommit(t *testing.T) {
 			Type:  "tool_use",
 			ID:    "c1",
 			Name:  "Bash",
-			Input: map[string]interface{}{"command": `git commit -m "feat: add auth"`},
+			Input: map[string]any{"command": `git commit -m "feat: add auth"`},
 		}),
 		makeToolResult("c1", true, "error: nothing to commit"),
 	}
@@ -595,7 +595,7 @@ func TestExtractCommits_NoCommits(t *testing.T) {
 			Type:  "tool_use",
 			ID:    "r1",
 			Name:  "Read",
-			Input: map[string]interface{}{"file_path": "/tmp/foo.go"},
+			Input: map[string]any{"file_path": "/tmp/foo.go"},
 		}),
 		makeToolResult("r1", false, "file contents"),
 	}
@@ -612,7 +612,7 @@ func TestExtract_PopulatesCommits(t *testing.T) {
 			Type:  "tool_use",
 			ID:    "c1",
 			Name:  "Bash",
-			Input: map[string]interface{}{"command": `git commit -m "feat: add auth"`},
+			Input: map[string]any{"command": `git commit -m "feat: add auth"`},
 		}),
 		makeToolResult("c1", false, "[feat/auth abc1234] feat: add auth\n 1 file changed"),
 	}
@@ -635,14 +635,14 @@ func TestExtractCommits_Multiple(t *testing.T) {
 			Type:  "tool_use",
 			ID:    "c1",
 			Name:  "Bash",
-			Input: map[string]interface{}{"command": `git commit -m "feat: add auth"`},
+			Input: map[string]any{"command": `git commit -m "feat: add auth"`},
 		}),
 		makeToolResult("c1", false, "[feat/auth abc1234] feat: add auth\n 1 file changed"),
 		makeEntry("assistant", "Second commit.", transcript.ContentBlock{
 			Type:  "tool_use",
 			ID:    "c2",
 			Name:  "Bash",
-			Input: map[string]interface{}{"command": `git commit -m "fix: handle nil"`},
+			Input: map[string]any{"command": `git commit -m "fix: handle nil"`},
 		}),
 		makeToolResult("c2", false, "[feat/auth def5678] fix: handle nil\n 1 file changed"),
 	}

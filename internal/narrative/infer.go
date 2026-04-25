@@ -13,10 +13,10 @@ import (
 
 // Inference thresholds and limits.
 const (
-	maxTitleLen     = 80  // maximum title length before truncation
-	truncatedTitleLen = 77  // truncated title length (leaves room for "...")
-	maxThreads     = 5   // cap on open threads
-	maxDecisions   = 5   // cap on extracted decisions
+	maxTitleLen       = 80 // maximum title length before truncation
+	truncatedTitleLen = 77 // truncated title length (leaves room for "...")
+	maxThreads        = 5  // cap on open threads
+	maxDecisions      = 5  // cap on extracted decisions
 )
 
 // inferTitle picks the best session title from segment user requests and transcript.

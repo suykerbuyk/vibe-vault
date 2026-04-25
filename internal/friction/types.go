@@ -23,10 +23,10 @@ type Signals struct {
 
 // Result holds the full friction analysis output.
 type Result struct {
-	Score       int        // Composite friction score 0-100
+	Score       int // Composite friction score 0-100
 	Signals     Signals
 	Corrections []Correction
-	Summary     []string   // Human-readable signal descriptions
+	Summary     []string // Human-readable signal descriptions
 }
 
 // ProjectFriction holds aggregated friction data across sessions for a project.

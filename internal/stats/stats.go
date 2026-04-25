@@ -46,11 +46,11 @@ type ProjectStats struct {
 
 // ModelStats holds per-model aggregate metrics.
 type ModelStats struct {
-	Name       string
-	Sessions   int
-	TokensIn   int
-	Messages   int
-	TokPerMsg  float64
+	Name      string
+	Sessions  int
+	TokensIn  int
+	Messages  int
+	TokPerMsg float64
 }
 
 // TagStats holds per-tag counts.
@@ -77,11 +77,11 @@ type SourceStats struct {
 
 // MonthStats holds per-month aggregate metrics.
 type MonthStats struct {
-	Month    string // YYYY-MM
-	Sessions int
-	TokensIn int
+	Month     string // YYYY-MM
+	Sessions  int
+	TokensIn  int
 	TokensOut int
-	CostUSD  float64
+	CostUSD   float64
 }
 
 // Compute builds a Summary from index entries, optionally filtered by project.

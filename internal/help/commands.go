@@ -24,11 +24,11 @@ type Arg struct {
 
 // Command describes a vv subcommand (or the top-level binary when Name is "").
 type Command struct {
-	Name        string   // "init", "hook", etc; "" for top-level
-	Synopsis    string   // one-line description (lowercase, for --help header)
-	Brief       string   // short description for usage table (capitalized)
-	Usage       string   // full usage line, e.g. "vv init [path] [--git]"
-	TableUsage  string   // shortened usage for the top-level table (if different from Usage)
+	Name        string // "init", "hook", etc; "" for top-level
+	Synopsis    string // one-line description (lowercase, for --help header)
+	Brief       string // short description for usage table (capitalized)
+	Usage       string // full usage line, e.g. "vv init [path] [--git]"
+	TableUsage  string // shortened usage for the top-level table (if different from Usage)
 	Args        []Arg
 	Flags       []Flag
 	Description string   // multi-line prose (stored verbatim)
@@ -83,9 +83,9 @@ new vault.`,
 }
 
 var CmdHook = Command{
-	Name:     "hook",
-	Synopsis: "Claude Code hook handler",
-	Brief:    "Hook mode (reads stdin from Claude Code)",
+	Name:       "hook",
+	Synopsis:   "Claude Code hook handler",
+	Brief:      "Hook mode (reads stdin from Claude Code)",
 	Usage:      "vv hook [install | uninstall | --event <name>]",
 	TableUsage: "vv hook [install | ...]",
 	Flags: []Flag{
@@ -553,9 +553,9 @@ prints an informational message and exits successfully.`,
 }
 
 var CmdContext = Command{
-	Name:     "context",
-	Synopsis: "manage vault-resident AI context files",
-	Brief:    "Manage vault-resident AI context",
+	Name:       "context",
+	Synopsis:   "manage vault-resident AI context files",
+	Brief:      "Manage vault-resident AI context",
 	Usage:      "vv context [init | migrate | sync]",
 	TableUsage: "vv context [init | ...]",
 	Description: `Manages AI workflow context files (resume, iterations, tasks) that live
@@ -691,9 +691,9 @@ deployment). Run from each repo root without --all for repo-side updates.`,
 }
 
 var CmdTemplates = Command{
-	Name:     "templates",
-	Synopsis: "inspect, compare, and reset vault templates",
-	Brief:    "Inspect, compare, and reset vault templates",
+	Name:       "templates",
+	Synopsis:   "inspect, compare, and reset vault templates",
+	Brief:      "Inspect, compare, and reset vault templates",
 	Usage:      "vv templates [list | diff | show | reset]",
 	TableUsage: "vv templates [list | ...]",
 	Description: `Manages vault templates against their built-in defaults. Over time,

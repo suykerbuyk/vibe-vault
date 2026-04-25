@@ -84,12 +84,12 @@ func TestExtractNarrative_ToolActivities(t *testing.T) {
 		withRawMessages(
 			rawUserMsg(t, "Fix this"),
 			rawAgentMsgWithTools(t, "Let me fix it.",
-				[]interface{}{
-					rawToolUse("edit_file", "tu-1", map[string]interface{}{"file_path": "/src/main.go"}),
-					rawToolUse("terminal", "tu-2", map[string]interface{}{"command": "go test ./..."}),
-					rawToolUse("read_file", "tu-3", map[string]interface{}{"file_path": "/src/util.go"}),
+				[]any{
+					rawToolUse("edit_file", "tu-1", map[string]any{"file_path": "/src/main.go"}),
+					rawToolUse("terminal", "tu-2", map[string]any{"command": "go test ./..."}),
+					rawToolUse("read_file", "tu-3", map[string]any{"file_path": "/src/util.go"}),
 				},
-				map[string]interface{}{},
+				map[string]any{},
 			),
 		),
 	)
@@ -136,10 +136,10 @@ func TestExtractNarrative_CommitExtraction(t *testing.T) {
 		withRawMessages(
 			rawUserMsg(t, "commit this"),
 			rawAgentMsgWithTools(t, "Committing.",
-				[]interface{}{
-					rawToolUse("terminal", "tu-1", map[string]interface{}{"command": "git commit -m \"fix bug\""}),
+				[]any{
+					rawToolUse("terminal", "tu-1", map[string]any{"command": "git commit -m \"fix bug\""}),
 				},
-				map[string]interface{}{
+				map[string]any{
 					"tu-1": rawToolResult("tu-1", "terminal", "[main abcdef1] fix bug\n 1 file changed", false),
 				},
 			),
@@ -167,10 +167,10 @@ func TestExtractNarrative_ErrorDetection(t *testing.T) {
 		withRawMessages(
 			rawUserMsg(t, "edit file"),
 			rawAgentMsgWithTools(t, "Editing.",
-				[]interface{}{
-					rawToolUse("edit_file", "tu-1", map[string]interface{}{"file_path": "main.go"}),
+				[]any{
+					rawToolUse("edit_file", "tu-1", map[string]any{"file_path": "main.go"}),
 				},
-				map[string]interface{}{
+				map[string]any{
 					"tu-1": rawToolResult("tu-1", "edit_file", "file not found", true),
 				},
 			),
@@ -196,10 +196,10 @@ func TestExtractNarrative_GitCommitActivity(t *testing.T) {
 		withRawMessages(
 			rawUserMsg(t, "commit"),
 			rawAgentMsgWithTools(t, "",
-				[]interface{}{
-					rawToolUse("terminal", "tu-1", map[string]interface{}{"command": "git commit -m \"add feature\""}),
+				[]any{
+					rawToolUse("terminal", "tu-1", map[string]any{"command": "git commit -m \"add feature\""}),
 				},
-				map[string]interface{}{},
+				map[string]any{},
 			),
 		),
 	)
@@ -227,20 +227,20 @@ func TestExtractNarrative_GitCommitActivity(t *testing.T) {
 func TestExtractNarrative_TagInference(t *testing.T) {
 	tests := []struct {
 		name     string
-		tools    []interface{}
+		tools    []any
 		expected string
 	}{
 		{
 			"build heavy",
-			[]interface{}{
-				rawToolUse("create_file", "1", map[string]interface{}{"file_path": "a.go"}),
-				rawToolUse("create_file", "2", map[string]interface{}{"file_path": "b.go"}),
+			[]any{
+				rawToolUse("create_file", "1", map[string]any{"file_path": "a.go"}),
+				rawToolUse("create_file", "2", map[string]any{"file_path": "b.go"}),
 			},
 			"build",
 		},
 		{
 			"explore heavy",
-			[]interface{}{
+			[]any{
 				rawToolUse("read_file", "1", nil),
 				rawToolUse("grep", "2", nil),
 				rawToolUse("find_path", "3", nil),
@@ -249,11 +249,11 @@ func TestExtractNarrative_TagInference(t *testing.T) {
 		},
 		{
 			"test heavy",
-			[]interface{}{
-				rawToolUse("terminal", "1", map[string]interface{}{"command": "go test ./..."}),
-				rawToolUse("edit_file", "2", map[string]interface{}{"file_path": "x.go"}),
-				rawToolUse("terminal", "3", map[string]interface{}{"command": "make test"}),
-				rawToolUse("terminal", "4", map[string]interface{}{"command": "go test -run TestX"}),
+			[]any{
+				rawToolUse("terminal", "1", map[string]any{"command": "go test ./..."}),
+				rawToolUse("edit_file", "2", map[string]any{"file_path": "x.go"}),
+				rawToolUse("terminal", "3", map[string]any{"command": "make test"}),
+				rawToolUse("terminal", "4", map[string]any{"command": "go test -run TestX"}),
 			},
 			"test",
 		},
@@ -264,7 +264,7 @@ func TestExtractNarrative_TagInference(t *testing.T) {
 			thread := parseTestThread(t,
 				withRawMessages(
 					rawUserMsg(t, "do stuff"),
-					rawAgentMsgWithTools(t, "", tt.tools, map[string]interface{}{}),
+					rawAgentMsgWithTools(t, "", tt.tools, map[string]any{}),
 				),
 			)
 			result := ExtractNarrative(thread)
@@ -301,10 +301,10 @@ func TestExtractNarrative_WorkPerformed(t *testing.T) {
 		withRawMessages(
 			rawUserMsg(t, "test"),
 			rawAgentMsgWithTools(t, "",
-				[]interface{}{
-					rawToolUse("edit_file", "tu-1", map[string]interface{}{"file_path": "/src/main.go"}),
+				[]any{
+					rawToolUse("edit_file", "tu-1", map[string]any{"file_path": "/src/main.go"}),
 				},
-				map[string]interface{}{},
+				map[string]any{},
 			),
 		),
 	)

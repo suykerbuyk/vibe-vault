@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	maxDiffBytes     = 8 * 1024
+	maxDiffBytes      = 8 * 1024
 	maxKnowledgeBytes = 12 * 1024
 	maxResumeBytes    = 12 * 1024
 	gitTimeout        = 5 * time.Second

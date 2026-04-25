@@ -46,7 +46,7 @@ type Learning struct {
 
 // StaleEntry identifies an entry that is no longer accurate.
 type StaleEntry struct {
-	File    string `json:"file"`    // "knowledge.md" or "resume.md"
+	File    string `json:"file"` // "knowledge.md" or "resume.md"
 	Section string `json:"section"`
 	Index   int    `json:"index"` // 0-based bullet index within section
 	Entry   string `json:"entry"` // approximate text (fallback matching)

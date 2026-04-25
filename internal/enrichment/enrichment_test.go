@@ -176,7 +176,7 @@ func TestGenerate_MockProvider(t *testing.T) {
 	}
 
 	input := PromptInput{
-		UserText:     "implement enrichment",
+		UserText:      "implement enrichment",
 		AssistantText: "done",
 		Duration:      5,
 		UserMessages:  2,

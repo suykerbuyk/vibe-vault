@@ -89,10 +89,10 @@ func analyzeProject(project string, entries []index.SessionEntry) ProjectReport 
 		duration    []float64
 	}
 	cohorts := map[string]*cohortData{
-		"none (0)":       {},
-		"early (1-10)":   {},
+		"none (0)":         {},
+		"early (1-10)":     {},
 		"building (11-30)": {},
-		"mature (30+)":   {},
+		"mature (30+)":     {},
 	}
 
 	var xs, ys []float64 // for Pearson: HistorySessions vs FrictionScore
