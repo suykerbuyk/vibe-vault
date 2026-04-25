@@ -522,55 +522,10 @@ Key architectural and design decisions in vibe-vault, with rationale.
     JSON response — consumer code stays uniform, and vault-side data
     hygiene issues land on the operator instead of the agent.
 
-50. **Marker-delimited block injection via schema migration (v8→v9).** The
-    canonical "Data workflow" section in each project's `agentctx/resume.md`
-    is managed by the schema v8→v9 migration inside `vv context sync`
-    rather than a dedicated subcommand. Rationale:
-
-    - **Reuse existing pipeline.** `vv context sync` already walks every
-      qualifying project, runs schema migrations, and propagates templates
-      via three-way baseline comparison. A new `vv config sync` subcommand
-      would duplicate that machinery and collide with `vv context sync`
-      conceptually.
-    - **Reachable from every call site.** `/restart`, `/wrap`, and manual
-      `vv context sync` invocations all pick up v9 automatically — no new
-      entry point for humans or scripts to discover.
-    - **Inherits `--dry-run`, `--force`, `.pinned`, `--all`.** Free with
-      the existing pipeline; a fresh subcommand would re-implement each.
-
-    **Span-only baseline.** The migration writes
-    `agentctx/resume.md.datablock.baseline` containing only the injected
-    block (the span between the two markers), not the whole file. Other
-    migrations' `.baseline` files may exist alongside and track the
-    whole-file state of `resume.md`; mixing the two would cause one
-    migration's baseline refresh to clobber the other's conflict
-    detection. The distinct filename (`.datablock.baseline`) keeps them
-    orthogonal — v9 only compares the span, and the three-way comparison
-    for the block survives unrelated edits elsewhere in `resume.md`.
-
-    **Two opt-out layers.** `.pinned` on the Tier-3 snippet freezes the
-    snippet body (user retains local wording forever); the sibling file
-    `resume.md.no-data-workflow` suppresses injection entirely (the
-    project acknowledges the workflow but doesn't want the section in
-    its resume). Split rather than unified because the two workflows are
-    actually different: pinning lets a project customize the wording,
-    opt-out declines the block at all. A single flag would conflate them.
-
-    **Marker choice.** HTML comments (`<!-- vv:data-workflow:start -->`)
-    render as invisible in Obsidian and standard markdown viewers, so
-    the block's boundaries don't clutter the rendered resume. The
-    `vv:` prefix reserves a namespace for future marker-delimited
-    blocks managed by the same machinery (e.g., vv-injected security
-    notes, team-wide disclaimers) without a second naming convention.
-
-    **Current `--dry-run` caveat.** `syncProject()` short-circuits
-    migrations in dry-run mode with a coarse `DRY-RUN` action per
-    migration. `MigrationContext` carries a `DryRun` field that
-    `migrate8to9` honours when invoked directly (e.g., from tests or
-    future callers), but the outer Sync pipeline never reaches that
-    branch today. Extending `syncProject` to call migrations with
-    `ctx.DryRun=true` and let them emit finer-grained dry-run output is
-    deferred — v9's current dry-run behaviour matches v1–v8.
+50. **Marker-delimited block injection (v8→v9) — retired iter 145.**
+    The `migrate8to9` mechanism for injecting a "Data workflow" block
+    into per-project resume.md was removed once all operator vaults
+    reached v10. Historical detail in iterations.md.
 
 51. **Shipped-capability descriptions live in `agentctx/features.md`,
     not `resume.md`.** `resume.md` is loaded into every session's

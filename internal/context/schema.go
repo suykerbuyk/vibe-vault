@@ -88,7 +88,6 @@ var migrations = []Migration{
 	{From: 5, To: 6, Apply: migrate5to6},
 	{From: 6, To: 7, Apply: migrate6to7},
 	{From: 7, To: 8, Apply: migrate7to8},
-	{From: 8, To: 9, Apply: migrate8to9},
 	{From: 9, To: 10, Apply: migrate9to10},
 }
 
@@ -115,10 +114,11 @@ func migrate0to1(ctx MigrationContext) ([]FileAction, error) {
 // migrate1to2 is implemented in sync.go (adds agentctx symlink, relative paths).
 // Placeholder here for the migration registry — the real implementation is in sync.go.
 
-// migrate9to10 is a no-op. v10 is a contract-marker bump: projects at v10 are
-// under the invariants-only Current State contract enforced by the synthesis
-// agent and vv_update_resume guard. The migration machinery runs the outer
-// .version bump automatically; no file-level changes are required.
+// migrate9to10 is a no-op marker: its presence in the registry causes the
+// migration framework to bump .version from 8 (or 9) to 10 for any vault
+// not yet at LatestSchemaVersion. The retired migrate8to9 mechanism (see
+// DESIGN.md #50) has no successor; v9 is no longer a meaningful resting
+// state, so this single entry brings post-v7 vaults straight to v10.
 func migrate9to10(_ MigrationContext) ([]FileAction, error) {
 	return nil, nil
 }

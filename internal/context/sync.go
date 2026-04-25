@@ -104,11 +104,10 @@ func syncProject(cfg config.Config, repoPath, project string, opts SyncOpts) (*P
 		}
 
 		// NOTE: the outer short-circuit below bypasses m.Apply(mctx)
-		// entirely when DryRun is set, so mctx.DryRun is currently only
-		// exercised by unit tests that invoke migrations directly. Once
-		// the per-migration dry-run reporting is ready to land (DESIGN.md
-		// #50 follow-up), remove this short-circuit and let each migration
-		// honour mctx.DryRun itself.
+		// entirely when DryRun is set, leaving mctx.DryRun unconsumed by
+		// any current migration. The field is reserved for the next
+		// migration that wants finer-grained dry-run output (carried-
+		// forward thread in resume.md).
 		if opts.DryRun {
 			psr.Actions = append(psr.Actions, FileAction{
 				Path:     fmt.Sprintf("migration %d→%d", m.From, m.To),
