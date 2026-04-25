@@ -128,7 +128,7 @@ func Convert(thread *Thread) (*transcript.Transcript, error) {
 		entry.Message = &transcript.Message{
 			Role:    msg.Role,
 			Model:   model,
-			Content: toContentInterface(contentBlocks),
+			Content: toContentAny(contentBlocks),
 		}
 
 		entries = append(entries, entry)
@@ -227,9 +227,9 @@ func aggregateTokenUsage(usage map[string]TokenUsage) (input, output, reads, wri
 	return
 }
 
-// toContentInterface converts content blocks to the []interface{} format
+// toContentAny converts content blocks to the []any format
 // expected by transcript.ContentBlocks.
-func toContentInterface(blocks []any) any {
+func toContentAny(blocks []any) any {
 	if len(blocks) == 0 {
 		return ""
 	}
