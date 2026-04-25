@@ -458,7 +458,7 @@ func TestPropagateSharedCommands(t *testing.T) {
 	// Create existing project command (no baseline → legacy)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "existing.md"), []byte("# Project"), 0o644)
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, false)
+	actions := propagateSharedSubdir(vault, agentctxDir, "commands", false, false)
 
 	// Should have CREATE for new-cmd and CUSTOMIZED for existing (legacy, no baseline)
 	if len(actions) != 2 {
@@ -568,7 +568,7 @@ func TestPropagateSharedCommands_ErrorSurfaced(t *testing.T) {
 	os.Chmod(agentctxDir, 0o555)
 	t.Cleanup(func() { os.Chmod(agentctxDir, 0o755) })
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, false)
+	actions := propagateSharedSubdir(vault, agentctxDir, "commands", false, false)
 
 	if len(actions) == 0 {
 		t.Fatal("expected ERROR action, got empty slice")
@@ -592,7 +592,7 @@ func TestPropagateSharedCommands_CustomizedDetected(t *testing.T) {
 	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte("# New Template Version"), 0o644)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# Old Project Version"), 0o644)
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, false)
+	actions := propagateSharedSubdir(vault, agentctxDir, "commands", false, false)
 
 	// Should have CUSTOMIZED action (legacy file, no baseline, content differs)
 	if len(actions) != 1 {
@@ -622,7 +622,7 @@ func TestPropagateSharedCommands_BaselineAutoUpdate(t *testing.T) {
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# Old Template"), 0o644)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md.baseline"), []byte("# Old Template"), 0o644)
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, false)
+	actions := propagateSharedSubdir(vault, agentctxDir, "commands", false, false)
 
 	if len(actions) != 1 {
 		t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
@@ -657,7 +657,7 @@ func TestPropagateSharedCommands_BaselineConflict(t *testing.T) {
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# User Edit"), 0o644)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md.baseline"), []byte("# Original"), 0o644)
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, false)
+	actions := propagateSharedSubdir(vault, agentctxDir, "commands", false, false)
 
 	if len(actions) != 1 {
 		t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
@@ -686,7 +686,7 @@ func TestPropagateSharedCommands_BaselineConflictForce(t *testing.T) {
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# User Edit"), 0o644)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md.baseline"), []byte("# Original"), 0o644)
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, true) // force=true
+	actions := propagateSharedSubdir(vault, agentctxDir, "commands", false, true) // force=true
 
 	if len(actions) != 1 {
 		t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
@@ -715,7 +715,7 @@ func TestPropagateSharedCommands_TemplateUnchanged(t *testing.T) {
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# User Customized"), 0o644)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md.baseline"), []byte("# Original"), 0o644)
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, false)
+	actions := propagateSharedSubdir(vault, agentctxDir, "commands", false, false)
 
 	if len(actions) != 0 {
 		t.Errorf("expected 0 actions (template unchanged), got %d: %v", len(actions), actions)
@@ -733,7 +733,7 @@ func TestPropagateSharedCommands_IdenticalBackfillsBaseline(t *testing.T) {
 	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte(content), 0o644)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte(content), 0o644)
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, false)
+	actions := propagateSharedSubdir(vault, agentctxDir, "commands", false, false)
 
 	// No actions — content is identical (baseline backfilled silently)
 	if len(actions) != 0 {
@@ -762,7 +762,7 @@ func TestPropagateSharedCommands_PinnedSkipped(t *testing.T) {
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# My Custom"), 0o644)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md.pinned"), []byte("pinned\n"), 0o644)
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, false)
+	actions := propagateSharedSubdir(vault, agentctxDir, "commands", false, false)
 
 	// No actions — pinned file is skipped
 	if len(actions) != 0 {
@@ -786,7 +786,7 @@ func TestPropagateSharedCommands_ForceOverwritesLegacy(t *testing.T) {
 	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte("# New Template"), 0o644)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# Old Template"), 0o644)
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, true) // force
+	actions := propagateSharedSubdir(vault, agentctxDir, "commands", false, true) // force
 
 	if len(actions) != 1 {
 		t.Fatalf("expected 1 action, got %d: %v", len(actions), actions)
@@ -819,7 +819,7 @@ func TestPropagateSharedCommands_ForceUpdatePinnedSkipped(t *testing.T) {
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# My Custom"), 0o644)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md.pinned"), []byte("pinned\n"), 0o644)
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, true)
+	actions := propagateSharedSubdir(vault, agentctxDir, "commands", false, true)
 
 	if len(actions) != 0 {
 		t.Errorf("expected 0 actions for pinned file, got %d: %v", len(actions), actions)
@@ -843,7 +843,7 @@ func TestPropagateSharedCommands_ForceUpdateCleansStale(t *testing.T) {
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte("# Old"), 0o644)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md.pending"), []byte("# Stale Pending"), 0o644)
 
-	propagateSharedCommands(vault, agentctxDir, false, true)
+	propagateSharedSubdir(vault, agentctxDir, "commands", false, true)
 
 	// Stale .pending should be removed
 	if _, err := os.Stat(filepath.Join(agentctxDir, "commands", "wrap.md.pending")); !os.IsNotExist(err) {
@@ -868,7 +868,7 @@ func TestPropagateSharedCommands_ForceUpdateIdenticalSkipped(t *testing.T) {
 	os.WriteFile(filepath.Join(tmplCmds, "wrap.md"), []byte(content), 0o644)
 	os.WriteFile(filepath.Join(agentctxDir, "commands", "wrap.md"), []byte(content), 0o644)
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, true)
+	actions := propagateSharedSubdir(vault, agentctxDir, "commands", false, true)
 
 	if len(actions) != 0 {
 		t.Errorf("expected 0 actions for identical content, got %d: %v", len(actions), actions)
@@ -978,7 +978,7 @@ func TestPropagateSharedCommands_CreateErrorSurfaced(t *testing.T) {
 	os.Chmod(cmdsDir, 0o555)
 	t.Cleanup(func() { os.Chmod(cmdsDir, 0o755) })
 
-	actions := propagateSharedCommands(vault, agentctxDir, false, false)
+	actions := propagateSharedSubdir(vault, agentctxDir, "commands", false, false)
 
 	if len(actions) == 0 {
 		t.Fatal("expected ERROR action for write failure, got empty slice")
