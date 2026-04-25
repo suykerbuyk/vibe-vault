@@ -200,11 +200,6 @@ func discoverProjects(vaultPath string) []string {
 // vault Templates/agentctx/ to per-project agentctx/ and then to repo .claude/.
 var propagateDirs = []string{"commands", "skills"}
 
-// propagateSharedCommands is a backward-compatible wrapper.
-func propagateSharedCommands(vaultPath, agentctxPath string, dryRun, force bool) []FileAction {
-	return propagateSharedSubdir(vaultPath, agentctxPath, "commands", dryRun, force)
-}
-
 // propagateSharedSubdir propagates entries from Templates/agentctx/{subdir}/
 // to a project's agentctx/{subdir}/ using three-way baseline comparison.
 //
