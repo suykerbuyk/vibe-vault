@@ -2,6 +2,8 @@ version: "2"
 run:
   modules-download-mode: readonly
 linters:
+  enable:
+    - forbidigo
   disable:
     - depguard
     - exhaustruct
@@ -21,6 +23,11 @@ linters:
     errcheck:
       check-type-assertions: true
       check-blank: false
+    forbidigo:
+      forbid:
+        - pattern: '^os\.UserHomeDir$'
+          msg: 'use buildEnvWithHome/buildEnvWithHomeUser sandbox helpers; canary helpers may bypass with //nolint:forbidigo + justification comment'
+      analyze-types: true
     govet:
       enable:
         - shadow
@@ -38,6 +45,8 @@ linters:
       - linters:
           - errcheck
         path: _test\.go
+      - linters: [forbidigo]
+        path-except: '^test/.*_test\.go$'
     paths:
       - third_party$
       - builtin$
