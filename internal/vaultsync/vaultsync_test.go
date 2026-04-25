@@ -274,6 +274,40 @@ func TestCommitAndPush_NoIdentity(t *testing.T) {
 	}
 }
 
+func TestPull_NoIdentity(t *testing.T) {
+	gitx.SandboxNoIdentity(t)
+	dir := gitx.InitTestRepoNoIdentity(t)
+
+	// Configure a remote so the early no-remotes guard would otherwise
+	// pass and Pull would proceed to rebase. The probe must reject
+	// before listRemotes is even consulted.
+	bare := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "origin", bare)
+
+	_, err := Pull(dir)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "no git identity") {
+		t.Errorf("error missing 'no git identity': %q", msg)
+	}
+	if !strings.Contains(msg, "git config --global user.email") {
+		t.Errorf("error missing remediation hint: %q", msg)
+	}
+
+	// Verify no commit was created. `git log` on a repo with no
+	// commits exits non-zero with "does not have any commits yet".
+	// Use exec.Command directly to avoid gitx.GitRun's identity injection.
+	cmd := exec.Command("git", "-C", dir, "log", "--oneline")
+	cmd.Env = []string{"HOME=" + t.TempDir()}
+	out, _ := cmd.CombinedOutput()
+	if len(out) > 0 && !strings.Contains(string(out), "does not have any commits") &&
+		!strings.Contains(string(out), "bad default revision") {
+		t.Errorf("expected no commits, got: %s", out)
+	}
+}
+
 func TestPull_NoRemote(t *testing.T) {
 	dir := gitx.InitTestRepo(t)
 
