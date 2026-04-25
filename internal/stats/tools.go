@@ -12,10 +12,10 @@ import (
 
 // ToolMetric holds effectiveness data for a single tool.
 type ToolMetric struct {
-	Name       string
-	Uses       int
-	Errors     int
-	Recoveries int // errors followed by successful retry
+	Name        string
+	Uses        int
+	Errors      int
+	Recoveries  int // errors followed by successful retry
 	SuccessRate float64
 }
 

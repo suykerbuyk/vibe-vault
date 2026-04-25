@@ -108,10 +108,10 @@ const (
 )
 
 type diffOp struct {
-	kind   opKind
-	line   string
-	aLine  int // 0-based line number in A
-	bLine  int // 0-based line number in B
+	kind  opKind
+	line  string
+	aLine int // 0-based line number in A
+	bLine int // 0-based line number in B
 }
 
 type hunk struct {

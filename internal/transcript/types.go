@@ -7,18 +7,18 @@ import "time"
 
 // Entry represents a single line in a Claude Code JSONL transcript.
 type Entry struct {
-	Type      string    `json:"type"`
-	UUID      string    `json:"uuid"`
-	ParentUUID string   `json:"parentUuid"`
-	SessionID string    `json:"sessionId"`
-	Timestamp time.Time `json:"timestamp"`
-	CWD       string    `json:"cwd"`
-	Version   string    `json:"version"`
-	GitBranch string    `json:"gitBranch"`
+	Type       string    `json:"type"`
+	UUID       string    `json:"uuid"`
+	ParentUUID string    `json:"parentUuid"`
+	SessionID  string    `json:"sessionId"`
+	Timestamp  time.Time `json:"timestamp"`
+	CWD        string    `json:"cwd"`
+	Version    string    `json:"version"`
+	GitBranch  string    `json:"gitBranch"`
 
 	// Present on assistant messages
-	Message   *Message  `json:"message,omitempty"`
-	RequestID string    `json:"requestId,omitempty"`
+	Message   *Message `json:"message,omitempty"`
+	RequestID string   `json:"requestId,omitempty"`
 
 	// Present on system messages
 	Subtype string `json:"subtype,omitempty"`
@@ -32,30 +32,30 @@ type Entry struct {
 	PlanContent string `json:"planContent,omitempty"`
 
 	// Present on tool result entries (type=user with tool results)
-	ToolUseResult        *ToolUseResult `json:"toolUseResult,omitempty"`
-	SourceToolAssistantUUID string      `json:"sourceToolAssistantUUID,omitempty"`
+	ToolUseResult           *ToolUseResult `json:"toolUseResult,omitempty"`
+	SourceToolAssistantUUID string         `json:"sourceToolAssistantUUID,omitempty"`
 }
 
 // Message is the inner message object on user/assistant entries.
 type Message struct {
-	Role    string      `json:"role"`
-	Model   string      `json:"model,omitempty"`
-	ID      string      `json:"id,omitempty"`
-	Content interface{} `json:"content"` // string or []ContentBlock
-	Usage   *Usage      `json:"usage,omitempty"`
+	Role    string `json:"role"`
+	Model   string `json:"model,omitempty"`
+	ID      string `json:"id,omitempty"`
+	Content any    `json:"content"` // string or []ContentBlock
+	Usage   *Usage `json:"usage,omitempty"`
 }
 
 // ContentBlock represents one block in a content array.
 type ContentBlock struct {
-	Type      string      `json:"type"`
-	Text      string      `json:"text,omitempty"`
-	Thinking  string      `json:"thinking,omitempty"`
-	ID        string      `json:"id,omitempty"`         // tool_use id
-	Name      string      `json:"name,omitempty"`       // tool name
-	Input     interface{} `json:"input,omitempty"`       // tool input
-	ToolUseID string      `json:"tool_use_id,omitempty"` // tool_result
-	Content   interface{} `json:"content,omitempty"`     // tool_result content (string or array)
-	IsError   bool        `json:"is_error,omitempty"`
+	Type      string `json:"type"`
+	Text      string `json:"text,omitempty"`
+	Thinking  string `json:"thinking,omitempty"`
+	ID        string `json:"id,omitempty"`          // tool_use id
+	Name      string `json:"name,omitempty"`        // tool name
+	Input     any    `json:"input,omitempty"`       // tool input
+	ToolUseID string `json:"tool_use_id,omitempty"` // tool_result
+	Content   any    `json:"content,omitempty"`     // tool_result content (string or array)
+	IsError   bool   `json:"is_error,omitempty"`
 }
 
 // Usage tracks token consumption for an assistant message.
@@ -75,23 +75,23 @@ type ToolUseResult struct {
 
 // Stats holds aggregated statistics for a parsed transcript.
 type Stats struct {
-	SessionID    string
-	Model        string
-	GitBranch    string
-	CWD          string
-	StartTime    time.Time
-	EndTime      time.Time
-	Duration     time.Duration
-	UserMessages int
+	SessionID         string
+	Model             string
+	GitBranch         string
+	CWD               string
+	StartTime         time.Time
+	EndTime           time.Time
+	Duration          time.Duration
+	UserMessages      int
 	AssistantMessages int
-	ToolUses     int
-	InputTokens  int
-	OutputTokens int
-	CacheReads   int
-	CacheWrites  int
-	FilesRead    map[string]bool
-	FilesWritten map[string]bool
-	ToolCounts   map[string]int
+	ToolUses          int
+	InputTokens       int
+	OutputTokens      int
+	CacheReads        int
+	CacheWrites       int
+	FilesRead         map[string]bool
+	FilesWritten      map[string]bool
+	ToolCounts        map[string]int
 
 	// Phase 4: Extended extraction fields
 
@@ -100,18 +100,18 @@ type Stats struct {
 	ThinkingTokens int // approximate thinking content length (chars)
 
 	// Turn duration metrics (from system turn_duration entries)
-	TurnDurations  []int // turn durations in ms
-	AvgTurnDuration int  // average turn duration in ms
-	MaxTurnDuration int  // maximum turn duration in ms
+	TurnDurations   []int // turn durations in ms
+	AvgTurnDuration int   // average turn duration in ms
+	MaxTurnDuration int   // maximum turn duration in ms
 
 	// File history snapshot data (ground truth file tracking)
 	FilesModifiedBySnapshot []string // file paths from file-history-snapshot entries
 
 	// Session metadata
-	Slug             string   // session name/slug
-	CCVersion        string   // Claude Code version
-	Branches         []string // all unique git branches observed
-	AutoCompactions  int      // count of auto-triggered compactions
+	Slug            string   // session name/slug
+	CCVersion       string   // Claude Code version
+	Branches        []string // all unique git branches observed
+	AutoCompactions int      // count of auto-triggered compactions
 
 	// Session continuity (/continue detection)
 	ParentUUID string // UUID of an entry outside this transcript (indicates continuation)

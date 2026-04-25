@@ -35,11 +35,11 @@ var AllSections = []string{
 
 // Inject configuration constants.
 const (
-	recentSessionCap  = 5     // max recent sessions in output
+	recentSessionCap   = 5    // max recent sessions in output
 	decisionDaysWindow = 30   // days to look back for decisions
-	decisionCap       = 10    // max decisions in output
-	threadCap         = 10    // max open threads in output
-	defaultMaxTokens  = 2000  // default token budget for output
+	decisionCap        = 10   // max decisions in output
+	threadCap          = 10   // max open threads in output
+	defaultMaxTokens   = 2000 // default token budget for output
 )
 
 // Opts configures the inject build.
@@ -67,11 +67,11 @@ type FrictionSummary struct {
 
 // Result is the structured inject output.
 type Result struct {
-	Project   string          `json:"project"`
-	Summary   string          `json:"summary,omitempty"`
-	Sessions  []SessionItem   `json:"sessions,omitempty"`
-	Threads   []string        `json:"threads,omitempty"`
-	Decisions []string        `json:"decisions,omitempty"`
+	Project   string           `json:"project"`
+	Summary   string           `json:"summary,omitempty"`
+	Sessions  []SessionItem    `json:"sessions,omitempty"`
+	Threads   []string         `json:"threads,omitempty"`
+	Decisions []string         `json:"decisions,omitempty"`
 	Friction  *FrictionSummary `json:"friction,omitempty"`
 }
 
@@ -333,7 +333,6 @@ func isResolvedByDecisions(thread string, decisions []string) bool {
 	}
 	return false
 }
-
 
 // filterResult returns a copy of Result with only the requested sections populated.
 func filterResult(r Result, sections []string) Result {

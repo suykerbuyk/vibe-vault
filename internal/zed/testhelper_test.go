@@ -62,7 +62,7 @@ func makeTestDB(t *testing.T, rows ...testRow) string {
 }
 
 // compressJSON marshals v to JSON and compresses with zstd.
-func compressJSON(t *testing.T, v interface{}) []byte {
+func compressJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	data, err := json.Marshal(v)
 	if err != nil {
@@ -91,13 +91,13 @@ func compressJSONRaw(t *testing.T, data []byte) []byte {
 
 // rawThread builds a raw JSON map matching the Zed thread format.
 type rawThread struct {
-	Title             string                 `json:"title"`
-	Model             *ZedModel              `json:"model"`
-	Messages          []json.RawMessage      `json:"messages"`
-	DetailedSummary   *string                `json:"detailed_summary"`
-	ProjectSnapshot   *rawProjectSnapshot    `json:"initial_project_snapshot"`
-	RequestTokenUsage map[string]TokenUsage  `json:"request_token_usage"`
-	Version           string                 `json:"version"`
+	Title             string                `json:"title"`
+	Model             *ZedModel             `json:"model"`
+	Messages          []json.RawMessage     `json:"messages"`
+	DetailedSummary   *string               `json:"detailed_summary"`
+	ProjectSnapshot   *rawProjectSnapshot   `json:"initial_project_snapshot"`
+	RequestTokenUsage map[string]TokenUsage `json:"request_token_usage"`
+	Version           string                `json:"version"`
 }
 
 type rawProjectSnapshot struct {
@@ -160,10 +160,10 @@ func makeThreadJSON(t *testing.T, opts ...threadOpt) []byte {
 
 func rawUserMsg(t *testing.T, text string) json.RawMessage {
 	t.Helper()
-	msg := map[string]interface{}{
-		"User": map[string]interface{}{
+	msg := map[string]any{
+		"User": map[string]any{
 			"id":      "user-" + text[:min(8, len(text))],
-			"content": []interface{}{map[string]string{"Text": text}},
+			"content": []any{map[string]string{"Text": text}},
 		},
 	}
 	data, _ := json.Marshal(msg)
@@ -172,14 +172,14 @@ func rawUserMsg(t *testing.T, text string) json.RawMessage {
 
 func rawUserMsgWithMention(t *testing.T, text, absPath string) json.RawMessage {
 	t.Helper()
-	msg := map[string]interface{}{
-		"User": map[string]interface{}{
+	msg := map[string]any{
+		"User": map[string]any{
 			"id": "user-mention",
-			"content": []interface{}{
+			"content": []any{
 				map[string]string{"Text": text},
-				map[string]interface{}{
-					"Mention": map[string]interface{}{
-						"uri":     map[string]interface{}{"File": map[string]string{"abs_path": absPath}},
+				map[string]any{
+					"Mention": map[string]any{
+						"uri":     map[string]any{"File": map[string]string{"abs_path": absPath}},
 						"content": "file contents here",
 					},
 				},
@@ -192,10 +192,10 @@ func rawUserMsgWithMention(t *testing.T, text, absPath string) json.RawMessage {
 
 func rawAgentMsg(t *testing.T, text string) json.RawMessage {
 	t.Helper()
-	msg := map[string]interface{}{
-		"Agent": map[string]interface{}{
-			"content":      []interface{}{map[string]string{"Text": text}},
-			"tool_results": map[string]interface{}{},
+	msg := map[string]any{
+		"Agent": map[string]any{
+			"content":      []any{map[string]string{"Text": text}},
+			"tool_results": map[string]any{},
 		},
 	}
 	data, _ := json.Marshal(msg)
@@ -204,28 +204,28 @@ func rawAgentMsg(t *testing.T, text string) json.RawMessage {
 
 func rawAgentMsgWithThinking(t *testing.T, thinking, text string) json.RawMessage {
 	t.Helper()
-	msg := map[string]interface{}{
-		"Agent": map[string]interface{}{
-			"content": []interface{}{
-				map[string]interface{}{"Thinking": map[string]string{"text": thinking, "signature": "sig"}},
+	msg := map[string]any{
+		"Agent": map[string]any{
+			"content": []any{
+				map[string]any{"Thinking": map[string]string{"text": thinking, "signature": "sig"}},
 				map[string]string{"Text": text},
 			},
-			"tool_results": map[string]interface{}{},
+			"tool_results": map[string]any{},
 		},
 	}
 	data, _ := json.Marshal(msg)
 	return data
 }
 
-func rawAgentMsgWithTools(t *testing.T, text string, tools []interface{}, toolResults map[string]interface{}) json.RawMessage {
+func rawAgentMsgWithTools(t *testing.T, text string, tools []any, toolResults map[string]any) json.RawMessage {
 	t.Helper()
-	content := []interface{}{}
+	content := []any{}
 	if text != "" {
 		content = append(content, map[string]string{"Text": text})
 	}
 	content = append(content, tools...)
-	msg := map[string]interface{}{
-		"Agent": map[string]interface{}{
+	msg := map[string]any{
+		"Agent": map[string]any{
 			"content":      content,
 			"tool_results": toolResults,
 		},
@@ -235,9 +235,9 @@ func rawAgentMsgWithTools(t *testing.T, text string, tools []interface{}, toolRe
 }
 
 // rawToolUse creates a ToolUse content block in Zed's format.
-func rawToolUse(name, id string, input map[string]interface{}) interface{} {
-	return map[string]interface{}{
-		"ToolUse": map[string]interface{}{
+func rawToolUse(name, id string, input map[string]any) any {
+	return map[string]any{
+		"ToolUse": map[string]any{
 			"id":    id,
 			"name":  name,
 			"input": input,
@@ -246,8 +246,8 @@ func rawToolUse(name, id string, input map[string]interface{}) interface{} {
 }
 
 // rawToolResult creates a tool result entry for the Agent's tool_results map.
-func rawToolResult(toolUseID, toolName, output string, isError bool) interface{} {
-	return map[string]interface{}{
+func rawToolResult(toolUseID, toolName, output string, isError bool) any {
+	return map[string]any{
 		"tool_use_id": toolUseID,
 		"tool_name":   toolName,
 		"is_error":    isError,

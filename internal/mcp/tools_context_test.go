@@ -156,9 +156,9 @@ func TestListTasksBasic(t *testing.T) {
 
 func TestListTasksIncludeDone(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
-		"Projects/testproj/agentctx/tasks/active-task.md":          "# Active Task\nStatus: in-progress\nPriority: medium\n",
-		"Projects/testproj/agentctx/tasks/done/old-task.md":        "# Old Task\nStatus: done\nPriority: low\n",
-		"Projects/testproj/agentctx/tasks/cancelled/bad-task.md":   "# Bad Task\nStatus: cancelled\nPriority: low\n",
+		"Projects/testproj/agentctx/tasks/active-task.md":        "# Active Task\nStatus: in-progress\nPriority: medium\n",
+		"Projects/testproj/agentctx/tasks/done/old-task.md":      "# Old Task\nStatus: done\nPriority: low\n",
+		"Projects/testproj/agentctx/tasks/cancelled/bad-task.md": "# Bad Task\nStatus: cancelled\nPriority: low\n",
 	})
 
 	tool := NewListTasksTool(cfg)
@@ -229,7 +229,7 @@ func TestListTasksPathTraversal(t *testing.T) {
 func TestListTasksStatusFormats(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
 		"Projects/testproj/agentctx/tasks/plain.md":   "# Plain Format\nStatus: active\nPriority: high\n",
-		"Projects/testproj/agentctx/tasks/heading.md":  "# Heading Format\n## Status: pending\n## Priority: low\n",
+		"Projects/testproj/agentctx/tasks/heading.md": "# Heading Format\n## Status: pending\n## Priority: low\n",
 	})
 
 	tool := NewListTasksTool(cfg)
@@ -263,8 +263,8 @@ func TestListTasksStatusFormats(t *testing.T) {
 // vv_bootstrap_context payload size. Covers the Phase 1 behavior change.
 func TestListTasksOmitsEmptyMetadata(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
-		"Projects/testproj/agentctx/tasks/bare.md":       "# Bare Task\n\nNo metadata whatsoever.",
-		"Projects/testproj/agentctx/tasks/populated.md":  "# Populated Task\nStatus: active\nPriority: high\n",
+		"Projects/testproj/agentctx/tasks/bare.md":      "# Bare Task\n\nNo metadata whatsoever.",
+		"Projects/testproj/agentctx/tasks/populated.md": "# Populated Task\nStatus: active\nPriority: high\n",
 	})
 
 	tool := NewListTasksTool(cfg)
@@ -443,9 +443,9 @@ func TestBootstrapContextBasic(t *testing.T) {
 			Decisions: []string{"Used Go"}, OpenThreads: []string{"Fix tests"},
 		},
 	}, map[string]string{
-		"Projects/testproj/agentctx/workflow.md":              "# Workflow\n\nStep 1: do things.",
-		"Projects/testproj/agentctx/resume.md":                "# Resume\n\nPick up here.",
-		"Projects/testproj/agentctx/tasks/implement-auth.md":  "# Implement Auth\nStatus: in-progress\nPriority: high\n",
+		"Projects/testproj/agentctx/workflow.md":             "# Workflow\n\nStep 1: do things.",
+		"Projects/testproj/agentctx/resume.md":               "# Resume\n\nPick up here.",
+		"Projects/testproj/agentctx/tasks/implement-auth.md": "# Implement Auth\nStatus: in-progress\nPriority: high\n",
 	})
 
 	tool := NewBootstrapContextTool(cfg)
@@ -670,9 +670,9 @@ func TestListLearningsEmptyDirectoryReturnsEmptyArray(t *testing.T) {
 
 func TestListLearningsReturnsMetadata(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
-		"Knowledge/learnings/testing-philosophy.md":   validLearningFile("Testing philosophy", "proven end-to-end", "user"),
-		"Knowledge/learnings/resume-phrasing.md":      validLearningFile("Resume phrasing", "precise years", "user"),
-		"Knowledge/learnings/parallel-feedback.md":    validLearningFile("Parallel feedback", "ack asap", "feedback"),
+		"Knowledge/learnings/testing-philosophy.md": validLearningFile("Testing philosophy", "proven end-to-end", "user"),
+		"Knowledge/learnings/resume-phrasing.md":    validLearningFile("Resume phrasing", "precise years", "user"),
+		"Knowledge/learnings/parallel-feedback.md":  validLearningFile("Parallel feedback", "ack asap", "feedback"),
 	})
 
 	tool := NewListLearningsTool(cfg)
@@ -798,9 +798,9 @@ func TestBootstrapContextOmitsLearningsFieldWhenEmpty(t *testing.T) {
 
 func TestBootstrapContextEmitsLearningsFieldWhenPopulated(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
-		"Projects/testproj/agentctx/workflow.md":     "# Workflow",
-		"Knowledge/learnings/testing.md":             validLearningFile("Testing", "x", "user"),
-		"Knowledge/learnings/feedback-loop.md":       validLearningFile("Feedback loop", "y", "feedback"),
+		"Projects/testproj/agentctx/workflow.md": "# Workflow",
+		"Knowledge/learnings/testing.md":         validLearningFile("Testing", "x", "user"),
+		"Knowledge/learnings/feedback-loop.md":   validLearningFile("Feedback loop", "y", "feedback"),
 	})
 
 	tool := NewBootstrapContextTool(cfg)

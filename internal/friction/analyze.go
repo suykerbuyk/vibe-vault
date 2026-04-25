@@ -14,10 +14,10 @@ import (
 
 // Analysis thresholds for signal detection and summary generation.
 const (
-	retryThreshold         = 3      // file modifications before counting as retry
-	summaryTokensPerFile   = 20000  // tokens/file threshold for summary mention
-	summaryFileRetryPct    = 0.2    // file retry density threshold for summary mention
-	summaryErrorCyclePct   = 0.1    // error cycle density threshold for summary mention
+	retryThreshold       = 3     // file modifications before counting as retry
+	summaryTokensPerFile = 20000 // tokens/file threshold for summary mention
+	summaryFileRetryPct  = 0.2   // file retry density threshold for summary mention
+	summaryErrorCyclePct = 0.1   // error cycle density threshold for summary mention
 )
 
 // Analyze performs full friction analysis from prose dialogue, narrative, and stats.

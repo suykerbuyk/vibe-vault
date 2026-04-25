@@ -622,7 +622,7 @@ func TestInstallMCPZed_Existing(t *testing.T) {
 	home := setupHome(t)
 	path := zedSettingsPath(home)
 	writeJSON(t, path, map[string]any{
-		"theme":          "One Dark",
+		"theme": "One Dark",
 		"context_servers": map[string]any{
 			"other-tool": map[string]any{
 				"command": map[string]any{"path": "other", "args": []any{"serve"}},
@@ -1281,8 +1281,8 @@ func TestUninstallClaudePlugin_PreservesOtherEntries(t *testing.T) {
 	path := settingsPath(home)
 	writeJSON(t, path, map[string]any{
 		"extraKnownMarketplaces": map[string]any{
-			"other-marketplace":         map[string]any{"source": "test"},
-			"vibe-vault-local": map[string]any{"source": "test"},
+			"other-marketplace": map[string]any{"source": "test"},
+			"vibe-vault-local":  map[string]any{"source": "test"},
 		},
 		"enabledPlugins": map[string]any{
 			"playwright@claude-plugins-official": true,

@@ -1864,7 +1864,7 @@ func printAction(a vvcontext.FileAction) {
 	}
 }
 
-func fatal(format string, args ...interface{}) {
+func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "vv: "+format+"\n", args...)
 	os.Exit(1)
 }

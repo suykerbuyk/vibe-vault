@@ -15,21 +15,21 @@ import (
 
 // ExportEntry is a flattened session record for export.
 type ExportEntry struct {
-	Date         string  `json:"date"`
-	Project      string  `json:"project"`
-	SessionID    string  `json:"session_id"`
-	Title        string  `json:"title"`
-	Tag          string  `json:"tag"`
-	Model        string  `json:"model"`
-	Branch       string  `json:"branch"`
-	Duration     int     `json:"duration_minutes"`
-	TokensIn     int     `json:"tokens_in"`
-	TokensOut    int     `json:"tokens_out"`
-	Messages     int     `json:"messages"`
-	ToolUses     int     `json:"tool_uses"`
-	FrictionScore int   `json:"friction_score"`
-	Corrections  int     `json:"corrections"`
-	CostUSD      float64 `json:"estimated_cost_usd,omitempty"`
+	Date          string  `json:"date"`
+	Project       string  `json:"project"`
+	SessionID     string  `json:"session_id"`
+	Title         string  `json:"title"`
+	Tag           string  `json:"tag"`
+	Model         string  `json:"model"`
+	Branch        string  `json:"branch"`
+	Duration      int     `json:"duration_minutes"`
+	TokensIn      int     `json:"tokens_in"`
+	TokensOut     int     `json:"tokens_out"`
+	Messages      int     `json:"messages"`
+	ToolUses      int     `json:"tool_uses"`
+	FrictionScore int     `json:"friction_score"`
+	Corrections   int     `json:"corrections"`
+	CostUSD       float64 `json:"estimated_cost_usd,omitempty"`
 }
 
 // csvHeaders are the CSV column names.

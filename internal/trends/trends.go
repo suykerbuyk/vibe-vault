@@ -36,10 +36,10 @@ type TrendPoint struct {
 // MetricTrend holds the full time series for one metric.
 type MetricTrend struct {
 	Name       string       `json:"name"`
-	Points     []TrendPoint `json:"points"`      // most recent first
+	Points     []TrendPoint `json:"points"` // most recent first
 	OverallAvg float64      `json:"overall_avg"`
-	Direction  string       `json:"direction"`   // "improving", "worsening", "stable"
-	DeltaPct   float64      `json:"delta_pct"`   // percent change (negative = improving for friction/corrections)
+	Direction  string       `json:"direction"` // "improving", "worsening", "stable"
+	DeltaPct   float64      `json:"delta_pct"` // percent change (negative = improving for friction/corrections)
 }
 
 // Result holds the complete trends analysis.

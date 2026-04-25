@@ -181,7 +181,7 @@ func extractSnapshotFiles(e *Entry, files map[string]bool) {
 		blocks := ContentBlocks(e.Message)
 		for _, b := range blocks {
 			if b.Input != nil {
-				if m, ok := b.Input.(map[string]interface{}); ok {
+				if m, ok := b.Input.(map[string]any); ok {
 					for k := range m {
 						files[k] = true
 					}
@@ -227,7 +227,7 @@ func extractCompactionTrigger(e *Entry) string {
 
 // trackFiles extracts file paths from tool inputs to track reads and writes.
 func trackFiles(s *Stats, tu ContentBlock) {
-	input, ok := tu.Input.(map[string]interface{})
+	input, ok := tu.Input.(map[string]any)
 	if !ok {
 		return
 	}
@@ -255,7 +255,7 @@ func trackFiles(s *Stats, tu ContentBlock) {
 }
 
 // trackBashFiles extracts file paths from bash commands that write files.
-func trackBashFiles(s *Stats, input map[string]interface{}) {
+func trackBashFiles(s *Stats, input map[string]any) {
 	cmd, ok := input["command"].(string)
 	if !ok {
 		return
@@ -410,8 +410,8 @@ func isConfirmation(lower string) bool {
 }
 
 // Summary produces a JSON-serializable summary of stats.
-func (s Stats) Summary() map[string]interface{} {
-	m := map[string]interface{}{
+func (s Stats) Summary() map[string]any {
+	m := map[string]any{
 		"session_id":         s.SessionID,
 		"model":              s.Model,
 		"git_branch":         s.GitBranch,
@@ -423,7 +423,7 @@ func (s Stats) Summary() map[string]interface{} {
 		"output_tokens":      s.OutputTokens,
 	}
 	b, _ := json.Marshal(m)
-	var result map[string]interface{}
+	var result map[string]any
 	_ = json.Unmarshal(b, &result)
 	return result
 }

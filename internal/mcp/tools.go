@@ -112,10 +112,10 @@ func NewListProjectsTool(cfg config.Config) Tool {
 			}
 
 			type projectInfo struct {
-				Name             string `json:"name"`
-				SessionCount     int    `json:"session_count"`
-				FirstSession     string `json:"first_session"`
-				LastSession      string `json:"last_session"`
+				Name              string `json:"name"`
+				SessionCount      int    `json:"session_count"`
+				FirstSession      string `json:"first_session"`
+				LastSession       string `json:"last_session"`
 				FrictionDirection string `json:"friction_direction,omitempty"`
 			}
 
@@ -237,14 +237,14 @@ func NewSearchSessionsTool(cfg config.Config) Tool {
 			}
 
 			type sessionResult struct {
-				SessionID    string   `json:"session_id"`
-				Project      string   `json:"project"`
-				Date         string   `json:"date"`
-				Title        string   `json:"title"`
-				Summary      string   `json:"summary,omitempty"`
-				FrictionScore int     `json:"friction_score,omitempty"`
-				FilesChanged int      `json:"files_changed"`
-				Decisions    []string `json:"decisions,omitempty"`
+				SessionID     string   `json:"session_id"`
+				Project       string   `json:"project"`
+				Date          string   `json:"date"`
+				Title         string   `json:"title"`
+				Summary       string   `json:"summary,omitempty"`
+				FrictionScore int      `json:"friction_score,omitempty"`
+				FilesChanged  int      `json:"files_changed"`
+				Decisions     []string `json:"decisions,omitempty"`
 			}
 
 			queryLower := strings.ToLower(args.Query)

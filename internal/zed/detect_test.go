@@ -154,13 +154,13 @@ func TestDetectProject_InferFromMentions(t *testing.T) {
 
 func TestDetectProject_InferFromToolPaths(t *testing.T) {
 	// Agent reads files from different subdirs of a project — no mentions from user
-	readTool := rawToolUse("read_file", "tool-1", map[string]interface{}{
+	readTool := rawToolUse("read_file", "tool-1", map[string]any{
 		"file_path": "/home/user/code/vibe-vault/internal/zed/detect.go",
 	})
-	editTool := rawToolUse("edit_file", "tool-2", map[string]interface{}{
+	editTool := rawToolUse("edit_file", "tool-2", map[string]any{
 		"file_path": "/home/user/code/vibe-vault/cmd/vv/main.go",
 	})
-	agentMsg := rawAgentMsgWithTools(t, "Let me check", []interface{}{readTool, editTool}, map[string]interface{}{})
+	agentMsg := rawAgentMsgWithTools(t, "Let me check", []any{readTool, editTool}, map[string]any{})
 
 	thread := parseTestThread(t,
 		withRawMessages(
@@ -178,10 +178,10 @@ func TestDetectProject_InferFromToolPaths(t *testing.T) {
 
 func TestDetectProject_MentionsPlusToolPaths(t *testing.T) {
 	// Mentions and tool paths from same project → combined pool
-	readTool := rawToolUse("read_file", "tool-1", map[string]interface{}{
+	readTool := rawToolUse("read_file", "tool-1", map[string]any{
 		"file_path": "/home/user/code/myapp/pkg/server.go",
 	})
-	agentMsg := rawAgentMsgWithTools(t, "reading", []interface{}{readTool}, map[string]interface{}{})
+	agentMsg := rawAgentMsgWithTools(t, "reading", []any{readTool}, map[string]any{})
 
 	thread := parseTestThread(t,
 		withRawMessages(
@@ -279,13 +279,13 @@ name = "identity-project"
 `), 0o644)
 
 	// Thread with CWD resolved from mentions — simulate LCD resolution
-	readTool := rawToolUse("read_file", "t1", map[string]interface{}{
+	readTool := rawToolUse("read_file", "t1", map[string]any{
 		"file_path": filepath.Join(dir, "src", "main.go"),
 	})
-	readTool2 := rawToolUse("read_file", "t2", map[string]interface{}{
+	readTool2 := rawToolUse("read_file", "t2", map[string]any{
 		"file_path": filepath.Join(dir, "cmd", "app.go"),
 	})
-	agentMsg := rawAgentMsgWithTools(t, "reading", []interface{}{readTool, readTool2}, map[string]interface{}{})
+	agentMsg := rawAgentMsgWithTools(t, "reading", []any{readTool, readTool2}, map[string]any{})
 
 	thread := parseTestThread(t,
 		withRawMessages(rawUserMsg(t, "fix it"), agentMsg),
@@ -318,13 +318,13 @@ func TestCollectAbsolutePaths_Mentions(t *testing.T) {
 }
 
 func TestCollectAbsolutePaths_FiltersSystemPaths(t *testing.T) {
-	readTmp := rawToolUse("read_file", "t1", map[string]interface{}{
+	readTmp := rawToolUse("read_file", "t1", map[string]any{
 		"file_path": "/tmp/scratch.txt",
 	})
-	readReal := rawToolUse("read_file", "t2", map[string]interface{}{
+	readReal := rawToolUse("read_file", "t2", map[string]any{
 		"file_path": "/home/user/code/proj/main.go",
 	})
-	agentMsg := rawAgentMsgWithTools(t, "", []interface{}{readTmp, readReal}, map[string]interface{}{})
+	agentMsg := rawAgentMsgWithTools(t, "", []any{readTmp, readReal}, map[string]any{})
 
 	thread := parseTestThread(t, withRawMessages(rawUserMsg(t, "go"), agentMsg))
 
@@ -339,10 +339,10 @@ func TestCollectAbsolutePaths_FiltersSystemPaths(t *testing.T) {
 }
 
 func TestCollectAbsolutePaths_SkipsRelativePaths(t *testing.T) {
-	readRel := rawToolUse("read_file", "t1", map[string]interface{}{
+	readRel := rawToolUse("read_file", "t1", map[string]any{
 		"file_path": "src/main.go",
 	})
-	agentMsg := rawAgentMsgWithTools(t, "", []interface{}{readRel}, map[string]interface{}{})
+	agentMsg := rawAgentMsgWithTools(t, "", []any{readRel}, map[string]any{})
 
 	thread := parseTestThread(t, withRawMessages(rawUserMsg(t, "go"), agentMsg))
 

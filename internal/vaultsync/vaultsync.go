@@ -387,7 +387,6 @@ func resolveConflicts(vaultPath string, result *PullResult) (bool, error) {
 	return err == nil, err
 }
 
-
 // checkIdentity returns nil if git can resolve a committer identity
 // from any source (.git/config, ~/.gitconfig, system gitconfig,
 // $XDG_CONFIG_HOME/git/config, or GIT_AUTHOR_*/GIT_COMMITTER_* env

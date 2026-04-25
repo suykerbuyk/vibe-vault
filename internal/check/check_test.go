@@ -89,7 +89,7 @@ func TestCheckStateDir_Warn(t *testing.T) {
 
 func TestCheckIndex_Pass(t *testing.T) {
 	dir := t.TempDir()
-	idx := map[string]interface{}{
+	idx := map[string]any{
 		"sess-1": map[string]string{"title": "One"},
 		"sess-2": map[string]string{"title": "Two"},
 		"sess-3": map[string]string{"title": "Three"},
@@ -314,7 +314,7 @@ func TestRun_Integration(t *testing.T) {
 	stateDir := filepath.Join(vault, ".vibe-vault")
 	os.Mkdir(stateDir, 0o755)
 
-	idx := map[string]interface{}{"sess-1": map[string]string{"title": "Test"}}
+	idx := map[string]any{"sess-1": map[string]string{"title": "Test"}}
 	data, _ := json.Marshal(idx)
 	os.WriteFile(filepath.Join(stateDir, "session-index.json"), data, 0o644)
 

@@ -206,8 +206,8 @@ func detectDomain(cwd string, cfg config.Config) string {
 	cwd = filepath.Clean(cwd)
 
 	domainMap := map[string]string{
-		filepath.Clean(cfg.Domains.Work):      "work",
-		filepath.Clean(cfg.Domains.Personal):  "personal",
+		filepath.Clean(cfg.Domains.Work):       "work",
+		filepath.Clean(cfg.Domains.Personal):   "personal",
 		filepath.Clean(cfg.Domains.Opensource): "opensource",
 	}
 

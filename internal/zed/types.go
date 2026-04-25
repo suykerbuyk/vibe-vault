@@ -22,16 +22,16 @@ type Thread struct {
 	ParentID       string
 
 	// JSON payload fields.
-	Title              string                      `json:"title"`
-	Model              *ZedModel                   `json:"model"`
-	Messages           []ZedMessage                `json:"-"` // custom unmarshal
-	RawMessages        []json.RawMessage           `json:"messages"`
-	DetailedSummary    *string                     `json:"detailed_summary"`
-	ProjectSnapshot    *ProjectSnapshot            `json:"initial_project_snapshot"`
-	RequestTokenUsage  map[string]TokenUsage       `json:"request_token_usage"`
-	Version            string                      `json:"version"`
-	CompletionMode     *string                     `json:"completion_mode"`
-	Profile            *string                     `json:"profile"`
+	Title             string                `json:"title"`
+	Model             *ZedModel             `json:"model"`
+	Messages          []ZedMessage          `json:"-"` // custom unmarshal
+	RawMessages       []json.RawMessage     `json:"messages"`
+	DetailedSummary   *string               `json:"detailed_summary"`
+	ProjectSnapshot   *ProjectSnapshot      `json:"initial_project_snapshot"`
+	RequestTokenUsage map[string]TokenUsage `json:"request_token_usage"`
+	Version           string                `json:"version"`
+	CompletionMode    *string               `json:"completion_mode"`
+	Profile           *string               `json:"profile"`
 }
 
 // ZedMessage represents a single message in a thread.
@@ -62,7 +62,7 @@ type ZedContent struct {
 	// tool_use
 	ToolName string
 	ToolID   string
-	Input    interface{}
+	Input    any
 	RawInput string
 
 	// mention
@@ -72,8 +72,8 @@ type ZedContent struct {
 
 // MentionURI represents a file/selection/thread reference in a user message.
 type MentionURI struct {
-	Type     string // "file", "selection", "thread"
-	AbsPath  string
+	Type    string // "file", "selection", "thread"
+	AbsPath string
 	// Selection-specific
 	LineStart int
 	LineEnd   int
@@ -113,10 +113,10 @@ type ProjectSnapshot struct {
 
 // WorktreeSnapshot captures a single worktree's state.
 type WorktreeSnapshot struct {
-	WorktreePath string    `json:"abs_path"`
-	GitBranch    string    `json:"branch"`
-	GitSHA       string    `json:"sha"`
-	Diff         string    `json:"diff"`
+	WorktreePath string `json:"abs_path"`
+	GitBranch    string `json:"branch"`
+	GitSHA       string `json:"sha"`
+	Diff         string `json:"diff"`
 }
 
 // --- Custom JSON unmarshaling for Rust-style enums ---
@@ -183,7 +183,7 @@ func unmarshalUserMessage(data json.RawMessage) (*ZedMessage, error) {
 func unmarshalAgentMessage(data json.RawMessage) (*ZedMessage, error) {
 	var agent struct {
 		Content     []json.RawMessage          `json:"content"`
-		ToolResults map[string]json.RawMessage  `json:"tool_results"`
+		ToolResults map[string]json.RawMessage `json:"tool_results"`
 	}
 	if err := json.Unmarshal(data, &agent); err != nil {
 		return nil, fmt.Errorf("unmarshal agent: %w", err)
@@ -277,7 +277,7 @@ func unmarshalContentBlock(raw json.RawMessage) (*ZedContent, error) {
 		if err := json.Unmarshal(tuRaw, &tu); err != nil {
 			return nil, err
 		}
-		var input interface{}
+		var input any
 		if len(tu.Input) > 0 {
 			_ = json.Unmarshal(tu.Input, &input)
 		}

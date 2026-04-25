@@ -256,10 +256,10 @@ func TestParseThread_ToolUseAndResults(t *testing.T) {
 		withRawMessages(
 			rawUserMsg(t, "Fix this"),
 			rawAgentMsgWithTools(t, "Fixing.",
-				[]interface{}{
-					rawToolUse("edit_file", "tu-1", map[string]interface{}{"file_path": "main.go"}),
+				[]any{
+					rawToolUse("edit_file", "tu-1", map[string]any{"file_path": "main.go"}),
 				},
-				map[string]interface{}{
+				map[string]any{
 					"tu-1": rawToolResult("tu-1", "edit_file", "Edit applied", false),
 				},
 			),
@@ -306,20 +306,20 @@ func TestParseThread_ToolUseAndResults(t *testing.T) {
 
 func TestParseThread_ResumeMarkerSkipped(t *testing.T) {
 	// Zed can have string markers like "Resume" in the messages array
-	data := compressJSON(t, map[string]interface{}{
+	data := compressJSON(t, map[string]any{
 		"title":   "Test",
 		"model":   map[string]string{"provider": "anthropic", "model": "claude-sonnet-4-5-20250514"},
 		"version": "0.3.0",
-		"messages": []interface{}{
+		"messages": []any{
 			"Resume", // string marker
-			map[string]interface{}{
-				"User": map[string]interface{}{
+			map[string]any{
+				"User": map[string]any{
 					"id":      "u1",
-					"content": []interface{}{map[string]string{"Text": "Hello"}},
+					"content": []any{map[string]string{"Text": "Hello"}},
 				},
 			},
 		},
-		"request_token_usage": map[string]interface{}{},
+		"request_token_usage": map[string]any{},
 	})
 
 	result, err := ParseThread("resume-test", "", "", "", "", data)

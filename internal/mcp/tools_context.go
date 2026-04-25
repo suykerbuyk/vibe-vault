@@ -493,12 +493,12 @@ func NewBootstrapContextTool(cfg config.Config) Tool {
 				tasks = []taskEntry{}
 			}
 			response := struct {
-				Project                     string                    `json:"project"`
-				Workflow                    string                    `json:"workflow"`
-				Resume                      string                    `json:"resume"`
-				ActiveTasks                 []taskEntry               `json:"active_tasks"`
-				Context                     string                    `json:"context"`
-				KnowledgeLearningsAvailable *learningsAvailableHint   `json:"knowledge_learnings_available,omitempty"`
+				Project                     string                  `json:"project"`
+				Workflow                    string                  `json:"workflow"`
+				Resume                      string                  `json:"resume"`
+				ActiveTasks                 []taskEntry             `json:"active_tasks"`
+				Context                     string                  `json:"context"`
+				KnowledgeLearningsAvailable *learningsAvailableHint `json:"knowledge_learnings_available,omitempty"`
 			}{
 				Project:     project,
 				Workflow:    workflow,

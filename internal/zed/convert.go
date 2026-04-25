@@ -9,33 +9,33 @@ import (
 
 // toolNameMap normalizes Zed tool names to vibe-vault canonical names.
 var toolNameMap = map[string]string{
-	"terminal":            "Bash",
-	"bash":                "Bash",
-	"run_terminal_cmd":    "Bash",
-	"run_terminal_command": "Bash",
-	"read_file":           "Read",
-	"read":                "Read",
-	"edit_file":           "Edit",
-	"str_replace_editor":  "Edit",
-	"edit":                "Edit",
-	"grep":                "Grep",
-	"find_path":           "Glob",
-	"list_directory":      "ListDir",
-	"thinking":            "Thinking",
-	"create_file":         "Write",
-	"write_file":          "Write",
-	"write_to_file":       "Write",
-	"write":               "Write",
-	"save_file":           "Save",
-	"delete_path":         "Delete",
-	"move_path":           "Move",
-	"copy_path":           "Copy",
-	"create_directory":    "Mkdir",
-	"diagnostics":         "Diagnostics",
-	"fetch":               "WebFetch",
-	"web_search":          "WebSearch",
-	"open":                "Open",
-	"now":                 "Now",
+	"terminal":               "Bash",
+	"bash":                   "Bash",
+	"run_terminal_cmd":       "Bash",
+	"run_terminal_command":   "Bash",
+	"read_file":              "Read",
+	"read":                   "Read",
+	"edit_file":              "Edit",
+	"str_replace_editor":     "Edit",
+	"edit":                   "Edit",
+	"grep":                   "Grep",
+	"find_path":              "Glob",
+	"list_directory":         "ListDir",
+	"thinking":               "Thinking",
+	"create_file":            "Write",
+	"write_file":             "Write",
+	"write_to_file":          "Write",
+	"write":                  "Write",
+	"save_file":              "Save",
+	"delete_path":            "Delete",
+	"move_path":              "Move",
+	"copy_path":              "Copy",
+	"create_directory":       "Mkdir",
+	"diagnostics":            "Diagnostics",
+	"fetch":                  "WebFetch",
+	"web_search":             "WebSearch",
+	"open":                   "Open",
+	"now":                    "Now",
 	"restore_file_from_disk": "Restore",
 }
 
@@ -67,7 +67,7 @@ func Convert(thread *Thread) (*transcript.Transcript, error) {
 			UUID:      thread.ID + "-" + itoa(i),
 		}
 
-		var contentBlocks []interface{}
+		var contentBlocks []any
 
 		for _, c := range msg.Content {
 			switch c.Type {
@@ -77,14 +77,14 @@ func Convert(thread *Thread) (*transcript.Transcript, error) {
 				} else {
 					assistantMsgs++
 				}
-				contentBlocks = append(contentBlocks, map[string]interface{}{
+				contentBlocks = append(contentBlocks, map[string]any{
 					"type": "text",
 					"text": c.Text,
 				})
 
 			case "thinking":
 				thinkingBlocks++
-				contentBlocks = append(contentBlocks, map[string]interface{}{
+				contentBlocks = append(contentBlocks, map[string]any{
 					"type":     "thinking",
 					"thinking": c.Thinking,
 				})
@@ -93,7 +93,7 @@ func Convert(thread *Thread) (*transcript.Transcript, error) {
 				toolUses++
 				canonical := NormalizeTool(c.ToolName)
 				toolCounts[canonical]++
-				contentBlocks = append(contentBlocks, map[string]interface{}{
+				contentBlocks = append(contentBlocks, map[string]any{
 					"type":  "tool_use",
 					"id":    c.ToolID,
 					"name":  canonical,
@@ -103,7 +103,7 @@ func Convert(thread *Thread) (*transcript.Transcript, error) {
 			case "mention":
 				// Inline mention as text with @ prefix
 				path := mentionPath(c)
-				contentBlocks = append(contentBlocks, map[string]interface{}{
+				contentBlocks = append(contentBlocks, map[string]any{
 					"type": "text",
 					"text": "@" + path,
 				})
@@ -116,7 +116,7 @@ func Convert(thread *Thread) (*transcript.Transcript, error) {
 		// Convert agent tool_results to tool_result content blocks
 		if msg.Role == "assistant" && len(msg.ToolResults) > 0 {
 			for _, tr := range msg.ToolResults {
-				contentBlocks = append(contentBlocks, map[string]interface{}{
+				contentBlocks = append(contentBlocks, map[string]any{
 					"type":        "tool_result",
 					"tool_use_id": tr.ToolUseID,
 					"content":     bestToolOutput(tr),
@@ -229,7 +229,7 @@ func aggregateTokenUsage(usage map[string]TokenUsage) (input, output, reads, wri
 
 // toContentInterface converts content blocks to the []interface{} format
 // expected by transcript.ContentBlocks.
-func toContentInterface(blocks []interface{}) interface{} {
+func toContentInterface(blocks []any) any {
 	if len(blocks) == 0 {
 		return ""
 	}

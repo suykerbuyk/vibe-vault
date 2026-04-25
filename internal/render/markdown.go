@@ -31,30 +31,30 @@ type RelatedNote struct {
 
 // NoteData holds everything needed to render a session note.
 type NoteData struct {
-	Date         string // YYYY-MM-DD
-	Project      string
-	Branch       string
-	Domain       string
-	Model        string
-	SessionID    string
-	Iteration    int
-	Duration     int // minutes
-	Messages     int // user + assistant
-	InputTokens  int
-	OutputTokens int
-	Title        string
-	Summary      string
-	PreviousNote string // wikilink target, e.g. "2026-02-21-03"
-	FilesChanged []string
-	Decisions    []string
-	OpenThreads  []string
-	EnrichedBy   string // model name, e.g. "grok-3-mini-fast"
-	Tag          string // activity tag, e.g. "implementation"
-	RelatedNotes []RelatedNote
-	ToolCounts    map[string]int
-	TotalTools    int
-	Status        string // "completed" or "checkpoint"
-	Commits       []narrative.Commit // Git commits extracted from tool output
+	Date            string // YYYY-MM-DD
+	Project         string
+	Branch          string
+	Domain          string
+	Model           string
+	SessionID       string
+	Iteration       int
+	Duration        int // minutes
+	Messages        int // user + assistant
+	InputTokens     int
+	OutputTokens    int
+	Title           string
+	Summary         string
+	PreviousNote    string // wikilink target, e.g. "2026-02-21-03"
+	FilesChanged    []string
+	Decisions       []string
+	OpenThreads     []string
+	EnrichedBy      string // model name, e.g. "grok-3-mini-fast"
+	Tag             string // activity tag, e.g. "implementation"
+	RelatedNotes    []RelatedNote
+	ToolCounts      map[string]int
+	TotalTools      int
+	Status          string             // "completed" or "checkpoint"
+	Commits         []narrative.Commit // Git commits extracted from tool output
 	WorkPerformed   string             // Rendered markdown for Work Performed section
 	ProseDialogue   string             // Rendered prose section (empty = use summary fallback)
 	FrictionScore   int                // Composite friction score 0-100

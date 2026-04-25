@@ -184,7 +184,7 @@ func TestFormatJSON(t *testing.T) {
 		t.Fatalf("FormatJSON error: %v", err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -332,4 +332,3 @@ func TestSignificantWords(t *testing.T) {
 		}
 	}
 }
-

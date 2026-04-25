@@ -30,10 +30,10 @@ type Note struct {
 	Previous  string
 
 	// Body sections extracted from markdown
-	Decisions      []string // from ## Key Decisions
-	OpenThreads    []string // from ## Open Threads
-	FilesChanged   []string // from ## What Changed
-	Commits        []string // from ## Commits
+	Decisions    []string // from ## Key Decisions
+	OpenThreads  []string // from ## Open Threads
+	FilesChanged []string // from ## What Changed
+	Commits      []string // from ## Commits
 }
 
 // ParseFile reads and parses a session note from disk.
@@ -172,4 +172,3 @@ func extractSection(lines []string, heading string, parse func(string) (string, 
 
 	return items
 }
-

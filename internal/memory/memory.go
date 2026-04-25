@@ -60,12 +60,12 @@ type Action struct {
 
 // Result summarizes a Link or Unlink run.
 type Result struct {
-	Project      string   // detected project name
-	Slug         string   // computed Claude slug
-	SourcePath   string   // ~/.claude/projects/{slug}/memory (the symlink location)
-	TargetPath   string   // VibeVault/.../agentctx/memory (the symlink target)
-	AlreadyLinked bool    // true when Link was a no-op
-	Actions      []Action // ordered list of performed actions
+	Project       string   // detected project name
+	Slug          string   // computed Claude slug
+	SourcePath    string   // ~/.claude/projects/{slug}/memory (the symlink location)
+	TargetPath    string   // VibeVault/.../agentctx/memory (the symlink target)
+	AlreadyLinked bool     // true when Link was a no-op
+	Actions       []Action // ordered list of performed actions
 }
 
 // Link establishes ~/.claude/projects/{slug}/memory → VibeVault target.

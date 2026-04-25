@@ -190,6 +190,7 @@ func TestCountEditCycles(t *testing.T) {
 
 // suppress unused import warning
 var _ = time.Now
+
 func contains(s, sub string) bool {
 	return len(s) >= len(sub) && searchString(s, sub)
 }

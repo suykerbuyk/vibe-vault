@@ -92,9 +92,9 @@ func BuildToolResultMap(entries []transcript.Entry) map[string]*ToolResult {
 				switch c := b.Content.(type) {
 				case string:
 					tr.Content = c
-				case []interface{}:
+				case []any:
 					for _, item := range c {
-						if m, ok := item.(map[string]interface{}); ok {
+						if m, ok := item.(map[string]any); ok {
 							if text, ok := m["text"].(string); ok {
 								tr.Content = text
 								break
@@ -127,7 +127,7 @@ func extractKnownFiles(entries []transcript.Entry) map[string]bool {
 			if b.Input == nil {
 				continue
 			}
-			if m, ok := b.Input.(map[string]interface{}); ok {
+			if m, ok := b.Input.(map[string]any); ok {
 				for k := range m {
 					known[k] = true
 				}
@@ -529,8 +529,8 @@ func firstUserRequest(entries []transcript.Entry) string {
 }
 
 // extractQuestion gets the question text from an AskUserQuestion input.
-func extractQuestion(input interface{}) string {
-	m, ok := input.(map[string]interface{})
+func extractQuestion(input any) string {
+	m, ok := input.(map[string]any)
 	if !ok {
 		return ""
 	}
@@ -538,11 +538,11 @@ func extractQuestion(input interface{}) string {
 	if !ok {
 		return ""
 	}
-	qList, ok := questions.([]interface{})
+	qList, ok := questions.([]any)
 	if !ok || len(qList) == 0 {
 		return ""
 	}
-	first, ok := qList[0].(map[string]interface{})
+	first, ok := qList[0].(map[string]any)
 	if !ok {
 		return ""
 	}
@@ -694,8 +694,8 @@ func parseCommitResult(output string) (sha, msg string) {
 
 // --- Helpers ---
 
-func inputStr(input interface{}, key string) string {
-	m, ok := input.(map[string]interface{})
+func inputStr(input any, key string) string {
+	m, ok := input.(map[string]any)
 	if !ok {
 		return ""
 	}

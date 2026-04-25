@@ -91,11 +91,11 @@ func TestExtractDialogue_ToolMarkers(t *testing.T) {
 		withRawMessages(
 			rawUserMsg(t, "Create a new file"),
 			rawAgentMsgWithTools(t, "I'll create the file for you.",
-				[]interface{}{
-					rawToolUse("create_file", "tu-1", map[string]interface{}{"file_path": "/src/handler.go"}),
-					rawToolUse("terminal", "tu-2", map[string]interface{}{"command": "go test ./..."}),
+				[]any{
+					rawToolUse("create_file", "tu-1", map[string]any{"file_path": "/src/handler.go"}),
+					rawToolUse("terminal", "tu-2", map[string]any{"command": "go test ./..."}),
 				},
-				map[string]interface{}{},
+				map[string]any{},
 			),
 		),
 	)
@@ -151,10 +151,10 @@ func TestExtractDialogue_FillerFilter(t *testing.T) {
 			rawUserMsg(t, "Edit the file"),
 			// Short text + tool use → text should be filtered as filler
 			rawAgentMsgWithTools(t, "Sure.",
-				[]interface{}{
-					rawToolUse("edit_file", "tu-1", map[string]interface{}{"file_path": "main.go"}),
+				[]any{
+					rawToolUse("edit_file", "tu-1", map[string]any{"file_path": "main.go"}),
 				},
-				map[string]interface{}{},
+				map[string]any{},
 			),
 		),
 	)
@@ -238,10 +238,10 @@ func TestExtractDialogue_ErrorMarker(t *testing.T) {
 		withRawMessages(
 			rawUserMsg(t, "do something"),
 			rawAgentMsgWithTools(t, "",
-				[]interface{}{
+				[]any{
 					rawToolUse("diagnostics", "tu-1", nil),
 				},
-				map[string]interface{}{
+				map[string]any{
 					"tu-1": rawToolResult("tu-1", "diagnostics", "compilation error", true),
 				},
 			),

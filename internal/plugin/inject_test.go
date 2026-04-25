@@ -176,7 +176,7 @@ func TestUnregisterKnownMarketplace_Removes(t *testing.T) {
 
 	// Set up with our entry and another.
 	existing := map[string]any{
-		MarketplaceName:   map[string]any{"source": "test"},
+		MarketplaceName:     map[string]any{"source": "test"},
 		"other-marketplace": map[string]any{"source": "other"},
 	}
 	if err := os.MkdirAll(filepath.Dir(KnownMarketplacesPath()), 0o755); err != nil {

@@ -7,11 +7,11 @@ import "testing"
 
 func TestParseZedTranscriptPath(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantDB   string
-		wantID   string
-		wantOK   bool
+		name   string
+		input  string
+		wantDB string
+		wantID string
+		wantOK bool
 	}{
 		{
 			"valid path",

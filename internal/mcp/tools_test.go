@@ -73,14 +73,14 @@ func TestGetProjectContextBasic(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
 		t.Fatalf("invalid JSON output: %v\nresult: %s", err, result)
 	}
 	if parsed["project"] != "myproject" {
 		t.Errorf("project = %v, want myproject", parsed["project"])
 	}
-	sessions, ok := parsed["sessions"].([]interface{})
+	sessions, ok := parsed["sessions"].([]any)
 	if !ok {
 		t.Fatal("expected sessions array")
 	}
@@ -104,7 +104,7 @@ func TestGetProjectContextWithSections(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	json.Unmarshal([]byte(result), &parsed)
 
 	if _, ok := parsed["threads"]; ok {
@@ -124,7 +124,7 @@ func TestGetProjectContextEmptyIndex(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestListProjectsBasic(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var projects []map[string]interface{}
+	var projects []map[string]any
 	if err := json.Unmarshal([]byte(result), &projects); err != nil {
 		t.Fatalf("invalid JSON: %v\nresult: %s", err, result)
 	}
@@ -188,7 +188,7 @@ func TestListProjectsEmptyIndex(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var projects []map[string]interface{}
+	var projects []map[string]any
 	if err := json.Unmarshal([]byte(result), &projects); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestSearchSessionsQueryFilter(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var sessions []map[string]interface{}
+	var sessions []map[string]any
 	json.Unmarshal([]byte(result), &sessions)
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(sessions))
@@ -233,7 +233,7 @@ func TestSearchSessionsProjectFilter(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var sessions []map[string]interface{}
+	var sessions []map[string]any
 	json.Unmarshal([]byte(result), &sessions)
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(sessions))
@@ -253,7 +253,7 @@ func TestSearchSessionsDateFilter(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var sessions []map[string]interface{}
+	var sessions []map[string]any
 	json.Unmarshal([]byte(result), &sessions)
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(sessions))
@@ -275,7 +275,7 @@ func TestSearchSessionsFrictionFilter(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var sessions []map[string]interface{}
+	var sessions []map[string]any
 	json.Unmarshal([]byte(result), &sessions)
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(sessions))
@@ -294,7 +294,7 @@ func TestSearchSessionsFileFilter(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var sessions []map[string]interface{}
+	var sessions []map[string]any
 	json.Unmarshal([]byte(result), &sessions)
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(sessions))
@@ -321,7 +321,7 @@ func TestSearchSessionsMaxResults(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var sessions []map[string]interface{}
+	var sessions []map[string]any
 	json.Unmarshal([]byte(result), &sessions)
 	if len(sessions) != 5 {
 		t.Errorf("expected 5 results, got %d", len(sessions))
@@ -337,7 +337,7 @@ func TestSearchSessionsEmpty(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var sessions []map[string]interface{}
+	var sessions []map[string]any
 	json.Unmarshal([]byte(result), &sessions)
 	if len(sessions) != 0 {
 		t.Errorf("expected 0 results, got %d", len(sessions))
@@ -357,7 +357,7 @@ func TestSearchSessionsCombinedFilters(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var sessions []map[string]interface{}
+	var sessions []map[string]any
 	json.Unmarshal([]byte(result), &sessions)
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(sessions))
@@ -500,7 +500,7 @@ func TestGetFrictionTrendsBasic(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestGetFrictionTrendsEmpty(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	json.Unmarshal([]byte(result), &parsed)
 	if parsed["total_sessions"].(float64) != 0 {
 		t.Errorf("total_sessions = %v, want 0", parsed["total_sessions"])
@@ -539,7 +539,7 @@ func TestGetFrictionTrendsCustomWeeks(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	json.Unmarshal([]byte(result), &parsed)
 	if parsed["display_weeks"].(float64) != 4 {
 		t.Errorf("display_weeks = %v, want 4", parsed["display_weeks"])
@@ -563,15 +563,15 @@ func TestGetEffectivenessBasic(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v\nresult: %s", err, result)
 	}
-	projects, ok := parsed["projects"].([]interface{})
+	projects, ok := parsed["projects"].([]any)
 	if !ok || len(projects) != 1 {
 		t.Fatalf("expected 1 project, got %v", parsed["projects"])
 	}
-	proj := projects[0].(map[string]interface{})
+	proj := projects[0].(map[string]any)
 	if proj["project"] != "p" {
 		t.Errorf("project = %v, want p", proj["project"])
 	}
@@ -581,7 +581,7 @@ func TestGetEffectivenessBasic(t *testing.T) {
 	if proj["with_context"].(float64) != 2 {
 		t.Errorf("with_context = %v, want 2", proj["with_context"])
 	}
-	cohorts, ok := proj["cohorts"].([]interface{})
+	cohorts, ok := proj["cohorts"].([]any)
 	if !ok || len(cohorts) == 0 {
 		t.Error("expected cohorts array with entries")
 	}
@@ -596,11 +596,11 @@ func TestGetEffectivenessEmpty(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	projects, _ := parsed["projects"].([]interface{})
+	projects, _ := parsed["projects"].([]any)
 	if len(projects) != 0 {
 		t.Errorf("expected 0 projects, got %d", len(projects))
 	}
@@ -625,7 +625,7 @@ func TestCaptureSessionTool_Success(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if unmarshalErr := json.Unmarshal([]byte(result), &resp); unmarshalErr != nil {
 		t.Fatalf("invalid JSON response: %v\nresult: %s", unmarshalErr, result)
 	}
@@ -683,7 +683,7 @@ func TestCaptureSessionTool_MinimalInput(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal([]byte(result), &resp); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}

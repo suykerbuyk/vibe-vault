@@ -23,13 +23,13 @@ func makeUserEntry(content string) transcript.Entry {
 }
 
 func makeAssistantEntry(text string, toolUses ...transcript.ContentBlock) transcript.Entry {
-	var msgContent interface{} = text
+	var msgContent any = text
 	if len(toolUses) > 0 {
-		blocks := []interface{}{
-			map[string]interface{}{"type": "text", "text": text},
+		blocks := []any{
+			map[string]any{"type": "text", "text": text},
 		}
 		for _, tu := range toolUses {
-			block := map[string]interface{}{
+			block := map[string]any{
 				"type": "tool_use",
 				"id":   tu.ID,
 				"name": tu.Name,
@@ -59,8 +59,8 @@ func makeToolResultEntry(toolUseID string, isError bool, content string) transcr
 		Timestamp: ts,
 		Message: &transcript.Message{
 			Role: "user",
-			Content: []interface{}{
-				map[string]interface{}{
+			Content: []any{
+				map[string]any{
 					"type":        "tool_result",
 					"tool_use_id": toolUseID,
 					"is_error":    isError,
@@ -92,9 +92,9 @@ func makeThinkingAssistant(thinking, text string) transcript.Entry {
 		CWD:       "/home/dev/project",
 		Message: &transcript.Message{
 			Role: "assistant",
-			Content: []interface{}{
-				map[string]interface{}{"type": "thinking", "thinking": thinking},
-				map[string]interface{}{"type": "text", "text": text},
+			Content: []any{
+				map[string]any{"type": "thinking", "thinking": thinking},
+				map[string]any{"type": "text", "text": text},
 			},
 		},
 	}
@@ -196,7 +196,7 @@ func TestExtract_LongTextKept(t *testing.T) {
 		Type: "tool_use",
 		ID:   "tu1",
 		Name: "Write",
-		Input: map[string]interface{}{
+		Input: map[string]any{
 			"file_path": "/home/dev/project/handler.go",
 		},
 	}
@@ -368,7 +368,7 @@ func TestExtract_TestMarker(t *testing.T) {
 		Type:  "tool_use",
 		ID:    "tu1",
 		Name:  "Bash",
-		Input: map[string]interface{}{"command": "go test ./..."},
+		Input: map[string]any{"command": "go test ./..."},
 	}
 	d := extract(
 		makeUserEntry("Run tests"),
@@ -394,7 +394,7 @@ func TestExtract_CommitMarker(t *testing.T) {
 		Type:  "tool_use",
 		ID:    "tu1",
 		Name:  "Bash",
-		Input: map[string]interface{}{"command": `git commit -m "feat: add auth"`},
+		Input: map[string]any{"command": `git commit -m "feat: add auth"`},
 	}
 	d := extract(
 		makeUserEntry("Commit"),
@@ -420,7 +420,7 @@ func TestExtract_FileCreateMarker(t *testing.T) {
 		Type: "tool_use",
 		ID:   "tu1",
 		Name: "Write",
-		Input: map[string]interface{}{
+		Input: map[string]any{
 			"file_path": "/home/dev/project/src/handler.go",
 		},
 	}

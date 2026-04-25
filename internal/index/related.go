@@ -105,4 +105,3 @@ func threadMatchScore(threads, decisions []string) int {
 	}
 	return matches
 }
-
