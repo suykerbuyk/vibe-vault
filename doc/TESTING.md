@@ -152,6 +152,19 @@ snapshot coverage — never both zero.
 | `plugin.InstallToCache` / `plugin.RegisterKnownMarketplace` / `plugin.RegisterInstalledPlugin` / `plugin.Remove` | `vv mcp install`/`uninstall` `--claude-plugin` | `~/.claude/plugins/cache/vibe-vault-local/`, `~/.claude/plugins/known_marketplaces.json`, `~/.claude/plugins/installed_plugins.json` | canary |
 | `memory.Link` / `memory.Unlink` (`resolve()` when `opts.HomeDir==""`) | `vv memory link` / `vv memory unlink` | `~/.claude/projects/<slug>/memory` | sandboxed via `buildEnvWithHome` (`memory_link_cli`) |
 
+### Category D — Canary helpers (read real HOME to monitor leaks)
+
+`readOperatorConfigVaultPath`, `canaryHomePrivateSingleFiles`, and
+`canaryHomePrivateRoots` in `test/integration_test.go` legitimately
+call `os.UserHomeDir()` against the operator's real environment.
+Their purpose is to detect when other subtests violate the sandbox.
+Whitelisted via `//nolint:forbidigo // canary-real-home: ...` with
+inline justification.
+
+If a future canary helper needs real HOME, follow this same
+nolint+justification pattern. Anything that does NOT need real HOME
+must use `buildEnvWithHome` / `buildEnvWithHomeUser`.
+
 ### Env-builders (`test/integration_test.go:100–130`)
 
 Three helpers live next to the `buildEnv` comment block — test authors

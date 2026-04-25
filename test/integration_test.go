@@ -169,7 +169,7 @@ func writeFixture(t *testing.T, dir, filename, content string) string {
 //
 // See doc/TESTING.md for the authoritative classification table
 // and the list of sandboxed subtests.
-func buildEnv(xdgConfigHome string) []string {
+func buildEnv(xdgConfigHome string) []string { //nolint:forbidigo // sandbox-helper: copies real HOME into env array
 	return []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.Getenv("HOME"),
@@ -177,7 +177,7 @@ func buildEnv(xdgConfigHome string) []string {
 	}
 }
 
-func buildEnvWithHome(xdgConfigHome, home string) []string {
+func buildEnvWithHome(xdgConfigHome, home string) []string { //nolint:forbidigo // sandbox-helper
 	return []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + home,
@@ -189,7 +189,7 @@ func buildEnvWithHome(xdgConfigHome, home string) []string {
 // VIBE_VAULT_HOSTNAME sentinel set. Callers get a deterministic provenance
 // pair ("vibe-vault-test", user) so assertions against YAML frontmatter or
 // iteration trailers do not depend on the operator's real hostname / login.
-func buildEnvWithHomeUser(xdgConfigHome, home, user string) []string {
+func buildEnvWithHomeUser(xdgConfigHome, home, user string) []string { //nolint:forbidigo // sandbox-helper
 	return []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + home,
@@ -2570,7 +2570,7 @@ type canarySnapshot struct {
 // behavior is itself under investigation in this task. Returns ("", "", nil)
 // with no error if the config file does not exist (the canary should skip).
 func readOperatorConfigVaultPath() (vaultPath, configPath string, err error) {
-	home, err := os.UserHomeDir()
+	home, err := os.UserHomeDir() //nolint:forbidigo // canary-real-home: reads operator's actual config path; sandboxing it would defeat the canary's purpose
 	if err != nil {
 		return "", "", fmt.Errorf("user home dir: %w", err)
 	}
@@ -2652,7 +2652,7 @@ func canaryShouldSkipFile(rel string) bool {
 // TestIntegration run, a subtest leaked writes to the operator's real
 // config. Returns an empty slice if $HOME cannot be resolved.
 func canaryHomePrivateSingleFiles() []string {
-	home, err := os.UserHomeDir()
+	home, err := os.UserHomeDir() //nolint:forbidigo // canary-real-home: monitors operator $HOME for leaks across TestIntegration runs
 	if err != nil || home == "" {
 		return nil
 	}
@@ -2673,7 +2673,7 @@ func canaryHomePrivateSingleFiles() []string {
 // rather than widening scope. Missing paths are dropped so the caller has a
 // clean list.
 func canaryHomePrivateRoots() []string {
-	home, err := os.UserHomeDir()
+	home, err := os.UserHomeDir() //nolint:forbidigo // canary-real-home: monitors operator ~/.claude/plugins/cache/vibe-vault-local/
 	if err != nil || home == "" {
 		return nil
 	}
