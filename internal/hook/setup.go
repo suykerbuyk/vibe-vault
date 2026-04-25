@@ -14,6 +14,7 @@ import (
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 	"github.com/suykerbuyk/vibe-vault/internal/help"
+	"github.com/suykerbuyk/vibe-vault/internal/meta"
 	"github.com/suykerbuyk/vibe-vault/internal/plugin"
 )
 
@@ -24,7 +25,7 @@ var hookEvents = []string{"SessionEnd", "Stop", "PreCompact"}
 
 // SettingsPath returns the path to ~/.claude/settings.json.
 func SettingsPath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := meta.HomeDir()
 	if err != nil {
 		return "", fmt.Errorf("determine home directory: %w", err)
 	}
@@ -165,7 +166,7 @@ func UninstallMCP() error {
 
 // ZedSettingsPath returns the path to ~/.config/zed/settings.json.
 func ZedSettingsPath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := meta.HomeDir()
 	if err != nil {
 		return "", fmt.Errorf("determine home directory: %w", err)
 	}

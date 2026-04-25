@@ -184,6 +184,70 @@ func TestStampCWDFailure(t *testing.T) {
 	}
 }
 
+// TestHomeDirOverride asserts that when homeDirFunc returns an error, HomeDir
+// surfaces it verbatim. Mirrors the hostname/cwd failure-path tests.
+func TestHomeDirOverride(t *testing.T) {
+	t.Setenv("VIBE_VAULT_HOME", "")
+	os.Unsetenv("VIBE_VAULT_HOME")
+
+	original := homeDirFunc
+	t.Cleanup(func() { homeDirFunc = original })
+	sentinelErr := errors.New("boom")
+	homeDirFunc = func() (string, error) {
+		return "", sentinelErr
+	}
+
+	got, err := HomeDir()
+	if !errors.Is(err, sentinelErr) {
+		t.Errorf("err = %v, want %v", err, sentinelErr)
+	}
+	if got != "" {
+		t.Errorf("home = %q, want \"\" on homeDirFunc failure", got)
+	}
+}
+
+// TestHomeDirSentinel asserts $VIBE_VAULT_HOME short-circuits the homeDirFunc
+// call entirely. We install a homeDirFunc that fails the test if reached.
+func TestHomeDirSentinel(t *testing.T) {
+	t.Setenv("VIBE_VAULT_HOME", "/sentinel/home")
+
+	original := homeDirFunc
+	t.Cleanup(func() { homeDirFunc = original })
+	homeDirFunc = func() (string, error) {
+		t.Fatalf("homeDirFunc should not be called when VIBE_VAULT_HOME is set")
+		return "", nil
+	}
+
+	got, err := HomeDir()
+	if err != nil {
+		t.Errorf("err = %v, want nil", err)
+	}
+	if got != "/sentinel/home" {
+		t.Errorf("home = %q, want %q", got, "/sentinel/home")
+	}
+}
+
+// TestHomeDirSuccess asserts the happy path: VIBE_VAULT_HOME unset, homeDirFunc
+// returns successfully, HomeDir surfaces the value verbatim.
+func TestHomeDirSuccess(t *testing.T) {
+	t.Setenv("VIBE_VAULT_HOME", "")
+	os.Unsetenv("VIBE_VAULT_HOME")
+
+	original := homeDirFunc
+	t.Cleanup(func() { homeDirFunc = original })
+	homeDirFunc = func() (string, error) {
+		return "/some/home", nil
+	}
+
+	got, err := HomeDir()
+	if err != nil {
+		t.Errorf("err = %v, want nil", err)
+	}
+	if got != "/some/home" {
+		t.Errorf("home = %q, want %q", got, "/some/home")
+	}
+}
+
 // TestStampCWDDeleted exercises the cwd()-failure path by chdir-ing into a
 // tempdir and removing it before calling Stamp. On Linux os.Getwd returns an
 // error (or a path suffixed with " (deleted)") once the inode is gone — both

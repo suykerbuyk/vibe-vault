@@ -34,6 +34,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/llm"
 	"github.com/suykerbuyk/vibe-vault/internal/mcp"
 	"github.com/suykerbuyk/vibe-vault/internal/memory"
+	"github.com/suykerbuyk/vibe-vault/internal/meta"
 	"github.com/suykerbuyk/vibe-vault/internal/scaffold"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
 	"github.com/suykerbuyk/vibe-vault/internal/stats"
@@ -1364,7 +1365,7 @@ func runIndex() {
 }
 
 func defaultTranscriptDir() string {
-	home, err := os.UserHomeDir()
+	home, err := meta.HomeDir()
 	if err != nil {
 		return ""
 	}

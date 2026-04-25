@@ -12,6 +12,7 @@ import (
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 	vvcontext "github.com/suykerbuyk/vibe-vault/internal/context"
+	"github.com/suykerbuyk/vibe-vault/internal/meta"
 	"github.com/suykerbuyk/vibe-vault/internal/plugin"
 )
 
@@ -275,7 +276,7 @@ func CheckSynthesis(scfg config.SynthesisConfig, ecfg config.EnrichmentConfig) R
 
 // CheckHook checks whether "vv hook" is configured in ~/.claude/settings.json.
 func CheckHook() Result {
-	home, err := os.UserHomeDir()
+	home, err := meta.HomeDir()
 	if err != nil {
 		return Result{Name: "hook", Status: Warn, Detail: "cannot determine home directory"}
 	}
@@ -296,7 +297,7 @@ func checkHookFile(path string) Result {
 
 // CheckMCP checks whether the vibe-vault MCP server is configured in ~/.claude/settings.json.
 func CheckMCP() Result {
-	home, err := os.UserHomeDir()
+	home, err := meta.HomeDir()
 	if err != nil {
 		return Result{Name: "mcp", Status: Warn, Detail: "cannot determine home directory"}
 	}
@@ -408,7 +409,7 @@ func CheckMemoryLink(vaultPath, project, cwd string) *Result {
 	}
 	slug := strings.ReplaceAll(filepath.Clean(abs), "/", "-")
 
-	home, err := os.UserHomeDir()
+	home, err := meta.HomeDir()
 	if err != nil {
 		return nil
 	}

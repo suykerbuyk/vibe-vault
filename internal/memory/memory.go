@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/suykerbuyk/vibe-vault/internal/meta"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
 )
 
@@ -283,7 +284,7 @@ func resolve(opts Opts) (*resolved, error) {
 
 	home := opts.HomeDir
 	if home == "" {
-		h, homeErr := os.UserHomeDir()
+		h, homeErr := meta.HomeDir()
 		if homeErr != nil {
 			return nil, fmt.Errorf("user home: %w", homeErr)
 		}

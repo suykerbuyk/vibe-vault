@@ -10,6 +10,7 @@ import (
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 	"github.com/suykerbuyk/vibe-vault/internal/identity"
+	"github.com/suykerbuyk/vibe-vault/internal/meta"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
 )
 
@@ -184,7 +185,7 @@ func commonProjectRoot(paths []string) (project, dir string) {
 	// Depth gate: must be at least 2 segments below $HOME.
 	// For /home/user/code/project, that's segments: home, user, code, project
 	// We need at least homeIdx+3 segments (home dir + 2 more).
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := meta.HomeDir()
 	if err != nil {
 		homeDir = filepath.Join(string(filepath.Separator), "home", os.Getenv("USER"))
 	}

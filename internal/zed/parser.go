@@ -8,17 +8,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver
+
+	"github.com/suykerbuyk/vibe-vault/internal/meta"
 )
 
 // DefaultDBPath returns the default Zed threads database path.
 func DefaultDBPath() string {
-	home, err := os.UserHomeDir()
+	home, err := meta.HomeDir()
 	if err != nil {
 		return ""
 	}

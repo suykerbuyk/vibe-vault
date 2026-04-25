@@ -31,6 +31,24 @@ var hostnameFunc = os.Hostname
 // deterministically. Tests may replace this; production uses os.Getwd.
 var cwdFunc = os.Getwd
 
+// homeDirFunc is the test seam for exercising os.UserHomeDir() failure paths
+// deterministically. Tests may replace this; production uses os.UserHomeDir.
+var homeDirFunc = os.UserHomeDir
+
+// HomeDir returns the user's home directory, honoring the $VIBE_VAULT_HOME
+// sentinel for deterministic testing. Mirrors os.UserHomeDir() for drop-in
+// replacement at production call sites.
+//
+// Exposed as a top-level helper rather than a Provenance field because most
+// callers want just the home dir and would otherwise pay the syscall cost
+// of resolving Host+User+CWD via Stamp() unnecessarily.
+func HomeDir() (string, error) {
+	if v := os.Getenv("VIBE_VAULT_HOME"); v != "" {
+		return v, nil
+	}
+	return homeDirFunc()
+}
+
 // Stamp resolves host, user, and cwd at the moment of the call. Safe on
 // all failure paths — never panics, never returns an error.
 func Stamp() Provenance {

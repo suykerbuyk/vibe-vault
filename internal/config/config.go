@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/suykerbuyk/vibe-vault/internal/meta"
 )
 
 // DefaultSessionTag is the default tag applied to all session notes.
@@ -198,7 +200,7 @@ func configPaths() []string {
 		paths = append(paths, filepath.Join(xdg, "vibe-vault", "config.toml"))
 	}
 
-	home, _ := os.UserHomeDir()
+	home, _ := meta.HomeDir()
 	if home != "" {
 		paths = append(paths, filepath.Join(home, ".config", "vibe-vault", "config.toml"))
 	}
@@ -210,7 +212,7 @@ func expandHome(path string) string {
 	if !strings.HasPrefix(path, "~/") {
 		return path
 	}
-	home, err := os.UserHomeDir()
+	home, err := meta.HomeDir()
 	if err != nil {
 		return path
 	}
