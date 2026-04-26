@@ -9,12 +9,20 @@ package vaultsync
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// afterPushHook runs immediately after a successful push records its
+// SHA in remoteSHA, before the convergence loop. Production code must
+// leave this as a no-op; tests override it to inject mid-flight state
+// changes (e.g., a concurrent writer mutating a bare remote between
+// the recorded push and the convergence force-with-lease).
+var afterPushHook = func(remote string) {}
 
 // FileClass determines conflict resolution strategy during rebase.
 type FileClass int
@@ -278,9 +286,29 @@ func Pull(vaultPath string) (*PullResult, error) {
 }
 
 // CommitAndPush stages all vault changes, commits with a machine-stamped
-// message, and pushes to all configured remotes. If a push is rejected
-// (non-fast-forward), it fetches and rebases from that remote and retries
-// once. Returns per-remote results.
+// message, and pushes to all configured remotes.
+//
+// Happy path is sequential push, unchanged. On a non-fast-forward
+// rejection, the rejected remote is fetched and the local branch is
+// rebased onto it; the rebased commit is then pushed to that remote.
+// Fetch failures and rebase failures (after `rebase --abort`) surface
+// directly via per-remote `RemoteResults` rather than masquerading as
+// downstream errors.
+//
+// After every successful rebase-and-push, prior remotes whose
+// last-known-good SHA differs from the new HEAD are converged via
+// `git push --force-with-lease=refs/heads/<branch>:<expected> <remote>
+// <branch>`. The lease is an atomic compare-and-swap: if any concurrent
+// writer has moved the prior remote's ref since we recorded it, the
+// push is rejected and the failure surfaces as
+// `"convergence rejected (concurrent writer at <remote>): <err>"` in
+// `PushResult.RemoteResults`. The lease is the only path in this
+// package that uses `--force-with-lease`; naked `--force` is never
+// used.
+//
+// `PushResult.CommitSHA` is refreshed to the post-loop HEAD if any
+// rebase happened, so the printed SHA always exists at the converged
+// remotes.
 func CommitAndPush(vaultPath, message string) (*PushResult, error) {
 	result := &PushResult{}
 
@@ -330,18 +358,94 @@ func CommitAndPush(vaultPath, message string) (*PushResult, error) {
 	}
 
 	result.RemoteResults = make(map[string]error, len(remotes))
+	remoteSHA := make(map[string]string, len(remotes))
+	rebasedAny := false
+
 	for _, remote := range remotes {
-		_, pushErr := gitCmd(vaultPath, 60*time.Second, "push", remote, branch)
-		if pushErr != nil {
-			// Retry: fetch from this remote, rebase, push again
-			_, _ = gitCmd(vaultPath, 60*time.Second, "fetch", remote)
-			_, _ = gitCmd(vaultPath, 60*time.Second, "rebase", remote+"/"+branch)
-			_, pushErr = gitCmd(vaultPath, 60*time.Second, "push", remote, branch)
+		curSHA, _ := gitCmd(vaultPath, 10*time.Second, "rev-parse", "HEAD")
+
+		if _, pushErr := gitCmd(vaultPath, 60*time.Second, "push", remote, branch); pushErr == nil {
+			// Happy path: fast-forward push succeeded.
+			remoteSHA[remote] = curSHA
+			result.RemoteResults[remote] = nil
+			afterPushHook(remote)
+			continue
 		}
-		result.RemoteResults[remote] = pushErr
+
+		// Rejection path (non-fast-forward or other push error).
+		// Fetch failure surfaces directly — no rebase/converge.
+		if _, fetchErr := gitCmd(vaultPath, 60*time.Second, "fetch", remote); fetchErr != nil {
+			result.RemoteResults[remote] = fmt.Errorf("fetch %s: %w", remote, fetchErr)
+			continue
+		}
+
+		// Rebase failure aborts cleanly so HEAD does not stay polluted
+		// for the next remote in the loop.
+		if _, rebaseErr := gitCmd(vaultPath, 60*time.Second, "rebase", remote+"/"+branch); rebaseErr != nil {
+			_, _ = gitCmd(vaultPath, 10*time.Second, "rebase", "--abort")
+			result.RemoteResults[remote] = fmt.Errorf("rebase against %s failed: %w", remote, rebaseErr)
+			continue
+		}
+
+		rebasedAny = true
+		curSHA, _ = gitCmd(vaultPath, 10*time.Second, "rev-parse", "HEAD")
+
+		if _, pushErr := gitCmd(vaultPath, 60*time.Second, "push", remote, branch); pushErr != nil {
+			// Non-NFF push error after rebase (auth, network, etc.).
+			result.RemoteResults[remote] = pushErr
+			continue
+		}
+		remoteSHA[remote] = curSHA
+		result.RemoteResults[remote] = nil
+		afterPushHook(remote)
+
+		// Converge prior remotes whose recorded SHA != current HEAD.
+		for priorRemote, priorSHA := range remoteSHA {
+			if priorSHA == curSHA {
+				continue
+			}
+			if leaseErr := forceWithLease(vaultPath, priorRemote, branch, priorSHA); leaseErr != nil {
+				result.RemoteResults[priorRemote] = fmt.Errorf(
+					"convergence rejected (concurrent writer at %s): %w",
+					priorRemote, leaseErr)
+				// Leave remoteSHA[priorRemote] unchanged — caller sees
+				// divergent state via per-remote error.
+				continue
+			}
+			remoteSHA[priorRemote] = curSHA
+			// result.RemoteResults[priorRemote] stays nil (still success).
+			log.Printf("vault: force-converged %s from %s\n", priorRemote, short(priorSHA))
+		}
+	}
+
+	// Refresh CommitSHA so the CLI never prints a SHA that no longer
+	// exists at any remote.
+	if rebasedAny {
+		if newSHA, err := gitCmd(vaultPath, 10*time.Second, "rev-parse", "--short", "HEAD"); err == nil {
+			result.CommitSHA = newSHA
+		}
 	}
 
 	return result, nil
+}
+
+// forceWithLease pushes branch to remote with a lease keyed to
+// expectedSHA. The lease causes git to reject the push if the remote's
+// branch ref has moved off expectedSHA since we last observed it —
+// catching concurrent writers without resorting to naked --force.
+func forceWithLease(vaultPath, remote, branch, expectedSHA string) error {
+	lease := fmt.Sprintf("--force-with-lease=refs/heads/%s:%s", branch, expectedSHA)
+	_, err := gitCmd(vaultPath, 60*time.Second, "push", lease, remote, branch)
+	return err
+}
+
+// short returns the first 7 characters of a SHA for log breadcrumbs,
+// or the original string if shorter.
+func short(sha string) string {
+	if len(sha) <= 7 {
+		return sha
+	}
+	return sha[:7]
 }
 
 // resolveConflicts attempts to auto-resolve all conflicted files during an
