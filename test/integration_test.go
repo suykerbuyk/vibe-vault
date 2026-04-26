@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -18,7 +19,10 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/mcp"
 	"github.com/suykerbuyk/vibe-vault/internal/testutil/gitx"
+	"github.com/suykerbuyk/vibe-vault/internal/vaultfs"
 	"github.com/suykerbuyk/vibe-vault/templates"
 )
 
@@ -1433,7 +1437,7 @@ func TestIntegration(t *testing.T) {
 			t.Error("initialize: missing serverInfo")
 		}
 
-		// Response 1: tools/list — exact-set check for all 31 registered tools.
+		// Response 1: tools/list — exact-set check for all 39 registered tools.
 		// Update this list when adding or removing tools; the exact-set check
 		// prevents silent breakage from numeric drift (O2 from iter-150).
 		expectedTools := []string{
@@ -1468,6 +1472,14 @@ func TestIntegration(t *testing.T) {
 			"vv_render_commit_msg",
 			"vv_synthesize_wrap",
 			"vv_apply_wrap_bundle",
+			"vv_vault_read",
+			"vv_vault_list",
+			"vv_vault_exists",
+			"vv_vault_sha256",
+			"vv_vault_write",
+			"vv_vault_edit",
+			"vv_vault_delete",
+			"vv_vault_move",
 		}
 		toolsResult := responses[1]["result"].(map[string]any)
 		tools := toolsResult["tools"].([]any)
@@ -3031,4 +3043,588 @@ func vaultCanaryDiff(before, after *canarySnapshot) []string {
 	}
 
 	return out
+}
+
+// --- Vault accessor MCP tool integration tests (vv-vault-file-accessors) ---
+//
+// These tests exercise the vv_vault_* MCP tools end-to-end through their
+// handler closures. They construct a config.Config with VaultPath set to a
+// tempdir per D13's "test injection at construction time" pattern; no
+// vault_path runtime parameter is supplied to any tool.
+
+// vaultTestSetup creates a tempdir vault and a config.Config pointing at it.
+// Returns (cfg, vaultPath). The vault directory exists; subdirectories are
+// created on demand by individual tests.
+func vaultTestSetup(t *testing.T) (config.Config, string) {
+	t.Helper()
+	vault := t.TempDir()
+	return config.Config{VaultPath: vault}, vault
+}
+
+// vaultWriteRaw writes data to <vault>/<rel> via stdlib, creating parents.
+// Used to seed test fixtures that bypass the MCP layer.
+func vaultWriteRaw(t *testing.T, vault, rel, content string) {
+	t.Helper()
+	full := filepath.Join(vault, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", full, err)
+	}
+}
+
+// callVaultTool marshals args into JSON and invokes tool.Handler.
+func callVaultTool(t *testing.T, tool mcp.Tool, args any) (string, error) {
+	t.Helper()
+	var params json.RawMessage
+	if args != nil {
+		raw, err := json.Marshal(args)
+		if err != nil {
+			t.Fatalf("marshal args: %v", err)
+		}
+		params = raw
+	}
+	return tool.Handler(params)
+}
+
+func TestIntegration_VaultRead_HappyPath(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	vaultWriteRaw(t, vault, "Notes/foo.md", "hello world")
+
+	tool := mcp.NewVaultReadTool(cfg)
+	out, err := callVaultTool(t, tool, map[string]any{"path": "Notes/foo.md"})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var got struct {
+		Content string `json:"content"`
+		Bytes   int64  `json:"bytes"`
+		Sha256  string `json:"sha256"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if got.Content != "hello world" {
+		t.Errorf("content = %q, want %q", got.Content, "hello world")
+	}
+	if got.Bytes != 11 {
+		t.Errorf("bytes = %d, want 11", got.Bytes)
+	}
+	if got.Sha256 == "" {
+		t.Error("sha256 missing")
+	}
+}
+
+func TestIntegration_VaultRead_PathTraversal(t *testing.T) {
+	cfg, _ := vaultTestSetup(t)
+	tool := mcp.NewVaultReadTool(cfg)
+	for _, bad := range []string{"../etc/passwd", "/etc/passwd", "foo/../../../etc/passwd"} {
+		_, err := callVaultTool(t, tool, map[string]any{"path": bad})
+		if err == nil {
+			t.Errorf("path %q: expected error, got nil", bad)
+		}
+	}
+}
+
+func TestIntegration_VaultRead_SymlinkEscape(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	// Place a file outside the vault, then create a symlink inside the vault
+	// pointing to it. Read must reject.
+	outside := t.TempDir()
+	target := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(target, []byte("classified"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	linkPath := filepath.Join(vault, "escape.md")
+	if err := os.Symlink(target, linkPath); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	tool := mcp.NewVaultReadTool(cfg)
+	_, err := callVaultTool(t, tool, map[string]any{"path": "escape.md"})
+	if err == nil {
+		t.Fatal("expected symlink-escape error, got nil")
+	}
+	if !errors.Is(err, vaultfs.ErrSymlinkEscape) && !strings.Contains(err.Error(), "escape") {
+		t.Errorf("error = %v, want symlink escape", err)
+	}
+}
+
+func TestIntegration_VaultList_HappyPath(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	vaultWriteRaw(t, vault, "Notes/a.md", "A")
+	vaultWriteRaw(t, vault, "Notes/b.md", "BB")
+	if err := os.MkdirAll(filepath.Join(vault, "Notes/sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := mcp.NewVaultListTool(cfg)
+	out, err := callVaultTool(t, tool, map[string]any{"path": "Notes"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var got struct {
+		Entries []vaultfs.Entry `json:"entries"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if len(got.Entries) != 3 {
+		t.Fatalf("entries = %d, want 3 (%v)", len(got.Entries), got.Entries)
+	}
+	names := map[string]string{}
+	for _, e := range got.Entries {
+		names[e.Name] = e.Type
+	}
+	if names["a.md"] != "file" || names["b.md"] != "file" || names["sub"] != "dir" {
+		t.Errorf("entries map mismatch: %v", names)
+	}
+	for _, e := range got.Entries {
+		if e.Sha256 != "" {
+			t.Errorf("sha256 unexpectedly set on default list: %v", e)
+		}
+	}
+}
+
+func TestIntegration_VaultList_HidesDotGit(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	vaultWriteRaw(t, vault, "Notes/keep.md", "x")
+	if err := os.MkdirAll(filepath.Join(vault, "Notes/.git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := mcp.NewVaultListTool(cfg)
+	out, err := callVaultTool(t, tool, map[string]any{"path": "Notes"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var got struct {
+		Entries []vaultfs.Entry `json:"entries"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	for _, e := range got.Entries {
+		if strings.EqualFold(e.Name, ".git") {
+			t.Errorf("list returned .git-like entry: %v", e)
+		}
+	}
+}
+
+func TestIntegration_VaultList_IncludeSha256(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	vaultWriteRaw(t, vault, "Notes/a.md", "A")
+
+	tool := mcp.NewVaultListTool(cfg)
+	out, err := callVaultTool(t, tool, map[string]any{
+		"path":           "Notes",
+		"include_sha256": true,
+	})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var got struct {
+		Entries []vaultfs.Entry `json:"entries"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if len(got.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(got.Entries))
+	}
+	want := sha256.Sum256([]byte("A"))
+	if got.Entries[0].Sha256 != hex.EncodeToString(want[:]) {
+		t.Errorf("sha256 = %q, want %q", got.Entries[0].Sha256, hex.EncodeToString(want[:]))
+	}
+}
+
+func TestIntegration_VaultExists_File(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	vaultWriteRaw(t, vault, "Notes/a.md", "x")
+	if err := os.MkdirAll(filepath.Join(vault, "Notes/sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := mcp.NewVaultExistsTool(cfg)
+
+	// File exists.
+	out, err := callVaultTool(t, tool, map[string]any{"path": "Notes/a.md"})
+	if err != nil {
+		t.Fatalf("exists file: %v", err)
+	}
+	var got vaultfs.Existence
+	if uerr := json.Unmarshal([]byte(out), &got); uerr != nil {
+		t.Fatalf("unmarshal: %v\n%s", uerr, out)
+	}
+	if !got.Exists || got.Type != "file" {
+		t.Errorf("file: got %+v, want exists=true type=file", got)
+	}
+
+	// Directory exists.
+	out, err = callVaultTool(t, tool, map[string]any{"path": "Notes/sub"})
+	if err != nil {
+		t.Fatalf("exists dir: %v", err)
+	}
+	if uerr := json.Unmarshal([]byte(out), &got); uerr != nil {
+		t.Fatalf("unmarshal: %v\n%s", uerr, out)
+	}
+	if !got.Exists || got.Type != "dir" {
+		t.Errorf("dir: got %+v, want exists=true type=dir", got)
+	}
+
+	// Missing.
+	out, err = callVaultTool(t, tool, map[string]any{"path": "Notes/missing.md"})
+	if err != nil {
+		t.Fatalf("exists missing: %v", err)
+	}
+	if uerr := json.Unmarshal([]byte(out), &got); uerr != nil {
+		t.Fatalf("unmarshal: %v\n%s", uerr, out)
+	}
+	if got.Exists {
+		t.Errorf("missing: got %+v, want exists=false", got)
+	}
+}
+
+func TestIntegration_VaultSha256_HappyPath(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	vaultWriteRaw(t, vault, "Notes/a.md", "abc")
+
+	tool := mcp.NewVaultSha256Tool(cfg)
+	out, err := callVaultTool(t, tool, map[string]any{"path": "Notes/a.md"})
+	if err != nil {
+		t.Fatalf("sha256: %v", err)
+	}
+	var got vaultfs.Sha256Result
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	want := sha256.Sum256([]byte("abc"))
+	if got.Sha256 != hex.EncodeToString(want[:]) {
+		t.Errorf("sha256 = %q, want %q", got.Sha256, hex.EncodeToString(want[:]))
+	}
+	if got.Bytes != 3 {
+		t.Errorf("bytes = %d, want 3", got.Bytes)
+	}
+}
+
+// TestIntegration_VaultRead_TempVaultPath_ViaConfig verifies the D13 test
+// injection contract: the tool resolves vault path from cfg.VaultPath, not
+// from any runtime parameter or global. Two parallel cfgs pointed at two
+// distinct tempdirs MUST resolve independently.
+func TestIntegration_VaultRead_TempVaultPath_ViaConfig(t *testing.T) {
+	cfgA, vaultA := vaultTestSetup(t)
+	cfgB, vaultB := vaultTestSetup(t)
+	vaultWriteRaw(t, vaultA, "x.md", "from-A")
+	vaultWriteRaw(t, vaultB, "x.md", "from-B")
+
+	toolA := mcp.NewVaultReadTool(cfgA)
+	toolB := mcp.NewVaultReadTool(cfgB)
+
+	getContent := func(out string) string {
+		var got struct {
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("unmarshal: %v\n%s", err, out)
+		}
+		return got.Content
+	}
+
+	outA, err := callVaultTool(t, toolA, map[string]any{"path": "x.md"})
+	if err != nil {
+		t.Fatalf("toolA read: %v", err)
+	}
+	outB, err := callVaultTool(t, toolB, map[string]any{"path": "x.md"})
+	if err != nil {
+		t.Fatalf("toolB read: %v", err)
+	}
+	if got := getContent(outA); got != "from-A" {
+		t.Errorf("toolA content = %q, want from-A", got)
+	}
+	if got := getContent(outB); got != "from-B" {
+		t.Errorf("toolB content = %q, want from-B", got)
+	}
+}
+
+func TestIntegration_VaultWrite_HappyPath(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	tool := mcp.NewVaultWriteTool(cfg)
+
+	_, err := callVaultTool(t, tool, map[string]any{
+		"path":    "Notes/new.md",
+		"content": "fresh",
+	})
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(vault, "Notes/new.md"))
+	if err != nil {
+		t.Fatalf("read after write: %v", err)
+	}
+	if string(got) != "fresh" {
+		t.Errorf("content = %q, want fresh", got)
+	}
+}
+
+func TestIntegration_VaultWrite_PathTraversal(t *testing.T) {
+	cfg, _ := vaultTestSetup(t)
+	tool := mcp.NewVaultWriteTool(cfg)
+	for _, bad := range []string{"../escape.md", "/abs/escape.md", "foo/../../etc/x"} {
+		_, err := callVaultTool(t, tool, map[string]any{"path": bad, "content": "x"})
+		if err == nil {
+			t.Errorf("path %q: expected error", bad)
+		}
+	}
+}
+
+func TestIntegration_VaultWrite_RefusesGitDir(t *testing.T) {
+	cfg, _ := vaultTestSetup(t)
+	tool := mcp.NewVaultWriteTool(cfg)
+	for _, bad := range []string{".git/HEAD", "Projects/foo/.git/config"} {
+		_, err := callVaultTool(t, tool, map[string]any{"path": bad, "content": "x"})
+		if err == nil {
+			t.Errorf("path %q: expected refusal", bad)
+		} else if !errors.Is(err, vaultfs.ErrRefusedPath) {
+			t.Errorf("path %q: got %v, want ErrRefusedPath", bad, err)
+		}
+	}
+}
+
+func TestIntegration_VaultWrite_RefusesGitDir_CaseInsensitive(t *testing.T) {
+	cfg, _ := vaultTestSetup(t)
+	tool := mcp.NewVaultWriteTool(cfg)
+	for _, bad := range []string{".GIT/HEAD", "Projects/foo/.Git/config", "Projects/foo/.gIt/x"} {
+		_, err := callVaultTool(t, tool, map[string]any{"path": bad, "content": "x"})
+		if err == nil {
+			t.Errorf("path %q: expected refusal", bad)
+		} else if !errors.Is(err, vaultfs.ErrRefusedPath) {
+			t.Errorf("path %q: got %v, want ErrRefusedPath", bad, err)
+		}
+	}
+}
+
+func TestIntegration_VaultWrite_AllowsGitSubstring(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	tool := mcp.NewVaultWriteTool(cfg)
+	// "foo.git" is a SEGMENT containing ".git" as a substring but not
+	// equal to ".git" — D8 allows it.
+	_, err := callVaultTool(t, tool, map[string]any{
+		"path":    "Projects/foo.git/notes.md",
+		"content": "ok",
+	})
+	if err != nil {
+		t.Fatalf("write foo.git/notes.md: unexpected error %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(vault, "Projects/foo.git/notes.md"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(got) != "ok" {
+		t.Errorf("content = %q, want ok", got)
+	}
+}
+
+func TestIntegration_VaultWrite_CompareAndSet(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	vaultWriteRaw(t, vault, "Notes/a.md", "v1")
+	tool := mcp.NewVaultWriteTool(cfg)
+
+	want := sha256.Sum256([]byte("v1"))
+	wantHex := hex.EncodeToString(want[:])
+
+	// Matching expected_sha256 succeeds.
+	_, err := callVaultTool(t, tool, map[string]any{
+		"path":            "Notes/a.md",
+		"content":         "v2",
+		"expected_sha256": wantHex,
+	})
+	if err != nil {
+		t.Fatalf("CAS match: %v", err)
+	}
+
+	// Now content is "v2"; supplying the OLD sha must fail with conflict.
+	_, err = callVaultTool(t, tool, map[string]any{
+		"path":            "Notes/a.md",
+		"content":         "v3",
+		"expected_sha256": wantHex,
+	})
+	if err == nil {
+		t.Fatal("CAS mismatch: expected error, got nil")
+	}
+	if !errors.Is(err, vaultfs.ErrShaConflict) {
+		t.Errorf("CAS mismatch: got %v, want ErrShaConflict", err)
+	}
+	// File must still be "v2" (not "v3").
+	got, _ := os.ReadFile(filepath.Join(vault, "Notes/a.md"))
+	if string(got) != "v2" {
+		t.Errorf("file should remain v2 after CAS conflict, got %q", got)
+	}
+}
+
+func TestIntegration_VaultEdit_HappyPath(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	vaultWriteRaw(t, vault, "Notes/a.md", "Hello, world!\n")
+	tool := mcp.NewVaultEditTool(cfg)
+
+	out, err := callVaultTool(t, tool, map[string]any{
+		"path":       "Notes/a.md",
+		"old_string": "world",
+		"new_string": "vault",
+	})
+	if err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	var got vaultfs.EditResult
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if got.Replacements != 1 {
+		t.Errorf("replacements = %d, want 1", got.Replacements)
+	}
+	data, _ := os.ReadFile(filepath.Join(vault, "Notes/a.md"))
+	if string(data) != "Hello, vault!\n" {
+		t.Errorf("content = %q, want %q", data, "Hello, vault!\n")
+	}
+}
+
+func TestIntegration_VaultEdit_AmbiguousMatch(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	vaultWriteRaw(t, vault, "Notes/a.md", "foo\nfoo\n")
+	tool := mcp.NewVaultEditTool(cfg)
+
+	_, err := callVaultTool(t, tool, map[string]any{
+		"path":       "Notes/a.md",
+		"old_string": "foo",
+		"new_string": "bar",
+	})
+	if err == nil {
+		t.Fatal("expected ambiguous-match error, got nil")
+	}
+	if !strings.Contains(err.Error(), "replace_all") {
+		t.Errorf("error should mention replace_all, got %v", err)
+	}
+
+	// With replace_all: true, the same call succeeds.
+	out, err := callVaultTool(t, tool, map[string]any{
+		"path":        "Notes/a.md",
+		"old_string":  "foo",
+		"new_string":  "bar",
+		"replace_all": true,
+	})
+	if err != nil {
+		t.Fatalf("replace_all: %v", err)
+	}
+	var got vaultfs.EditResult
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if got.Replacements != 2 {
+		t.Errorf("replacements = %d, want 2", got.Replacements)
+	}
+}
+
+func TestIntegration_VaultDelete_HappyPath(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	vaultWriteRaw(t, vault, "Notes/doomed.md", "x")
+	tool := mcp.NewVaultDeleteTool(cfg)
+
+	out, err := callVaultTool(t, tool, map[string]any{"path": "Notes/doomed.md"})
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	var got vaultfs.DeleteResult
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if !got.Removed {
+		t.Error("removed = false, want true")
+	}
+	if _, err := os.Stat(filepath.Join(vault, "Notes/doomed.md")); !os.IsNotExist(err) {
+		t.Errorf("file still exists after delete: %v", err)
+	}
+}
+
+func TestIntegration_VaultDelete_RefusesDirectory(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	if err := os.MkdirAll(filepath.Join(vault, "Notes/sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tool := mcp.NewVaultDeleteTool(cfg)
+	_, err := callVaultTool(t, tool, map[string]any{"path": "Notes/sub"})
+	if err == nil {
+		t.Fatal("expected error deleting directory")
+	}
+	if !strings.Contains(err.Error(), "directory") {
+		t.Errorf("error should mention directory, got %v", err)
+	}
+}
+
+func TestIntegration_VaultMove_HappyPath(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+	vaultWriteRaw(t, vault, "Notes/a.md", "movable")
+	tool := mcp.NewVaultMoveTool(cfg)
+
+	_, err := callVaultTool(t, tool, map[string]any{
+		"from_path": "Notes/a.md",
+		"to_path":   "Archive/a.md",
+	})
+	if err != nil {
+		t.Fatalf("move: %v", err)
+	}
+	if _, serr := os.Stat(filepath.Join(vault, "Notes/a.md")); !os.IsNotExist(serr) {
+		t.Errorf("source still exists: %v", serr)
+	}
+	got, err := os.ReadFile(filepath.Join(vault, "Archive/a.md"))
+	if err != nil {
+		t.Fatalf("read dst: %v", err)
+	}
+	if string(got) != "movable" {
+		t.Errorf("dst content = %q, want movable", got)
+	}
+}
+
+// TestIntegration_AutoMemoryWrite_VisibleViaHostSymlink is the full
+// end-to-end MCP-handler version of the auto-memory acceptance test: writing
+// via vv_vault_write to the canonical vault path lands on disk such that the
+// host-side symlink view (the path Claude Code's auto-memory tooling uses)
+// observes the same content. Mirrors the production setup created by
+// `vv memory link`.
+func TestIntegration_AutoMemoryWrite_VisibleViaHostSymlink(t *testing.T) {
+	cfg, vault := vaultTestSetup(t)
+
+	memDir := filepath.Join(vault, "Projects", "foo", "agentctx", "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatalf("mkdir vault memory: %v", err)
+	}
+
+	host := t.TempDir()
+	hostMem := filepath.Join(host, "memory")
+	if err := os.Symlink(memDir, hostMem); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	tool := mcp.NewVaultWriteTool(cfg)
+	rel := "Projects/foo/agentctx/memory/MEMORY.md"
+	body := "auto-memory entry from MCP\n"
+	if _, err := callVaultTool(t, tool, map[string]any{"path": rel, "content": body}); err != nil {
+		t.Fatalf("vv_vault_write: %v", err)
+	}
+
+	// Vault-side: actual file landed.
+	gotVault, err := os.ReadFile(filepath.Join(vault, rel))
+	if err != nil {
+		t.Fatalf("read vault file: %v", err)
+	}
+	if string(gotVault) != body {
+		t.Errorf("vault content = %q, want %q", gotVault, body)
+	}
+
+	// Host-side: same file visible via the symlink.
+	gotHost, err := os.ReadFile(filepath.Join(hostMem, "MEMORY.md"))
+	if err != nil {
+		t.Fatalf("read via host symlink: %v", err)
+	}
+	if string(gotHost) != body {
+		t.Errorf("host content = %q, want %q", gotHost, body)
+	}
 }
