@@ -2,7 +2,7 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**1633 tests** across 47 test packages + **1 integration test** (22 subtests). All passing.
+**1704 tests** across 48 test packages + **1 integration test** (31 subtests) + **21 vault-accessor integration tests**. All passing.
 
 > **Note (iter 121):** The detailed per-file table below is out of date relative to the
 > headline counts above — accumulated drift across many iterations. Treat the table
@@ -89,25 +89,32 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 | `mcp/tools_synthesize_wrap_test.go` | 13 | `TestSynthesizeWrap_BundleShape`, `_IterationBlockFormat`, `_CommitMsgStructure`, `_CaptureSessionAlwaysPresent`, `_ThreadsToOpen`, `_CarriedChanges`, `_SHAFingerprint`, `_FilesChangedSupplied`, `_RequiredFieldsMissing`, `_ProseBodyDefaultsToNarrative`, `_DecisionsInCaptureSession`, `TestFingerprintString_Deterministic`, `TestFirstNWords` |
 | `mcp/tools_apply_wrap_bundle_test.go` | 14 | `TestApplyWrapBundle_AppendIteration`, `_ThreadInsert`, `_ThreadRemove`, `_CarriedAdd`, `_CarriedRemove`, `_SetCommitMsg`, `_MetricsWritten`, `_PartialFailure_StopsAtError`, `_BundleMissing`, `_AutoIncrementIteration`, `_DriftSummaryNoSHA`; `TestAnalyse_GoldenWrap` is excluded (lives in `cmd/wrap-trace`) |
 | `cmd/wrap-trace/main_test.go` | 3 | `TestAnalyse_GoldenWrap` (golden-file output comparison), `TestMeasure_GoldenFile` (per-step latency JSON structure), `TestCanonicalTool` (tool normalization) |
+| `vaultfs/safety_test.go` | 18 | `TestValidateRelPath_*` (8 variants: RejectsAbsolute, RejectsDotDotSegment, RejectsNullBytes, RejectsControlChars, RejectsEmpty, RejectsDot, AcceptsTypicalRelative, AcceptsHiddenFile), `TestResolveSafePath_*` (4 variants: HappyPath, RealpathStaysUnderVault, RejectsSymlinkEscape_RealpathBased, RejectsAfterClean), `TestIsRefusedWritePath_*` (6 variants: RejectsGitSegmentTopLevel, RejectsGitSegmentNested, RejectsGitSegmentCaseInsensitive, AllowsSubstringNotSegment, AllowsGitignore, AllowsHiddenNonGit) |
+| `vaultfs/read_test.go` | 21 | `TestRead_*` (8 variants: HappyPath, FileNotFound, SizeCapDefault, SizeCapCustom, SizeCapExceedsMax, PathTraversalRejected, FollowsSymlinkUnderVault, RejectsSymlinkEscape_Realpath), `TestList_*` (6 variants: HappyPath, NotADir, NotFound, HidesDotGit, HidesDotGitCaseInsensitive, IncludeSha256_OptIn), `TestExists_*` (5 variants: File, Dir, Missing, DanglingSymlink, Symlink_ResolvesUnderVault), `TestSha256_*` (2 variants: HappyPath, FileNotFound) |
+| `vaultfs/write_test.go` | 28 | `TestWrite_*` (12 variants incl. HappyPath, FilePermissions_0o644, NoTempFileDebrisOnSuccess, NoTempFileDebrisOnRenameError, RefusesGitDir_TopLevel/Nested/CaseInsensitive, AllowsGitSubstring, CompareAndSet_Match/Mismatch/FileMissing, NoCompareAndSet_Overwrites, CreatesParentDirs), `TestEdit_*` (6: HappyPath, NotFoundString, AmbiguousMatch, ReplaceAll, RefusesGitDir, CompareAndSet_Mismatch), `TestDelete_*` (4: HappyPath, RefusesGitDir, OnDirectory, CompareAndSet_Mismatch), `TestMove_*` (5: HappyPath, DestinationExists, RefusesGitDir_Source, RefusesGitDir_Destination, SamePath) |
+| `vaultfs/automemory_acceptance_test.go` | 4 | `TestVaultfs_AutoMemoryWrite_VisibleViaHostSymlink`, `_AutoMemoryRead_ViaHostSymlink_ReturnsVaultContent`, `_AutoMemoryEdit_PropagatesViaHostSymlink`, `_AutoMemoryDelete_VisibleViaHostSymlink` — production-mirror tests: tempdir vault `V` with `Projects/foo/agentctx/memory/` as a regular dir, separate tempdir `H` with `os.Symlink(V/.../memory, H/memory)`, verifies write/read/edit/delete via vault paths converge through the host-side symlink view |
 
 ## Integration Test
 
 | File | Subtests | Coverage |
 |------|----------|----------|
-| `test/integration_test.go` | 22 | `init` (with nested `reinit_updates_vault_path`), `process_session_a1`, `process_session_a2_iteration`, `process_trivial_skipped`, `process_session_b_different_project`, `process_narrative_session`, `index_rebuild`, `index_knowledge_seeding`, `stats`, `backfill`, `archive`, `stop_checkpoint_then_session_end`, `process_friction_session`, `friction`, `trends`, `inject`, `context_init_and_migrate`, `context_sync`, `export`, `reprocess`, `mcp` |
+| `test/integration_test.go` (TestIntegration) | 31 | `init` (with nested `reinit_updates_vault_path`), `process_session_a1`, `process_session_a2_iteration`, `process_trivial_skipped`, `process_session_b_different_project`, `process_narrative_session`, `index_rebuild`, `index_knowledge_seeding`, `stats`, `backfill`, `archive`, `stop_checkpoint_then_session_end`, `process_friction_session`, `friction`, `trends`, `inject`, `context_init_and_migrate`, `context_sync`, `context_marker_guards`, `check_resume_invariants`, `export`, `reprocess`, `mcp`, `mcp_learnings`, `mcp_update_resume_guard`, `provenance_in_vault_writes`, `context_sync_t1_t2_cascade`, `memory_link_cli`, `vault_push_multi_remote`, `no_real_vault_mutation` |
+| `test/integration_test.go` (TestIntegration_Vault\*) | 21 | Top-level tests for `vv_vault_*` MCP surface: `TestIntegration_VaultRead_HappyPath`, `_VaultRead_PathTraversal`, `_VaultRead_SymlinkEscape`, `_VaultList_HappyPath`, `_VaultList_HidesDotGit`, `_VaultList_IncludeSha256`, `_VaultExists_File`, `_VaultSha256_HappyPath`, `_VaultRead_TempVaultPath_ViaConfig`, `_VaultWrite_HappyPath`, `_VaultWrite_PathTraversal`, `_VaultWrite_RefusesGitDir`, `_VaultWrite_RefusesGitDir_CaseInsensitive`, `_VaultWrite_AllowsGitSubstring`, `_VaultWrite_CompareAndSet`, `_VaultEdit_HappyPath`, `_VaultEdit_AmbiguousMatch`, `_VaultDelete_HappyPath`, `_VaultDelete_RefusesDirectory`, `_VaultMove_HappyPath`, `_AutoMemoryWrite_VisibleViaHostSymlink` (full end-to-end through MCP) |
 
-The integration test builds `vv` once via `TestMain`, then runs 22 sequential subtests (20 top-level + 2 nested)
+The integration test builds `vv` once via `TestMain`, then runs 31 sequential subtests under `TestIntegration`
 exercising the full pipeline as subprocess calls. Uses XDG_CONFIG_HOME isolation and
 temp directories. 8 JSONL fixtures loaded from `test/testdata/*.jsonl` via `readTestdata()`: normal session, same-day iteration,
 trivial (skipped), different project, UUID-named backfill, checkpoint session, narrative session (with tool results), friction session (with correction patterns). The
 `index_knowledge_seeding` subtest verifies per-project `knowledge.md` files are seeded during index generation. The `inject` subtest tests markdown/JSON output, sections filter, max-tokens truncation, help flag, and unknown project warning. The `export` subtest tests JSON output, project filter, CSV format, and help flag. The `context_sync` subtest verifies schema migration (0→2), shared command propagation, dry-run mode, and idempotent re-sync. Skipped in `-short` mode.
 
-The `mcp` subtest's `tools/list` check uses an **exact-set assertion**: the test enumerates all 31
+In addition to `TestIntegration`, the file holds 21 top-level `TestIntegration_Vault*` tests covering the eight `vv_vault_*` MCP tools through the same subprocess-driven harness: read/list/exists/sha256/write/edit/delete/move plus path-traversal, symlink-escape, `.git`-segment refusal (case-insensitive and substring-allowed), compare-and-set semantics, ambiguous-edit detection, and an end-to-end auto-memory shared-storage acceptance test that creates the host-side symlink and writes through the MCP surface.
+
+The `mcp` subtest's `tools/list` check uses an **exact-set assertion**: the test enumerates all 39
 expected tool names by name and compares against the server's reported list bidirectionally. A
 tool missing from the expected list fails with `"unexpected tool %q"`, and a tool missing from the
 server's list fails with `"missing expected tool %q"`. The old numeric `len(tools) != 20` check has
 been replaced; add new tools explicitly to `expectedTools` in `test/integration_test.go` to prevent
-silent count drift.
+silent count drift. The eight `vv_vault_{read,list,exists,sha256,write,edit,delete,move}` entries land on the slice as part of this epic (count 31 → 39).
 
 ## HOME-Sandbox Classification
 
