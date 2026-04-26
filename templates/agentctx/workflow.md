@@ -47,4 +47,10 @@ Use `vv_manage_task` (action: create | update_status | retire). Write the plan, 
 - **Minimal impact** — touch only what the task requires.
 - **Test coverage** — ~80% unit coverage for code changes.
 
+## Vault file accessors
+
+Use the `vv_vault_*` MCP tools (`vv_vault_read`, `vv_vault_list`, `vv_vault_exists`, `vv_vault_sha256`, `vv_vault_write`, `vv_vault_edit`, `vv_vault_delete`, `vv_vault_move`) for any vault-resident file outside the schema-typed slots (notes, learnings, memory, templates, archived sessions, etc.). All paths are **vault-relative** (e.g. `Projects/<p>/agentctx/notes/foo.md`); the MCP server resolves the canonical absolute path internally from `~/.config/vibe-vault/config.toml`'s `vault_path`. Do **not** fall back to absolute filesystem paths via `Read`/`Write`/`Edit` — that pollutes the permission allowlist with operator-specific entries and prevents `.claude/settings.json` from being shareable across hosts. Writes refuse any path with a `.git` segment (case-insensitive); reads cap at 1 MB by default; write/edit/delete accept an optional `expected_sha256` for compare-and-set.
+
+**Auto-memory setup precondition.** AI auto-memory (writes under `Projects/<p>/agentctx/memory/`) lands on shared vault storage only when the host-side `~/.claude/projects/<slug>/memory/` symlink points INTO the vault directory. Each new host requires `vv memory link <project>` once. Without it, AI's `vv_vault_write` lands in the vault while Claude Code's native auto-memory lands in a regular host-local directory at `~/.claude/projects/<slug>/memory/`, and the two diverge silently. The bootstrap workflow (`/restart`, CLAUDE.md hint) should verify the symlink exists and prompt the operator if not. See DESIGN.md #48 for the link semantics.
+
 Read resume.md for current state and open threads. Consult doc/ files for stable reference (architecture, design, tests).
