@@ -409,3 +409,295 @@ func searchString(s, substr string) bool {
 	}
 	return false
 }
+
+// barePushUnrelated places an unrelated commit at refs/heads/main on
+// the given bare repo by cloning it to a scratch tempdir, committing
+// a unique file, and force-pushing back. Returns the SHA at which the
+// bare's main now points.
+//
+// Inlined per test in the plan; the recipe is repeated five times
+// across the new convergence tests. If a sixth call site appears,
+// extract to gitx.
+func barePushUnrelated(t *testing.T, bareDir, fileName, content string) string {
+	t.Helper()
+	scratch := t.TempDir()
+	gitx.GitRun(t, scratch, "clone", "-b", "main", bareDir, ".")
+	gitx.GitRun(t, scratch, "config", "user.email", "test@test.com")
+	gitx.GitRun(t, scratch, "config", "user.name", "test")
+	if err := os.WriteFile(filepath.Join(scratch, fileName), []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", fileName, err)
+	}
+	gitx.GitRun(t, scratch, "add", ".")
+	gitx.GitRun(t, scratch, "commit", "-m", "unrelated: "+fileName)
+	gitx.GitRun(t, scratch, "push", "origin", "main")
+	sha := strings.TrimSpace(gitx.GitRun(t, scratch, "rev-parse", "HEAD"))
+	return sha
+}
+
+// bareRefSHA reads refs/heads/main from a bare repo and returns the
+// resolved SHA.
+func bareRefSHA(t *testing.T, bareDir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", bareDir, "rev-parse", "refs/heads/main")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("rev-parse refs/heads/main on %s: %s: %v", bareDir, out, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestCommitAndPush_SHADivergenceConvergence_GithubFirst(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	bareGithub := gitx.InitBareRemote(t)
+	bareVault := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "github", bareGithub)
+	gitx.AddRemote(t, dir, "vault", bareVault)
+
+	// Seed both bares with the initial commit so neither rejects on
+	// the first push attempt for an empty ref.
+	gitx.GitRun(t, dir, "push", "github", "main")
+	gitx.GitRun(t, dir, "push", "vault", "main")
+
+	// Plant an unrelated commit on vault's bare so vault rejects the
+	// next fast-forward push from `dir`. github accepts (FF), vault
+	// rejects → fetch → rebase → push → convergence force-with-leases
+	// github back into alignment.
+	barePushUnrelated(t, bareVault, "vault-unrelated.txt", "vault unrelated state")
+
+	// Stage a new local commit in `dir`.
+	if err := os.WriteFile(filepath.Join(dir, "local.txt"), []byte("local change"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := CommitAndPush(dir, "convergence test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.AllPushed() {
+		t.Fatalf("expected AllPushed; got results=%v", result.RemoteResults)
+	}
+
+	githubSHA := bareRefSHA(t, bareGithub)
+	vaultSHA := bareRefSHA(t, bareVault)
+	if githubSHA != vaultSHA {
+		t.Errorf("remotes diverged: github=%s vault=%s", githubSHA, vaultSHA)
+	}
+}
+
+func TestCommitAndPush_SHADivergenceConvergence_RejecterFirst(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	// Names chosen so alphabetical iteration order puts the rejecter
+	// first: the listRemotes output is sorted by `git remote`.
+	bareReject := gitx.InitBareRemote(t)
+	bareAccept := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "aaa-rejecter", bareReject)
+	gitx.AddRemote(t, dir, "zzz-acceptor", bareAccept)
+
+	gitx.GitRun(t, dir, "push", "aaa-rejecter", "main")
+	gitx.GitRun(t, dir, "push", "zzz-acceptor", "main")
+
+	// Plant unrelated state on the rejecter so the FIRST iterated
+	// remote is the one that rejects.
+	barePushUnrelated(t, bareReject, "reject-first.txt", "rejecter state")
+
+	if err := os.WriteFile(filepath.Join(dir, "local.txt"), []byte("local change"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := CommitAndPush(dir, "rejecter-first convergence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.AllPushed() {
+		t.Fatalf("expected AllPushed; got results=%v", result.RemoteResults)
+	}
+
+	rejectSHA := bareRefSHA(t, bareReject)
+	acceptSHA := bareRefSHA(t, bareAccept)
+	if rejectSHA != acceptSHA {
+		t.Errorf("remotes diverged: rejecter=%s acceptor=%s", rejectSHA, acceptSHA)
+	}
+}
+
+func TestCommitAndPush_LeaseRejectsConcurrentWriter(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	bareGithub := gitx.InitBareRemote(t)
+	bareVault := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "github", bareGithub)
+	gitx.AddRemote(t, dir, "vault", bareVault)
+
+	gitx.GitRun(t, dir, "push", "github", "main")
+	gitx.GitRun(t, dir, "push", "vault", "main")
+
+	// vault has unrelated state to force the rebase path.
+	barePushUnrelated(t, bareVault, "vault-unrelated.txt", "vault unrelated")
+
+	// Capture the third-party SHA that will be planted on github
+	// AFTER our push to github but BEFORE the convergence
+	// force-with-lease — the lease must reject and leave the bare at
+	// this state.
+	var thirdPartySHA string
+
+	prev := afterPushHook
+	t.Cleanup(func() { afterPushHook = prev })
+	afterPushHook = func(remote string) {
+		if remote != "github" {
+			return
+		}
+		// Mid-flight: plant a concurrent commit on github's bare via
+		// a scratch clone. This moves github's main off the SHA we
+		// just recorded, so the convergence lease will reject.
+		thirdPartySHA = barePushUnrelated(t, bareGithub, "github-concurrent.txt", "third-party writer")
+		// One-shot: don't fire on subsequent hook calls within this
+		// test (e.g., the post-rebase push to vault).
+		afterPushHook = func(string) {}
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "local.txt"), []byte("local change"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := CommitAndPush(dir, "lease rejection test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	githubErr := result.RemoteResults["github"]
+	if githubErr == nil {
+		t.Fatal("expected non-nil error for github (lease should have rejected)")
+	}
+	if !strings.Contains(githubErr.Error(), "convergence rejected") {
+		t.Errorf("github error missing 'convergence rejected': %v", githubErr)
+	}
+	if result.AllPushed() {
+		t.Error("expected AllPushed false when lease rejects")
+	}
+
+	// github bare should be left at the third-party state — no
+	// overwrite.
+	githubSHA := bareRefSHA(t, bareGithub)
+	if githubSHA != thirdPartySHA {
+		t.Errorf("github bare overwritten by lease: got %s, want third-party %s",
+			githubSHA, thirdPartySHA)
+	}
+}
+
+func TestCommitAndPush_BothRemotesRebase(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	bareGithub := gitx.InitBareRemote(t)
+	bareVault := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "github", bareGithub)
+	gitx.AddRemote(t, dir, "vault", bareVault)
+
+	gitx.GitRun(t, dir, "push", "github", "main")
+	gitx.GitRun(t, dir, "push", "vault", "main")
+
+	// Both bares carry distinct unrelated commits — sequential rebase
+	// chain.
+	barePushUnrelated(t, bareGithub, "github-unrelated.txt", "github state")
+	barePushUnrelated(t, bareVault, "vault-unrelated.txt", "vault state")
+
+	// Capture pre-push HEAD so we can assert post-loop refresh moved
+	// CommitSHA off it.
+	originalHEADfull := strings.TrimSpace(gitx.GitRun(t, dir, "rev-parse", "HEAD"))
+
+	if err := os.WriteFile(filepath.Join(dir, "local.txt"), []byte("local change"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := CommitAndPush(dir, "both-rebase test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.AllPushed() {
+		t.Fatalf("expected AllPushed; got results=%v", result.RemoteResults)
+	}
+
+	// Both remotes must end at the same SHA.
+	githubSHA := bareRefSHA(t, bareGithub)
+	vaultSHA := bareRefSHA(t, bareVault)
+	if githubSHA != vaultSHA {
+		t.Errorf("remotes diverged: github=%s vault=%s", githubSHA, vaultSHA)
+	}
+
+	// CommitSHA must reflect post-loop HEAD, not the pre-push commit.
+	postHEAD := strings.TrimSpace(gitx.GitRun(t, dir, "rev-parse", "--short", "HEAD"))
+	if result.CommitSHA != postHEAD {
+		t.Errorf("CommitSHA = %q, want post-loop HEAD %q",
+			result.CommitSHA, postHEAD)
+	}
+	// Sanity: the post-loop HEAD must differ from the pre-push HEAD
+	// (a rebase happened — distinct from the pre-rebase commit SHA).
+	if strings.HasPrefix(originalHEADfull, result.CommitSHA) {
+		t.Errorf("CommitSHA %q still matches pre-push HEAD %q — rebase did not refresh",
+			result.CommitSHA, originalHEADfull)
+	}
+}
+
+func TestCommitAndPush_ThreeRemotesSecondCascade(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	bareA := gitx.InitBareRemote(t)
+	bareB := gitx.InitBareRemote(t)
+	bareC := gitx.InitBareRemote(t)
+	// Names chosen so alphabetical iteration order is A, B, C.
+	gitx.AddRemote(t, dir, "aaa-first", bareA)
+	gitx.AddRemote(t, dir, "bbb-second", bareB)
+	gitx.AddRemote(t, dir, "ccc-third", bareC)
+
+	gitx.GitRun(t, dir, "push", "aaa-first", "main")
+	gitx.GitRun(t, dir, "push", "bbb-second", "main")
+	gitx.GitRun(t, dir, "push", "ccc-third", "main")
+
+	// B and C carry distinct unrelated commits. A is empty (FF
+	// accepts). The loop:
+	//   1. push A (FF) → succeeds; remoteSHA[A] = X.
+	//   2. push B → reject → rebase → push B → succeeds at X' (parent
+	//      Y_B); converge A from X to X'.
+	//   3. push C → reject (C's tip is Y_C, not X') → rebase →
+	//      push C → succeeds at X'' (parent Y_C); converge A and B
+	//      from X' to X'' (the SECOND CASCADE).
+	barePushUnrelated(t, bareB, "b-unrelated.txt", "B state")
+	barePushUnrelated(t, bareC, "c-unrelated.txt", "C state")
+
+	if err := os.WriteFile(filepath.Join(dir, "local.txt"), []byte("local change"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := CommitAndPush(dir, "three-remote cascade")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.AllPushed() {
+		t.Fatalf("expected AllPushed; got results=%v", result.RemoteResults)
+	}
+	for name, perr := range result.RemoteResults {
+		if perr != nil {
+			t.Errorf("remote %s: unexpected error: %v", name, perr)
+		}
+	}
+
+	// All three bares must converge.
+	shaA := bareRefSHA(t, bareA)
+	shaB := bareRefSHA(t, bareB)
+	shaC := bareRefSHA(t, bareC)
+	if shaA != shaB || shaB != shaC {
+		t.Errorf("three remotes diverged: A=%s B=%s C=%s", shaA, shaB, shaC)
+	}
+
+	// CommitSHA must reflect post-loop HEAD.
+	postHEAD := strings.TrimSpace(gitx.GitRun(t, dir, "rev-parse", "--short", "HEAD"))
+	if result.CommitSHA != postHEAD {
+		t.Errorf("CommitSHA = %q, want post-loop HEAD %q",
+			result.CommitSHA, postHEAD)
+	}
+}
+
+func TestAfterPushHook_DefaultIsNoOp(t *testing.T) {
+	if afterPushHook == nil {
+		t.Fatal("afterPushHook is nil — must be a no-op default")
+	}
+	// Calling the default must not panic and must not have observable
+	// side effects beyond returning. A no-op is observable only by
+	// not panicking.
+	afterPushHook("any-remote-name")
+}
