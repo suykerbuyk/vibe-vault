@@ -1193,6 +1193,14 @@ func registerMCPTools(srv *mcp.Server, cfg config.Config) {
 	srv.RegisterTool(mcp.NewRenderCommitMsgTool(cfg))
 	srv.RegisterTool(mcp.NewSynthesizeWrapTool(cfg))
 	srv.RegisterTool(mcp.NewApplyWrapBundleTool(cfg))
+	srv.RegisterTool(mcp.NewVaultReadTool(cfg))
+	srv.RegisterTool(mcp.NewVaultListTool(cfg))
+	srv.RegisterTool(mcp.NewVaultExistsTool(cfg))
+	srv.RegisterTool(mcp.NewVaultSha256Tool(cfg))
+	srv.RegisterTool(mcp.NewVaultWriteTool(cfg))
+	srv.RegisterTool(mcp.NewVaultEditTool(cfg))
+	srv.RegisterTool(mcp.NewVaultDeleteTool(cfg))
+	srv.RegisterTool(mcp.NewVaultMoveTool(cfg))
 	srv.RegisterPrompt(mcp.NewSessionGuidelinesPrompt())
 }
 
