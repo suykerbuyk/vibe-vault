@@ -333,6 +333,7 @@ Source of truth: Tier 1 (Go embeds). See DESIGN.md decisions #41 and #46.
 | `mcp` | `tools_render_commit_msg.go` | `vv_render_commit_msg` — reads `git status` + `git diff --cached --stat`, renders a conventional commit message from convention file and AI-supplied subject+body; `RenderCommitMsg()` exported as package-level function for reuse in `vv_synthesize_wrap` |
 | `mcp` | `tools_synthesize_wrap.go` | `vv_synthesize_wrap` — reads resume.md, iterations.md, knowledge.md, convention file; builds `WrapBundle` with all wrap fields and SHA-256 fingerprints stamped at synth time |
 | `mcp` | `tools_apply_wrap_bundle.go` | `vv_apply_wrap_bundle` — in-process orchestrator: dispatches all `WrapBundle` writes sequentially by calling peer handler bodies directly (no MCP round-trips); logs synth vs. apply SHA drift to `wrapmetrics`; fail-stop on first error, no rollback |
+| `mcp` | `tools_vault.go` | 8 generic vault-relative file accessor tools: `vv_vault_read`, `vv_vault_list`, `vv_vault_exists`, `vv_vault_sha256`, `vv_vault_write`, `vv_vault_edit`, `vv_vault_delete`, `vv_vault_move`. Each constructor (`NewVault*Tool(cfg config.Config)`) closure-captures `cfg.VaultPath`; the AI passes vault-relative paths only and the handler joins them under the configured vault root via `vaultfs` package. Write/edit/delete/move accept an optional `expected_sha256` for compare-and-set. Reads cap at 1 MB by default (settable up to 10 MB via `max_bytes`). |
 | `mcp` | `prompts.go` | `NewSessionGuidelinesPrompt()` — agent instructions for when/how to call `vv_capture_session` |
 | `help` | `commands.go` | Command/Flag/Arg structs, Version var (build-time injection via ldflags), registry of 17 subcommands + 2 hook + 3 context + 3 vault subcommands (status, pull, push), ManName() with space→hyphen |
 | `help` | `terminal.go` | `FormatTerminal()` and `FormatUsage()` — terminal help output |
@@ -393,11 +394,26 @@ Source of truth: Tier 1 (Go embeds). See DESIGN.md decisions #41 and #46.
 | `synthesis` | `actions.go` | `Apply()` — execute synthesis result: append learnings to knowledge.md (with significant-word duplicate detection), flag stale entries (index + fuzzy fallback), update resume sections, move completed tasks to `done/` |
 | `synthesis` | `run.go` | `Run()` — top-level orchestrator: gather → synthesize → apply; short-circuits on nil provider, disabled config, or empty result |
 | `mdutil` | `mdutil.go` | Shared markdown/text utilities: `SignificantWords()` (4+ char, stop-word filtered), `Overlap()`/`SetIntersection()` (word set operations), `ReplaceSectionBody()` (heading-targeted markdown editing), `AtomicWriteFile()` (temp + rename crash safety); subsection family: `ReplaceSubsectionBody()`, `InsertSubsection()`, `RemoveSubsection()`, `NormalizeSubheadingSlug()` (text up to first ` — ` separator) |
+| `vaultfs` | `safety.go`, `read.go`, `write.go`, `types.go` | Generic vault-relative file accessors (read, list, exists, sha256, write, edit, delete, move) with path-traversal protection, case-insensitive `.git` refusal, atomic writes via `mdutil` delegation. `ValidateRelPath()` rejects absolute paths, `..` segments, null/control bytes, empty, and bare `.`; `ResolveSafePath()` joins under the configured vault root and verifies the realpath via `filepath.EvalSymlinks` stays inside the vault; `IsRefusedWritePath()` rejects any path whose segment matches `.git` case-insensitively. Linux-primary scope (no Windows-reserved-name check). Powers the eight `vv_vault_*` MCP tools. |
 | `mdutil` | `carried.go` | `CarriedBullet` type + liberal-on-read parser (`ParseCarriedForward`) + strict-on-write emitter (`EmitCarriedBullets`, `BuildCarriedBullet`); `AddCarriedBullet()`, `RemoveCarriedBullet()`, `GetCarriedBullet()` for resume.md "Carried forward" subsections |
 | `wrapmetrics` | `writer.go` | Host-local JSONL metric writer at `~/.cache/vibe-vault/wrap-metrics.jsonl`; `AppendLine()`, `AppendBundleLines()`, `CacheDir()`, rotation to `wrap-metrics-archive-YYYY.jsonl` at 1000-line threshold via `rotateIfNeeded()` |
 | `meta` | `provenance.go`, `sanitize.go` | `Stamp()` — resolves host/user/cwd/origin_project for provenance metadata. `HomeDir()` — config-aware home directory. `ProjectRoot(cwd, vaultPath)` — walks up the directory tree checking for `agentctx/` first, then `.git/`; returns `ErrIsVaultRoot` if matched directory equals the configured vault path |
 | `sanitize` | `redact.go` | Regex-based XML tag stripping for Claude Code wrapper tags |
 | `memory` | `memory.go` | `Link()`/`Unlink()` for `vv memory` — slug derivation (symlink-resolved + `/` → `-`), project resolution via `session.DetectProject`, migrate pre-existing host-local memory into the vault target (drop identical, move unique, quarantine conflicts to sibling `memory-conflicts/{timestamp}/` under `--force`), establish/remove the `~/.claude/projects/{slug}/memory` ↔ `Projects/{name}/agentctx/memory` symlink. Host-local writes go through to the vault by POSIX symlink semantics; see DESIGN.md #48 |
+
+### Cross-package dependencies
+
+- `vaultfs` → `mdutil`: `vaultfs.Write`/`Edit`/`Move` delegate atomic file
+  writes to `mdutil.AtomicWriteFile(path, data, 0o644)`. The dependency is
+  one-directional; `mdutil` imports stdlib only and has no upward awareness
+  of `vaultfs`. There is no import cycle. `vaultfs` always passes
+  `perm = 0o644` (matching the 24 existing call sites elsewhere in the
+  codebase) so the helper is not duplicated and the on-disk mode bits are
+  uniform across writers. The unrelated `atomicWriteCommitMsg` in
+  `internal/mcp/tools_commit_msg.go` is intentionally NOT consolidated —
+  its alternate caller writes outside the vault scope and `vaultfs.Write`
+  cannot subsume it. (Mirrors the iter-152 cross-package documentation
+  pattern.)
 
 ## Template System
 
