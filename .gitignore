@@ -1,4 +1,5 @@
 /vv
+/wrap-trace
 *.test
 /CLAUDE.md
 /commit.msg
