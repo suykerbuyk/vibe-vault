@@ -1191,6 +1191,8 @@ func registerMCPTools(srv *mcp.Server, cfg config.Config) {
 	srv.RegisterTool(mcp.NewCarriedRemoveTool(cfg))
 	srv.RegisterTool(mcp.NewCarriedPromoteToTaskTool(cfg))
 	srv.RegisterTool(mcp.NewRenderCommitMsgTool(cfg))
+	srv.RegisterTool(mcp.NewSynthesizeWrapTool(cfg))
+	srv.RegisterTool(mcp.NewApplyWrapBundleTool(cfg))
 	srv.RegisterPrompt(mcp.NewSessionGuidelinesPrompt())
 }
 

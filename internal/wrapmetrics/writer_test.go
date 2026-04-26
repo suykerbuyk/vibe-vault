@@ -112,16 +112,16 @@ func TestRotationTriggerAt1000Lines(t *testing.T) {
 	}
 
 	// Append one more line — rotation should fire.
-	if err := AppendLine(makeTestLine("trigger")); err != nil {
-		t.Fatalf("AppendLine after prefill: %v", err)
+	if appendErr := AppendLine(makeTestLine("trigger")); appendErr != nil {
+		t.Fatalf("AppendLine after prefill: %v", appendErr)
 	}
 
 	// The archive file should now exist.
 	year := time.Now().Year()
 	archiveName := fmt.Sprintf("wrap-metrics-archive-%d.jsonl", year)
 	archiveFull := filepath.Join(cacheDir, archiveName)
-	if _, err := os.Stat(archiveFull); err != nil {
-		t.Fatalf("archive file not created after rotation: %v", err)
+	if _, statErr := os.Stat(archiveFull); statErr != nil {
+		t.Fatalf("archive file not created after rotation: %v", statErr)
 	}
 
 	// The active file should contain only the new line (1 line).
