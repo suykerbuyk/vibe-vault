@@ -468,7 +468,7 @@ func TestInsertSubsection_ModeAfter(t *testing.T) {
 	if alphaIdx == -1 || betaIdx == -1 || gammaIdx == -1 {
 		t.Fatal("missing expected headings")
 	}
-	if !(alphaIdx < betaIdx && betaIdx < gammaIdx) {
+	if alphaIdx >= betaIdx || betaIdx >= gammaIdx {
 		t.Errorf("order wrong: alpha=%d beta=%d gamma=%d", alphaIdx, betaIdx, gammaIdx)
 	}
 }
@@ -485,7 +485,7 @@ func TestInsertSubsection_ModeBefore(t *testing.T) {
 	if alphaIdx == -1 || betaIdx == -1 || gammaIdx == -1 {
 		t.Fatal("missing expected headings")
 	}
-	if !(alphaIdx < betaIdx && betaIdx < gammaIdx) {
+	if alphaIdx >= betaIdx || betaIdx >= gammaIdx {
 		t.Errorf("order wrong: alpha=%d beta=%d gamma=%d", alphaIdx, betaIdx, gammaIdx)
 	}
 }
