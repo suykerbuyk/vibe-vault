@@ -3,6 +3,7 @@
 *.test
 /CLAUDE.md
 /commit.msg
-/.claude/
+/.claude/*
+!/.claude/settings.json
 man/*.1
 
