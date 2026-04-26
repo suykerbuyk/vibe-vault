@@ -1433,7 +1433,7 @@ func TestIntegration(t *testing.T) {
 			t.Error("initialize: missing serverInfo")
 		}
 
-		// Response 1: tools/list — exact-set check for all 22 registered tools.
+		// Response 1: tools/list — exact-set check for all 25 registered tools.
 		// Update this list when adding or removing tools; the exact-set check
 		// prevents silent breakage from numeric drift (O2 from iter-150).
 		expectedTools := []string{
@@ -1459,6 +1459,9 @@ func TestIntegration(t *testing.T) {
 			"vv_get_iterations",
 			"vv_get_project_root",
 			"vv_set_commit_msg",
+			"vv_thread_insert",
+			"vv_thread_replace",
+			"vv_thread_remove",
 		}
 		toolsResult := responses[1]["result"].(map[string]any)
 		tools := toolsResult["tools"].([]any)
