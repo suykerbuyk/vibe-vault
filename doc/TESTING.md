@@ -2,7 +2,7 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**1704 tests** across 48 test packages + **1 integration test** (31 subtests) + **21 vault-accessor integration tests**. All passing.
+**1710 tests** across 48 test packages + **1 integration test** (31 subtests) + **21 vault-accessor integration tests**. All passing.
 
 > **Note (iter 121):** The detailed per-file table below is out of date relative to the
 > headline counts above — accumulated drift across many iterations. Treat the table
@@ -73,6 +73,12 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 | `check/check_test.go` | 27 | `CheckVaultPath` (pass/fail), `CheckObsidian` (pass/warn), `CheckProjects` (pass/warn), `CheckStateDir` (pass/warn), `CheckIndex` (pass/warn/fail), `CheckDomains` (all exist/some missing/empty skipped), `CheckEnrichment` (disabled/enabled+key/enabled+no key), `checkHookFile` (pass/warn/fail), `Report.HasFailures` (true/false), `Run` integration, `Status.String`, `CheckAgentctxSchema` (current/outdated/no-agentctx) |
 | `templates/templates_test.go` | 8 | `New` (entry count=14), `DefaultContent`, `DefaultContentReturnsCopy`, `Has`, `Compare` (default/customized/missing), `Reset` (create/reset), `ResetAll` (14 actions), `ResetUnknown` |
 | `vaultsync/vaultsync_test.go` | 22 | `Classify` (15 subtests: history.md, session-index.json, session notes, templates, config, knowledge.md, resume.md, iterations.md, tasks, dashboards, README), `GetStatus_CleanRepo`, `GetStatus_DirtyRepo`, `CommitAndPush_NoRemote`, `CommitAndPush_NothingToCommit`, `Pull_NoRemote`, `EnsureRemote` |
+| `vaultsync/vaultsync_test.go` (convergence) | `CommitAndPush_SHADivergenceConvergence_GithubFirst` | second-iterated remote rejects; assert both bare refs converge to the same SHA after rebase + force-with-lease. |
+| `vaultsync/vaultsync_test.go` (convergence) | `CommitAndPush_SHADivergenceConvergence_RejecterFirst` | first-iterated remote rejects (alphabetical-ordering coverage with `aaa-rejecter` / `zzz-acceptor`); assert both bare refs converge. |
+| `vaultsync/vaultsync_test.go` (convergence) | `CommitAndPush_LeaseRejectsConcurrentWriter` | `afterPushHook` plants a third-party commit on github's bare mid-flight; assert the convergence lease rejects with `"convergence rejected"`, `AllPushed()` is false, and the bare is left at the third-party state (no overwrite). |
+| `vaultsync/vaultsync_test.go` (convergence) | `CommitAndPush_BothRemotesRebase` | both remotes carry distinct unrelated commits; sequential rebase chain; assert both bare refs match AND `PushResult.CommitSHA` reflects the post-loop HEAD (covers the v1-H2 refresh). |
+| `vaultsync/vaultsync_test.go` (convergence) | `CommitAndPush_ThreeRemotesSecondCascade` | three bare remotes, two with unrelated commits; asserts second-cascade re-convergence (the third remote's rebase re-converges both prior remotes under fresh leases) even though the live vault is N=2. |
+| `vaultsync/vaultsync_test.go` (convergence) | `AfterPushHook_DefaultIsNoOp` | sanity: the default `afterPushHook` is non-nil and a no-op (folds in v1-M2). |
 | `synthesis/actions_test.go` | 16 | `AppendLearnings_NewEntry`, `AppendLearnings_DuplicateSkipped`, `AppendLearnings_MissingSection`, `AppendLearnings_MissingFile_SeedsTemplate`, `AppendLearnings_EmptySection`, `FlagStaleEntries_IndexMatch`, `FlagStaleEntries_FuzzyFallback`, `FlagStaleEntries_NoMatch`, `FlagStaleEntries_AlreadyFlagged`, `UpdateResume_BothSections`, `UpdateResume_OneSection`, `UpdateResume_MissingFile`, `ApplyTaskUpdates_Complete`, `ApplyTaskUpdates_UpdateStatus`, `ApplyTaskUpdates_MissingTask`, `Apply_FullWorkflow` |
 | `synthesis/prompt_test.go` | 9 | `BuildPrompt_AllSections`, `BuildPrompt_EmptyKnowledge`, `BuildPrompt_EmptyResume`, `BuildPrompt_GitDiffTruncation`, `BuildPrompt_NoTasks`, `BuildPrompt_NoHistory`, `BuildPrompt_NumberedBullets`, `BuildPrompt_NoCommitsNoDiff`, `NumberBullets_ResetsBetweenSections` |
 | `synthesis/synthesize_test.go` | 9 | `Synthesize_FullResult`, `Synthesize_EmptyResult`, `Synthesize_NilProvider`, `Synthesize_LLMError`, `Synthesize_InvalidJSON`, `Synthesize_InvalidSection`, `Synthesize_InvalidTaskAction`, `Synthesize_InvalidStaleFile`, `Synthesize_NegativeIndex` |

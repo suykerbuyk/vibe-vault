@@ -1181,3 +1181,51 @@ Key architectural and design decisions in vibe-vault, with rationale.
     round-trips. Hiding by default keeps the AI's view of the vault
     coherent. Mandatory test: `TestList_HidesDotGit` plus a
     case-insensitive variant.
+
+81. **Vault push convergence uses `--force-with-lease` keyed to the
+    last-known-good SHA per prior remote; rebase failures abort and
+    surface; convergence-rejected state surfaces in
+    `PushResult.RemoteResults`. The `afterPushHook` test seam is the
+    pattern for in-flight state injection in tests.**
+
+    **Rationale.** Before this decision, `vaultsync.CommitAndPush`
+    pushed remotes sequentially with a single pull-retry per remote.
+    On a rejection the local branch was rebased onto the rejected
+    remote and re-pushed *only to that remote* — leaving any prior
+    accepting remote at the pre-rebase SHA. With N=2, this produced
+    silent SHA divergence: github at X, vault at X', no machinery to
+    converge. The high-value defect was not parallelism (N=2 caps the
+    win at one round-trip) but the divergence itself.
+
+    `--force-with-lease=refs/heads/<branch>:<expected-sha>` is the
+    safe primitive: an atomic compare-and-swap that rejects if the
+    remote ref has moved off `expected-sha`. Concurrent writers are
+    caught and surfaced as
+    `"convergence rejected (concurrent writer at <remote>): <err>"`
+    in `PushResult.RemoteResults` rather than silently overwritten.
+    Naked `--force` remains forbidden in this package — convergence
+    is the only path that uses any form of force-push.
+
+    Rebase failures call `git rebase --abort` and route to the
+    per-remote error map rather than leaving HEAD polluted for the
+    next remote in the loop. Fetch failures surface directly without
+    masquerading as downstream rebase/push errors.
+    `PushResult.CommitSHA` is refreshed to the post-loop HEAD if any
+    rebase happened, so the CLI never prints a SHA that no longer
+    exists at the converged remotes. One `log.Printf` breadcrumb on
+    each successful force-convergence makes divergence-path frequency
+    operator-observable in production without committing to a
+    `PushResult` shape change.
+
+    The `afterPushHook = func(remote string) {}` package-level seam
+    matches the `internal/wrapmetrics/writer.go:81 warnFunc`
+    precedent: a no-op default that tests override with
+    `t.Cleanup`-restored assignment to inject mid-flight state
+    changes (e.g., a concurrent writer mutating a bare remote between
+    the recorded push and the convergence force-with-lease) without
+    exposing them in the production API. This is the canonical
+    pattern in this codebase for testing race-window behavior at
+    package-private granularity.
+
+    Parallel push is deferred. Re-open conditions: a third remote
+    appears, or measurement shows push exceeds 15% of wrap latency.
