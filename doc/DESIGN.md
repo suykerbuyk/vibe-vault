@@ -911,3 +911,273 @@ Key architectural and design decisions in vibe-vault, with rationale.
     success/failure report gives the operator enough information to
     re-run the remaining steps manually if needed, without undoing work
     that succeeded.
+
+64. **Vault root resolution via closure-captured `cfg.VaultPath`,
+    not `meta.VaultRoot()`:** Each `vv_vault_*` tool constructor takes
+    `cfg config.Config` and closure-captures `cfg.VaultPath`. Tool
+    handlers join vault-relative inputs against that captured path
+    directly. No `meta.VaultRoot()` indirection, no `vaultRootFunc`
+    test seam.
+
+    **Rationale.** Mirrors the iter-152 tool pattern (`tools_thread.go`,
+    `tools_carried.go`, etc.), which closure-captures `cfg` for every
+    handler. Adding a `meta.VaultRoot()` wrapper would introduce an
+    abstraction with no MCP caller. Tests inject a temp vault by
+    constructing `config.Config{VaultPath: tempPath}` and passing it
+    to the constructor (D13); production callers go through the
+    standard `config.Load()` path. The unexported
+    `readVaultPathFromConfig` in `internal/meta/project_root.go` stays
+    package-private; vault file accessors do not call it.
+
+65. **`ValidateRelPath` rejection set is exhaustive at the input
+    boundary:** Absolute paths (leading `/`), `..` segments after
+    `filepath.Clean`, null bytes (`\x00`), control characters
+    (`\x01-\x1f`, `\x7f`), the cleaned result `"."` (vault-root
+    reference is incoherent for write/edit/delete), and the empty
+    string are all rejected before the path is joined under the vault
+    root. Windows-reserved names (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`,
+    `LPT1-9`) are NOT validated in v1.
+
+    **Rationale.** vibe-vault is Linux-primary and the vault is
+    git-managed; cross-platform support is not a stated requirement.
+    The Windows-name skip is documented in
+    `internal/vaultfs/safety.go`'s package comment so a later
+    cross-platform pass has an obvious extension point. The empty-string
+    and `.` rejections close two attack-surface gaps the v2 review
+    identified: an empty path would otherwise pass `filepath.Clean`
+    unchanged, and a `.` would resolve to the vault root and let a
+    write replace it wholesale.
+
+66. **Symlink policy: realpath check via `filepath.EvalSymlinks`,
+    `os.Lstat` first for `Exists`:** `ResolveSafePath` joins the
+    relative path under the vault, then calls `filepath.EvalSymlinks`
+    and verifies `strings.HasPrefix(realpath, absVault+sep)`.
+    `vv_vault_exists` uses `os.Lstat` first to detect symlink presence
+    (succeeds even for dangling links), then calls `EvalSymlinks` to
+    verify resolvability — on `EvalSymlinks` error from a dangling
+    target, `Exists` returns `{exists: false}` (the effective file is
+    unreachable through the symlink).
+
+    **Rationale.** `filepath.Abs` + `strings.HasPrefix` is not
+    symlink-safe: a symlink under the vault pointing at `/etc/passwd`
+    passes the prefix check but resolves outside the vault. Realpath
+    resolution closes that escape. The Lstat-then-EvalSymlinks
+    sequence in `Exists` lets callers distinguish "file is missing"
+    from "symlink points to a missing target" without leaking
+    information about non-vault paths. The auto-memory pattern
+    (vault-side regular dir, host-side symlink INTO the vault) is
+    unaffected by this check — the realpath of the vault-side dir
+    stays inside the vault. The check matters for OTHER symlinks an
+    operator might create under the vault that point outward.
+
+67. **Read size cap is a NEW mechanism (1 MB default, 10 MB ceiling):**
+    `vv_vault_read` and `vv_vault_sha256` cap byte transfer at 1 MB
+    by default, settable up to 10 MB via the `max_bytes` argument.
+    This is NOT derived from existing token-cap precedent (e.g.
+    `vv_get_project_context` caps by tokens with default 4000); the
+    new policy is documented in tool descriptions.
+
+    **Rationale.** Token caps make sense for narrative content piped
+    into LLM context windows; byte caps make sense for arbitrary file
+    content where the AI does not necessarily ingest the whole payload
+    into context. The two policies coexist by tool category. The 10 MB
+    ceiling caps blast radius for misuse without forcing every read to
+    chunk.
+
+68. **Atomic writes delegate to `mdutil.AtomicWriteFile` with
+    `perm = 0o644`:** `vaultfs.Write` (and the file-write paths inside
+    `vaultfs.Edit`/`vaultfs.Move`) call
+    `mdutil.AtomicWriteFile(path, data, 0o644)` — never duplicate the
+    temp+rename pattern. The `0o644` perm matches all 24 existing call
+    sites elsewhere in the codebase.
+
+    **Rationale.** The atomic-write helper is correct and well-tested
+    (`TestAtomicWriteFile_CreatesDir` and friends already cover parent-
+    dir creation, overwrite, and crash safety in
+    `internal/mdutil/mdutil_test.go`). Delegating eliminates the third
+    copy of the temp+rename pattern. `0o644` is uniform across every
+    other writer (`internal/synthesis/actions.go`, the per-tool MCP
+    write surfaces, etc.); locking it here keeps on-disk mode bits
+    consistent and removes a parameter no caller wants to set. The
+    duplicate `atomicWriteCommitMsg` at
+    `internal/mcp/tools_commit_msg.go` is intentionally NOT
+    consolidated: its alternate caller writes to the project root —
+    outside the vault scope `vaultfs.Write` covers — so the
+    duplication is the correct trade-off given the dual-copy
+    semantics. Not filed as a follow-up cleanup.
+
+69. **Compare-and-set is OPTIONAL via `expected_sha256`:** `write`,
+    `edit`, and `delete` accept an optional `expected_sha256` argument.
+    When provided, the file's current SHA-256 must match or the
+    operation aborts with `ErrShaConflict`. When omitted, the operation
+    proceeds unconditionally.
+
+    **Rationale.** First-write scenarios (creating a new file, seeding
+    a notes file) have no prior SHA to compare against, and forcing
+    the AI to read-then-write would burn tokens and round-trips for
+    no safety gain. Making the field optional gives concurrent-write
+    safety where it matters (subsequent edits) without first-write
+    friction.
+
+70. **Permissive top-level write mode, except `.git/`:** Any path
+    under the vault root is allowed for write/create/delete EXCEPT
+    paths whose segments match `.git` case-insensitively (per #71).
+    New top-level directories (`Scratch/`, ad-hoc working dirs) are
+    allowed; the operator reviews the diff via `/wrap` and the vault
+    git commit.
+
+    **Rationale.** The vault is the AI's primary work surface;
+    locking it down to a hardcoded directory whitelist would force a
+    schema change every time a new use case emerges. Operator review
+    at the git-commit boundary is the right control point — the same
+    point at which the vault syncs across machines.
+
+71. **`.git/` segment refusal is case-insensitive and segment-equal,
+    not substring:** `IsRefusedWritePath(p)` rejects iff any segment
+    of `filepath.Clean(p)` matches `.git` under
+    `strings.EqualFold(seg, ".git")`. `Projects/<p>/foo.git/bar` is
+    ALLOWED (substring, not segment). `Projects/<p>/.git/foo`,
+    `Projects/<p>/.GIT/foo`, and `.gIt/HEAD` are all REFUSED. Applies
+    to `vv_vault_write`, `vv_vault_edit`, `vv_vault_delete`, and both
+    sides of `vv_vault_move`.
+
+    **Rationale.** Case-insensitivity is a cross-filesystem hazard
+    guard: macOS/NTFS resolve `.GIT` and `.git` to the same directory,
+    Linux ext4 differs but a Linux operator could mount a
+    case-insensitive filesystem (FAT/exFAT, network mounts). The
+    case-sensitive form would let a `.GIT/HEAD` write land
+    successfully on Linux and then collide with the real `.git/HEAD`
+    on macOS sync. Segment-equality (rather than substring) preserves
+    legitimate names like `foo.git/bar` (clone directory naming
+    convention).
+
+72. **Implicit parent-directory creation comes free via
+    `mdutil.AtomicWriteFile`:** `mdutil.AtomicWriteFile` already calls
+    `os.MkdirAll` on the parent before the temp+rename. `vaultfs.Write`
+    inherits this behavior via the D5 delegation; no additional logic
+    in the vaultfs layer.
+
+    **Rationale.** Forcing the AI to call `vv_vault_mkdir` (which
+    doesn't exist) before every write would add round-trips for the
+    common case of "create file under existing or new dir." Implicit
+    creation handles 99% of cases. Listed as #74 (D9) in the v3 plan
+    purely to prevent an implementer from adding redundant
+    `os.MkdirAll` calls in `vaultfs/write.go`.
+
+73. **`vv_vault_delete` deletes FILES only in v1:** Empty-directory
+    delete returns an informative error suggesting that directory
+    removal is not yet supported. Recursive directory delete is out of
+    scope.
+
+    **Rationale.** Recursive directory delete is high-blast-radius
+    even with safety guards — a misvalidated path or a careless AI
+    call could remove an entire project subtree before the operator
+    notices. v1 stays file-only; if a real use case for empty-dir
+    removal surfaces, it can be added with a narrow contract (empty
+    only, single level, no recursion).
+
+74. **No exec, pure file I/O:** `vaultfs` and `tools_vault.go` never
+    invoke external commands. Git operations (commit, push) remain
+    operator responsibility via `vv vault push` (or future tools).
+
+    **Rationale.** Separation of concerns. The AI writes to the vault;
+    the operator reviews and commits. Adding `git add`/`git commit`
+    inside the write path would break the review boundary that makes
+    operator control meaningful.
+
+75. **Tool count assertion bumped from 31 to 39 with explicit
+    `expectedTools` slice:** The integration test at
+    `test/integration_test.go` enumerates every expected tool name in
+    a slice; the bidirectional assertion (`missing expected tool` and
+    `unexpected tool`) catches both omissions and name typos. The
+    eight new `vv_vault_*` entries land on the slice in this PR.
+
+    **Rationale.** A numeric `len(tools) != 39` check would silently
+    pass if a tool was renamed or replaced. The explicit slice makes
+    the contract checkable: a future PR that adds a tool must add the
+    name explicitly, and a removal must drop it explicitly. Catches
+    silent count drift across multi-PR feature branches.
+
+76. **Test injection via `config.Config{VaultPath: tempPath}`, no
+    runtime `vault_path` parameter:** Tests construct
+    `config.Config{VaultPath: tempVaultPath}` and pass it to the tool
+    constructor (`mcp.NewVaultReadTool(testCfg)`), matching the
+    iter-152 integration pattern. Tools do NOT accept a caller-supplied
+    `vault_path` argument in production. The existing integration
+    mechanism via `VIBE_VAULT_HOME` still works for end-to-end
+    subprocess tests; both approaches coexist.
+
+    **Rationale.** A runtime `vault_path` argument on the tool surface
+    would defeat the MCP-as-gatekeeper property: any caller could
+    point the tool at any directory, bypassing the operator's
+    configured vault. Constructor injection lets tests substitute a
+    temp directory at construction time without exposing a hole on
+    the production tool schema.
+
+77. **Auto-memory writes via the generic accessor; no dedicated
+    `vv_memory_*` tool group:** AI calls
+    `vv_vault_write("Projects/<p>/agentctx/memory/<file>.md", ...)`
+    against the canonical vault location. The host-side
+    `~/.claude/projects/<slug>/memory/` is a symlink INTO that vault
+    directory (created by `vv memory link`, see #48), so Claude Code's
+    native auto-memory and the AI's MCP writes converge on the same
+    physical files.
+
+    **Setup precondition.** Each host requires `vv memory link
+    <project>` once. Until that runs, the host-side path is a regular
+    directory (Claude Code's default). AI writes via vault-relative
+    paths land in the vault; native auto-memory writes land
+    host-locally; the two diverge silently. The bootstrap workflow
+    documents the precondition; `vv check` flags a missing symlink.
+
+    **Rationale.** A `vv_memory_*` tool group would duplicate the
+    generic accessor with a narrower path scope and add tool-list
+    surface for no new capability. The symlink+generic-accessor
+    convergence is simpler and reuses every safety guarantee
+    (`.git`-segment refusal, realpath check, atomic write). The
+    setup precondition is a one-time per-host operator action,
+    well-bounded and visible.
+
+78. **Tools register at the existing single registration site
+    `cmd/vv/main.go:registerMCPTools`:** Eight
+    `srv.RegisterTool(mcp.NewVault*Tool(cfg))` calls are appended to
+    the same span as every other production MCP tool. New file
+    `internal/mcp/tools_vault.go` defines the constructors.
+
+    **Rationale.** A second registration site would bifurcate the
+    tool surface and complicate every "what tools are loaded?" audit.
+    One registration site, one ordering, one diff to read for tool
+    visibility.
+
+79. **Path validation is fresh-written in
+    `internal/vaultfs/safety.go`, not borrowed from
+    `vaultPrefixCheck`:** The existing `vaultPrefixCheck` in
+    `internal/mcp/tools_context.go` is NOT reused. It uses
+    `filepath.Abs` + `strings.HasPrefix` with no `EvalSymlinks` and
+    is therefore not symlink-safe; its callers feed it
+    already-validated absolute paths produced inside the MCP server,
+    not raw user input. `validateTaskName` is cited as a design
+    precedent for relpath rejection but not directly reused (it's
+    task-name-specific).
+
+    **Rationale.** Reusing a not-symlink-safe helper at the new
+    boundary would import the bug into a new attack surface.
+    Fresh-writing closes the gap and lets `safety.go` be the one
+    place the realpath invariant is enforced. The two checks live
+    side by side at different boundaries, with documentation in
+    package comments calling out the difference.
+
+80. **`vv_vault_list` default-hides `.git` entries case-insensitively:**
+    When iterating `os.ReadDir` results, `vv_vault_list` filters out
+    any entry whose name matches `.git` under
+    `strings.EqualFold(name, ".git")`. Operators can enumerate `.git/`
+    contents via Bash if they need to; the AI never sees `.git/`
+    through the generic accessor.
+
+    **Rationale.** Consistent with the write-side refusal in #71. If
+    `.git/` is invisible to the AI's writers, it should also be
+    invisible to the AI's listers — otherwise the AI sees entries it
+    cannot inspect or modify, generating spurious "is this protected?"
+    round-trips. Hiding by default keeps the AI's view of the vault
+    coherent. Mandatory test: `TestList_HidesDotGit` plus a
+    case-insensitive variant.
