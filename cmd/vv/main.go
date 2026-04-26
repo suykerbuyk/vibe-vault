@@ -1183,6 +1183,7 @@ func registerMCPTools(srv *mcp.Server, cfg config.Config) {
 	srv.RegisterTool(mcp.NewGetLearningTool(cfg))
 	srv.RegisterTool(mcp.NewGetIterationsTool(cfg))
 	srv.RegisterTool(mcp.NewGetProjectRootTool(cfg))
+	srv.RegisterTool(mcp.NewSetCommitMsgTool(cfg))
 	srv.RegisterPrompt(mcp.NewSessionGuidelinesPrompt())
 }
 

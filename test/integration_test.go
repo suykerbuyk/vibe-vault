@@ -1433,24 +1433,59 @@ func TestIntegration(t *testing.T) {
 			t.Error("initialize: missing serverInfo")
 		}
 
-		// Response 1: tools/list — should have tools array
+		// Response 1: tools/list — exact-set check for all 22 registered tools.
+		// Update this list when adding or removing tools; the exact-set check
+		// prevents silent breakage from numeric drift (O2 from iter-150).
+		expectedTools := []string{
+			"vv_get_project_context",
+			"vv_list_projects",
+			"vv_search_sessions",
+			"vv_get_knowledge",
+			"vv_get_session_detail",
+			"vv_get_friction_trends",
+			"vv_get_effectiveness",
+			"vv_capture_session",
+			"vv_get_workflow",
+			"vv_get_resume",
+			"vv_list_tasks",
+			"vv_get_task",
+			"vv_update_resume",
+			"vv_append_iteration",
+			"vv_manage_task",
+			"vv_refresh_index",
+			"vv_bootstrap_context",
+			"vv_list_learnings",
+			"vv_get_learning",
+			"vv_get_iterations",
+			"vv_get_project_root",
+			"vv_set_commit_msg",
+		}
 		toolsResult := responses[1]["result"].(map[string]any)
 		tools := toolsResult["tools"].([]any)
-		if len(tools) < 21 {
-			t.Errorf("tools/list: expected at least 21 tools, got %d", len(tools))
-		}
 		toolNames := make(map[string]bool)
 		for _, tool := range tools {
 			toolNames[tool.(map[string]any)["name"].(string)] = true
 		}
-		if !toolNames["vv_get_project_context"] {
-			t.Error("tools/list: missing vv_get_project_context")
+		for _, want := range expectedTools {
+			if !toolNames[want] {
+				t.Errorf("tools/list: missing expected tool %q", want)
+			}
 		}
-		if !toolNames["vv_list_projects"] {
-			t.Error("tools/list: missing vv_list_projects")
-		}
-		if !toolNames["vv_get_project_root"] {
-			t.Error("tools/list: missing vv_get_project_root")
+		if len(tools) != len(expectedTools) {
+			// List unexpected extras to help diagnose.
+			for name := range toolNames {
+				found := false
+				for _, want := range expectedTools {
+					if name == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("tools/list: unexpected tool %q (not in expected set)", name)
+				}
+			}
+			t.Errorf("tools/list: got %d tools, want %d", len(tools), len(expectedTools))
 		}
 
 		// Response 2: vv_list_projects — should return project data
