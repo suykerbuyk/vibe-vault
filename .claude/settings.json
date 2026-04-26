@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make pre-commit)",
+      "Bash(make pre-commit *)",
+      "Bash(make lint)",
+      "Bash(make lint *)",
+      "Bash(make test)",
+      "Bash(make test *)",
+      "Bash(make integration)",
+      "Bash(make integration *)",
+      "Bash(make build)",
+      "Bash(vv check)",
+      "Bash(vv check *)",
+      "Bash(vv version)",
+      "Bash(vv version *)",
+      "Bash(vv inject)",
+      "Bash(vv inject *)",
+      "Bash(vv vault status)",
+      "Bash(vv vault status *)",
+      "Bash(vv context sync --dry-run)",
+      "Bash(vv context sync --dry-run *)",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_bootstrap_context",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_get_resume",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_get_task",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_list_tasks",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_get_iterations",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_get_project_root",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_get_project_context",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_get_workflow",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_list_learnings",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_get_learning",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_get_session_detail",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_search_sessions",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_list_projects",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_get_friction_trends",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_get_effectiveness",
+      "mcp__plugin_vibe-vault_vibe-vault__vv_get_knowledge"
+    ]
+  }
+}
