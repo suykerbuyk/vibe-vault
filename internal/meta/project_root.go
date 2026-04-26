@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ErrIsVaultRoot is returned by ProjectRoot when the discovered root equals
@@ -104,94 +105,48 @@ func checkCandidate(dir, absVault string) (string, error) {
 }
 
 // readVaultPathFromConfig does a minimal line-scan of a config.toml to extract
-// the vault_path value. This avoids importing the config package (import cycle)
-// while still resolving the vault path when vaultPath is empty.
+// the vault_path value. Avoids importing the config package (which would
+// create a cycle) while still resolving the vault path when vaultPath is empty.
 func readVaultPathFromConfig(cfgPath string) string {
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		return ""
 	}
-	// Look for a line matching: vault_path = "..."
-	lines := splitLines(string(data))
-	for _, line := range lines {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		val := extractTOMLString(line, "vault_path")
-		if val != "" {
-			// Expand leading ~/ with home dir.
-			if len(val) >= 2 && val[:2] == "~/" {
-				home, err := HomeDir()
-				if err == nil && home != "" {
-					return filepath.Join(home, val[2:])
-				}
-			}
-			return val
+		if val == "" {
+			continue
 		}
+		if rest, ok := strings.CutPrefix(val, "~/"); ok {
+			if home, err := HomeDir(); err == nil && home != "" {
+				return filepath.Join(home, rest)
+			}
+		}
+		return val
 	}
 	return ""
-}
-
-// splitLines splits a string on newlines.
-func splitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
 }
 
 // extractTOMLString extracts the string value from a TOML line of the form
 // `key = "value"` or `key = 'value'`. Returns "" if the line does not match.
 func extractTOMLString(line, key string) string {
-	// Trim spaces.
-	trimmed := trimSpace(line)
-	prefix := key + " ="
-	if len(trimmed) <= len(prefix) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(line), key)
+	if !ok {
 		return ""
 	}
-	// Match key followed by optional spaces and =
-	if !hasPrefix(trimmed, key) {
+	rest = strings.TrimSpace(rest)
+	rest, ok = strings.CutPrefix(rest, "=")
+	if !ok {
 		return ""
 	}
-	rest := trimSpace(trimmed[len(key):])
-	if len(rest) == 0 || rest[0] != '=' {
-		return ""
-	}
-	rest = trimSpace(rest[1:])
-	if len(rest) < 2 {
+	rest = strings.TrimSpace(rest)
+	if len(rest) < 2 || (rest[0] != '"' && rest[0] != '\'') {
 		return ""
 	}
 	quote := rest[0]
-	if quote != '"' && quote != '\'' {
+	end := strings.LastIndexByte(rest[1:], quote)
+	if end < 0 {
 		return ""
 	}
-	end := len(rest) - 1
-	for end > 0 && rest[end] != quote {
-		end--
-	}
-	if end == 0 {
-		return ""
-	}
-	return rest[1:end]
-}
-
-func trimSpace(s string) string {
-	start := 0
-	for start < len(s) && (s[start] == ' ' || s[start] == '\t') {
-		start++
-	}
-	end := len(s)
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
-}
-
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+	return rest[1 : 1+end]
 }
