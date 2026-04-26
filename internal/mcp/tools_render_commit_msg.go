@@ -38,6 +38,61 @@ var execGitDiffCachedStat = func(dir string) (string, error) {
 	return string(out), nil
 }
 
+// RenderCommitMsgParams holds all inputs for RenderCommitMsg.
+type RenderCommitMsgParams struct {
+	Subject             string
+	ProseBody           string
+	FilesSection        string // pre-built; if empty, derived from git in ProjectRoot
+	ProjectRoot         string // required when FilesSection is empty
+	UnitTests           int
+	IntegrationSubtests int
+	LintFindings        int
+	Iteration           int
+}
+
+// RenderCommitMsg assembles a commit message from the given params.
+//
+// If FilesSection is empty, it is derived from git status/diff in
+// ProjectRoot (which must be non-empty in that case). Subject must be a
+// single line with no embedded newlines. Returns an error on validation
+// failures or git invocation errors.
+func RenderCommitMsg(p RenderCommitMsgParams) (string, error) {
+	if p.Subject == "" {
+		return "", fmt.Errorf("subject is required")
+	}
+	if strings.Contains(p.Subject, "\n") {
+		return "", fmt.Errorf("subject must be a single line (no newlines)")
+	}
+	if p.ProseBody == "" {
+		return "", fmt.Errorf("prose_body is required")
+	}
+	if p.Iteration <= 0 {
+		return "", fmt.Errorf("iteration must be a positive integer, got %d", p.Iteration)
+	}
+
+	filesSection := p.FilesSection
+	if filesSection == "" {
+		if p.ProjectRoot == "" {
+			return "", fmt.Errorf("project_root is required when files_section is not supplied")
+		}
+		var err error
+		filesSection, err = buildFilesChangedSection(p.ProjectRoot)
+		if err != nil {
+			return "", fmt.Errorf("files changed section: %w", err)
+		}
+	}
+
+	return renderCommitMsg(
+		p.Subject,
+		p.ProseBody,
+		filesSection,
+		p.UnitTests,
+		p.IntegrationSubtests,
+		p.LintFindings,
+		p.Iteration,
+	), nil
+}
+
 // NewRenderCommitMsgTool creates the vv_render_commit_msg tool.
 //
 // The tool assembles a commit message string from AI-supplied content and
@@ -117,16 +172,6 @@ func NewRenderCommitMsgTool(cfg config.Config) Tool {
 				}
 			}
 
-			// Validate required fields.
-			if args.Subject == "" {
-				return "", fmt.Errorf("subject is required")
-			}
-			if strings.Contains(args.Subject, "\n") {
-				return "", fmt.Errorf("subject must be a single line (no newlines)")
-			}
-			if args.ProseBody == "" {
-				return "", fmt.Errorf("prose_body is required")
-			}
 			if args.Iteration <= 0 {
 				return "", fmt.Errorf("iteration must be a positive integer, got %d", args.Iteration)
 			}
@@ -137,22 +182,19 @@ func NewRenderCommitMsgTool(cfg config.Config) Tool {
 				return "", err
 			}
 
-			// Derive files-changed section from git.
-			filesSection, err := buildFilesChangedSection(projectRoot)
+			// Assemble the rendered commit message via the exported helper.
+			rendered, err := RenderCommitMsg(RenderCommitMsgParams{
+				Subject:             args.Subject,
+				ProseBody:           args.ProseBody,
+				ProjectRoot:         projectRoot,
+				UnitTests:           args.UnitTests,
+				IntegrationSubtests: args.IntegrationSubtests,
+				LintFindings:        args.LintFindings,
+				Iteration:           args.Iteration,
+			})
 			if err != nil {
-				return "", fmt.Errorf("files changed section: %w", err)
+				return "", err
 			}
-
-			// Assemble the rendered commit message.
-			rendered := renderCommitMsg(
-				args.Subject,
-				args.ProseBody,
-				filesSection,
-				args.UnitTests,
-				args.IntegrationSubtests,
-				args.LintFindings,
-				args.Iteration,
-			)
 
 			result := struct {
 				Rendered string `json:"rendered"`
