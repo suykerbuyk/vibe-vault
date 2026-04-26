@@ -772,3 +772,142 @@ Key architectural and design decisions in vibe-vault, with rationale.
     unexpected real hostname or cwd now fails the canary
     immediately, regardless of whether the snapshot happens to
     match.
+
+54. **`meta.ProjectRoot()` per-level check order — `agentctx/` before
+    `.git/`:** `ProjectRoot(cwd, vaultPath)` walks upward from `cwd`,
+    and at each directory level it checks for `agentctx/` before
+    checking for `.git/`. The first directory containing either marker
+    is the project root.
+
+    **Rationale.** Vault-only projects (no git repo) have an `agentctx/`
+    directory but no `.git/`. Checking `.git/` first would skip those
+    directories and walk past the project root. Checking `agentctx/`
+    first makes the function work correctly for both git-backed and
+    vault-only projects. The tie-breaking is irrelevant for projects
+    that have both — the walk stops at the first level that matches
+    either marker.
+
+55. **`ErrIsVaultRoot` vault-root refusal:** `ProjectRoot` returns the
+    sentinel error `ErrIsVaultRoot` when the matched directory equals
+    the configured vault path (passed explicitly or read from
+    `~/.config/vibe-vault/config.toml`). The caller decides what to
+    do; wrap-related callers surface an actionable message and abort.
+
+    **Rationale.** The vault is itself an Obsidian repo with an
+    `agentctx/` directory. Without the guard, `ProjectRoot` would
+    return the vault root when called from inside a vault-resident
+    project that has no `agentctx/` of its own, or from the vault
+    directory itself. That would silently write `commit.msg` and
+    iteration blocks into the vault root — indistinguishable from a
+    legitimate vault project but semantically wrong. The sentinel
+    keeps the error visible and the logic in callers, not embedded as
+    a magic path comparison in every consumer.
+
+56. **Slug normalization rule — heading text up to first ` — `:**
+    `NormalizeSubheadingSlug()` derives a stable identifier from a
+    `### ` heading line by taking the text up to the first
+    ` — ` (space–em-dash–space) separator, or the full text if no
+    separator exists. Matching is exact-equal (case-sensitive, no
+    whitespace normalization). The same rule applies in
+    `ReplaceSubsectionBody`, `InsertSubsection`, and `RemoveSubsection`.
+
+    **Rationale.** Headings often carry a topical key followed by a
+    descriptive suffix separated by ` — ` (e.g., `### my-task — open
+    since iter 140`). The topical key is the stable identifier; the
+    suffix changes as status evolves. Locking the slug to the prefix
+    means callers do not need to re-derive the full heading text when
+    the description changes. No v11 schema migration is required — the
+    rule is purely a parsing convention over existing headings.
+
+57. **Liberal-on-read / strict-on-write carried bullet parser:**
+    `ParseCarriedForward()` accepts multiple bullet forms on read —
+    `- **slug**`, `- **slug:**`, `- **slug (note)**`, plain `- text` —
+    without normalizing the source document. `EmitCarriedBullets()` and
+    `BuildCarriedBullet()` always emit the canonical `- **slug**` form.
+
+    **Rationale.** Requiring strictly-formatted input before a tool
+    call works creates friction when the document was written by hand
+    or by an older version of the tool. Liberal parsing tolerates
+    variation without forcing a format-fix step. Strict emission means
+    the document converges toward canonical form over time — each write
+    normalizes the bullets it touches without a dedicated migration
+    pass.
+
+58. **No runtime drift gate between synthesize and apply:** When
+    `vv_apply_wrap_bundle` computes apply-time SHA-256 fingerprints
+    for each bundle field and finds them differing from the synth-time
+    fingerprints embedded in the bundle, the divergence is logged to
+    `wrap-metrics.jsonl` but does **not** abort the operation.
+
+    **Rationale.** The AI is intended to edit the bundle between
+    synthesize and apply. That editing is the point of the two-step
+    flow — the AI reviews and improves the synthesized content. A
+    drift gate would fire on every legitimate AI edit. Observability
+    (logged drift, per-field byte counts, both SHAs in the metric
+    record) provides forensic capability without introducing a
+    "must match" invariant that the normal workflow would violate
+    constantly.
+
+59. **Host-local drift metric file at `~/.cache/vibe-vault/wrap-metrics.jsonl`:**
+    Wrap metrics are written to a host-local cache path, not to the
+    vault. The file rotates to `wrap-metrics-archive-YYYY.jsonl` at
+    1000 lines.
+
+    **Rationale.** The vault is a shared git repository. A vault-side
+    JSONL file appended independently on multiple machines creates an
+    append-race that requires `merge=union` gitattributes or a custom
+    merge driver. Moving the file host-local eliminates the race at the
+    cost of per-machine (rather than cross-machine) drift trends.
+    Operators who want aggregated views can copy the files manually.
+
+60. **`subject` REQUIRED in `vv_render_commit_msg`:** The tool's
+    input schema marks `subject` as a required field. There is no
+    auto-derivation from the convention file or git history.
+
+    **Rationale.** The AI is the source of truth for subject-line
+    semantics — it understands what changed in this session and can
+    write a meaningful subject. Auto-derivation from convention files
+    or branch names produces generic or wrong subjects. Requiring the
+    AI to provide the subject explicitly keeps the responsibility
+    where the signal is.
+
+61. **`vv_capture_session` always present in synthesize bundle:**
+    `vv_synthesize_wrap` unconditionally includes a `capture_session`
+    field in the `WrapBundle`. Downstream consumers of
+    `vv_apply_wrap_bundle` always call `vv_capture_session` as the
+    final dispatch step.
+
+    **Rationale.** A Phase 0 grep of the codebase confirmed that
+    `vv_capture_session` is referenced in `index.go`, `context.go`,
+    `mcp/tools.go`, and `prompts.go` — it is a core part of the
+    session lifecycle, not optional. Omitting it from the bundle would
+    require callers to handle capture separately, splitting the
+    "one-call wrap" invariant. Making it unconditional keeps the
+    dispatch contract simple.
+
+62. **`project_path` REQUIRED and EXPLICIT in `vv_set_commit_msg`:**
+    The tool does not internally detect the project path. The AI calls
+    `vv_get_project_root` first to discover the path, then passes it
+    explicitly to `vv_set_commit_msg`.
+
+    **Rationale.** Explicit beats magic. Internal path detection would
+    duplicate the logic in `meta.ProjectRoot()` and couple the tool to
+    a detection heuristic that may not match what the AI already knows.
+    The discovery tool exists precisely to answer "where is the project
+    root?" — requiring the AI to call it first keeps each tool's
+    responsibility narrow and makes the call chain auditable.
+
+63. **Apply-bundle is fail-stop, not transactional:** `vv_apply_wrap_bundle`
+    dispatches writes sequentially; on the first error it returns
+    immediately with an `applied_writes` list of completed steps and an
+    `error_at_step` field identifying where the failure occurred.
+    Completed writes are not rolled back.
+
+    **Rationale.** Each write in the bundle is semantically correct in
+    isolation — an appended iteration block or an inserted thread entry
+    has independent value even if the subsequent `commit.msg` write
+    fails. Rolling back completed writes would mean removing valid vault
+    state that the user can see and verify. Fail-stop with an explicit
+    success/failure report gives the operator enough information to
+    re-run the remaining steps manually if needed, without undoing work
+    that succeeded.
