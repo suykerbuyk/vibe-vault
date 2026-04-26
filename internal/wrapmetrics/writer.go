@@ -88,20 +88,20 @@ var warnFunc = func(format string, args ...any) {
 // Parent directories are created as needed. Errors from the rotation step
 // are logged as warnings and do not abort the append.
 func AppendLine(r Line) error {
-	cacheDir, err := CacheDir()
-	if err != nil {
-		return err
+	cacheDir, cacheDirErr := CacheDir()
+	if cacheDirErr != nil {
+		return cacheDirErr
 	}
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		return fmt.Errorf("create cache dir %q: %w", cacheDir, err)
+	if mkdirErr := os.MkdirAll(cacheDir, 0o755); mkdirErr != nil {
+		return fmt.Errorf("create cache dir %q: %w", cacheDir, mkdirErr)
 	}
 
 	path := activePath(cacheDir)
 
 	// Rotate before writing if the file already has >= RotationThreshold lines.
-	if err := rotateIfNeeded(path, cacheDir); err != nil {
+	if rotErr := rotateIfNeeded(path, cacheDir); rotErr != nil {
 		// Non-fatal: warn and continue.
-		warnFunc("rotation check failed: %v", err)
+		warnFunc("rotation check failed: %v", rotErr)
 	}
 
 	// Marshal the line.

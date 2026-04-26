@@ -163,6 +163,23 @@ func provenanceTrailer(p meta.Provenance, vaultPath string) string {
 	return "\n\n<!-- recorded: " + strings.Join(parts, " ") + " -->"
 }
 
+// BuildIterationBlock constructs the canonical iteration block string
+// (heading + narrative + provenance trailer) that vv_append_iteration writes
+// to iterations.md. The returned string is ready for direct appending after a
+// newline-terminated document. It does NOT include a leading blank line.
+//
+// iterNum must be > 0. date is YYYY-MM-DD; if empty today's date is used.
+// vaultPath is passed to provenanceTrailer for CWD sanitisation.
+func BuildIterationBlock(iterNum int, title, narrative, date, vaultPath string) string {
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+	heading := iterationHeading(iterNum, title, date)
+	body := strings.TrimRight(narrative, "\n")
+	trailer := provenanceTrailer(meta.Stamp(), vaultPath)
+	return fmt.Sprintf("\n%s\n\n%s%s\n", heading, body, trailer)
+}
+
 // scanIterationNumbers parses all iteration numbers from an iterations.md body.
 // Returns them in document order.
 func scanIterationNumbers(content string) []int {
