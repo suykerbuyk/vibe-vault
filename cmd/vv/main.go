@@ -1182,6 +1182,7 @@ func registerMCPTools(srv *mcp.Server, cfg config.Config) {
 	srv.RegisterTool(mcp.NewListLearningsTool(cfg))
 	srv.RegisterTool(mcp.NewGetLearningTool(cfg))
 	srv.RegisterTool(mcp.NewGetIterationsTool(cfg))
+	srv.RegisterTool(mcp.NewGetProjectRootTool(cfg))
 	srv.RegisterPrompt(mcp.NewSessionGuidelinesPrompt())
 }
 

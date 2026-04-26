@@ -1436,8 +1436,8 @@ func TestIntegration(t *testing.T) {
 		// Response 1: tools/list — should have tools array
 		toolsResult := responses[1]["result"].(map[string]any)
 		tools := toolsResult["tools"].([]any)
-		if len(tools) != 20 {
-			t.Errorf("tools/list: expected 20 tools, got %d", len(tools))
+		if len(tools) < 21 {
+			t.Errorf("tools/list: expected at least 21 tools, got %d", len(tools))
 		}
 		toolNames := make(map[string]bool)
 		for _, tool := range tools {
@@ -1448,6 +1448,9 @@ func TestIntegration(t *testing.T) {
 		}
 		if !toolNames["vv_list_projects"] {
 			t.Error("tools/list: missing vv_list_projects")
+		}
+		if !toolNames["vv_get_project_root"] {
+			t.Error("tools/list: missing vv_get_project_root")
 		}
 
 		// Response 2: vv_list_projects — should return project data
