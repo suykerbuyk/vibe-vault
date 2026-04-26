@@ -206,8 +206,69 @@ Claude Code / AI agent
         │                               parseIterations before returning
         │                               narrative to callers.
         │
+        ├─── vv_get_project_root     → meta.ProjectRoot(cwd, vaultPath)
+        │                            → walk up checking agentctx/ before .git/
+        │                            → returns ErrIsVaultRoot if matched = vault
+        ├─── vv_set_commit_msg       → write commit.msg at project_path
+        │                            → or vault-side fallback path
+        ├─── vv_thread_insert        → mdutil.InsertSubsection() on resume.md
+        ├─── vv_thread_replace       → mdutil.ReplaceSubsectionBody() on resume.md
+        ├─── vv_thread_remove        → mdutil.RemoveSubsection() on resume.md
+        ├─── vv_carried_add          → mdutil.AddCarriedBullet() on resume.md
+        ├─── vv_carried_remove       → mdutil.RemoveCarriedBullet() on resume.md
+        ├─── vv_carried_promote_to_task → remove bullet + create task file
+        ├─── vv_render_commit_msg    → git status + diff --cached --stat
+        │                            → render subject + body from convention file
+        ├─── vv_synthesize_wrap      → read resume.md, iterations.md, knowledge.md
+        │                            → build WrapBundle (all fields + SHA-256
+        │                               fingerprints at synth time)
+        ├─── vv_apply_wrap_bundle    → in-process dispatch (see Canonical Wrap
+        │                               Pattern diagram below); logs drift metrics
+        │                               to ~/.cache/vibe-vault/wrap-metrics.jsonl
+        │
         └─── prompt: vv_session_guidelines → agent instructions for capture
 ```
+
+### Canonical Wrap Pattern
+
+The recommended `/wrap` flow uses two tools instead of seven sequential
+surgical calls. `vv_synthesize_wrap` reads all relevant vault state in one
+call and returns a `WrapBundle` JSON object. The AI edits the bundle fields
+(iteration narrative, thread updates, carried bullets, commit message,
+capture summary). `vv_apply_wrap_bundle` dispatches all writes in a single
+in-process call — no MCP round-trips per write.
+
+```
+vv_synthesize_wrap(project, project_path)
+        │
+        ▼  WrapBundle JSON (with synth-time SHA-256 per field)
+   AI edits bundle fields
+   (iteration block, threads, carried bullets, commit msg, capture)
+        │
+        ▼
+vv_apply_wrap_bundle(project, project_path, bundle)
+        │
+        ▼  in-process sequential dispatch:
+        ├── 1. vv_append_iteration    (iteration_block)
+        ├── 2. vv_thread_insert       (resume_thread_blocks, each)
+        ├── 3. vv_thread_remove       (resume_threads_to_close, each)
+        ├── 4. vv_carried_add         (carried_changes.add, each)
+        ├── 5. vv_carried_remove      (carried_changes.remove, each)
+        ├── 6. vv_set_commit_msg      (commit_msg)
+        └── 7. vv_capture_session     (capture_session)
+                │
+                ▼  for each field:
+        wrapmetrics.AppendBundleLines()
+        → ~/.cache/vibe-vault/wrap-metrics.jsonl
+          (synth SHA vs apply SHA, logged but never abort)
+
+On first error: returns applied_writes + error_at_step.
+Completed writes are not rolled back (each is semantically correct
+in isolation).
+```
+
+The per-tool surgical APIs (`vv_thread_insert`, `vv_set_commit_msg`, etc.)
+remain available for hand-edits but are not called from the canonical flow.
 
 ### Context Sync Flow (`vv context`)
 
@@ -250,6 +311,7 @@ Source of truth: Tier 1 (Go embeds). See DESIGN.md decisions #41 and #46.
 |---------|------|----------------|
 | `cmd/vv` | `main.go` | CLI arg parsing, subcommand routing (including hook sub-subcommands), help via `internal/help`, `wantsHelp()` flag guard, unknown flag rejection, `runTrends()` with `--project` and `--weeks` flags, `runInject()` with `--project`/`--format`/`--sections`/`--max-tokens` flags, `runExport()` with `--format`/`--project` flags, `runContext()` with `sync` sub-subcommand (`--project`/`--all`/`--dry-run`/`--force`), `runCheck()` agentctx schema check |
 | `cmd/gen-man` | `main.go` | Generates `man/*.1` files from help registry (Subcommands + HookSubcommands + ContextSubcommands) |
+| `cmd/wrap-trace` | `main.go` | Phase 0 measurement harness: replays a session transcript through the full wrap pipeline, measures per-step latency and token cost, and emits a golden JSONL report. Reuses `internal/transcript/parser.go` for transcript reading; no production MCP dependency. |
 | `templates` | `embed.go` | `//go:embed all:agentctx` — embeds 23 agentctx template files (commands, skills, settings) into the binary; `AgentctxFS()` returns the `embed.FS`. Templates use `{{PROJECT}}`/`{{DATE}}` placeholders resolved at runtime. These are Tier 1 of the three-tier template cascade (see DESIGN.md #46). |
 | `context` | `context.go` | `Init()` — scaffold vault-resident context (templates from embed.FS, repo-side CLAUDE.md symlink + .claude/{commands,rules,skills,agents} symlinks, agentctx symlink, .version); `Migrate()` — copy local files to vault + force-update repo-side; `claudeSubdirs` var defines .claude/ subdirectories; helpers: safeWrite, safeSymlink, gitignoreEnsure, copyFile/Dir |
 | `context` | `schema.go` | `VersionFile` TOML struct, `ReadVersion`/`WriteVersion`, `LatestSchemaVersion` const (10), `Migration` type + registry (0→1 through 7→8 plus a no-op 9→10 contract-marker entry that brings post-v7 vaults to v10 in one step), `MigrationContext` (incl. `DryRun` field), `migrationsFrom()` |
@@ -263,7 +325,14 @@ Source of truth: Tier 1 (Go embeds). See DESIGN.md decisions #41 and #46.
 | `friction` | `format.go` | `ComputeProjectFriction()` — aggregate per-project friction from index; `Format()` — aligned terminal output for `vv friction` |
 | `mcp` | `protocol.go` | JSON-RPC 2.0 and MCP message types (Request, Response, InitializeResult, ToolDef, ToolsCallResult, ContentBlock, PromptDef, PromptArg, PromptMessage) |
 | `mcp` | `server.go` | Stdio transport: `Server.Serve()` reads newline-delimited JSON, dispatches initialize/tools/list/tools/call/prompts/list/prompts/get, logs tool calls to stderr |
-| `mcp` | `tools.go` | 8 tools (all `vv_`-prefixed): `vv_get_project_context`, `vv_list_projects`, `vv_search_sessions`, `vv_get_knowledge`, `vv_get_session_detail`, `vv_get_friction_trends`, `vv_get_effectiveness`, `vv_capture_session` |
+| `mcp` | `tools.go` | 8 read/capture tools (all `vv_`-prefixed): `vv_get_project_context`, `vv_list_projects`, `vv_search_sessions`, `vv_get_knowledge`, `vv_get_session_detail`, `vv_get_friction_trends`, `vv_get_effectiveness`, `vv_capture_session` |
+| `mcp` | `tools_project.go` | `vv_get_project_root` — calls `meta.ProjectRoot()` and returns the project root path, or an error if in vault root |
+| `mcp` | `tools_commit_msg.go` | `vv_set_commit_msg` — writes `commit.msg` at an explicit `project_path` or falls back to a vault-side path; `subject` is required |
+| `mcp` | `tools_thread.go` | `vv_thread_insert`, `vv_thread_replace`, `vv_thread_remove` — surgical Open Threads subsection edits on `resume.md` using `mdutil` subsection family; rejects the reserved "Carried forward" slug |
+| `mcp` | `tools_carried.go` | `vv_carried_add`, `vv_carried_remove`, `vv_carried_promote_to_task` — manage `Carried forward` bullet list in resume.md via `mdutil.CarriedBullet` helpers; promote creates a task file and removes the bullet atomically |
+| `mcp` | `tools_render_commit_msg.go` | `vv_render_commit_msg` — reads `git status` + `git diff --cached --stat`, renders a conventional commit message from convention file and AI-supplied subject+body; `RenderCommitMsg()` exported as package-level function for reuse in `vv_synthesize_wrap` |
+| `mcp` | `tools_synthesize_wrap.go` | `vv_synthesize_wrap` — reads resume.md, iterations.md, knowledge.md, convention file; builds `WrapBundle` with all wrap fields and SHA-256 fingerprints stamped at synth time |
+| `mcp` | `tools_apply_wrap_bundle.go` | `vv_apply_wrap_bundle` — in-process orchestrator: dispatches all `WrapBundle` writes sequentially by calling peer handler bodies directly (no MCP round-trips); logs synth vs. apply SHA drift to `wrapmetrics`; fail-stop on first error, no rollback |
 | `mcp` | `prompts.go` | `NewSessionGuidelinesPrompt()` — agent instructions for when/how to call `vv_capture_session` |
 | `help` | `commands.go` | Command/Flag/Arg structs, Version var (build-time injection via ldflags), registry of 17 subcommands + 2 hook + 3 context + 3 vault subcommands (status, pull, push), ManName() with space→hyphen |
 | `help` | `terminal.go` | `FormatTerminal()` and `FormatUsage()` — terminal help output |
@@ -323,7 +392,10 @@ Source of truth: Tier 1 (Go embeds). See DESIGN.md decisions #41 and #46.
 | `synthesis` | `synthesize.go` | `Synthesize()` — LLM invocation (temp 0.3, JSON mode) + response validation/filtering (section names, file targets, index bounds, action types) |
 | `synthesis` | `actions.go` | `Apply()` — execute synthesis result: append learnings to knowledge.md (with significant-word duplicate detection), flag stale entries (index + fuzzy fallback), update resume sections, move completed tasks to `done/` |
 | `synthesis` | `run.go` | `Run()` — top-level orchestrator: gather → synthesize → apply; short-circuits on nil provider, disabled config, or empty result |
-| `mdutil` | `mdutil.go` | Shared markdown/text utilities: `SignificantWords()` (4+ char, stop-word filtered), `Overlap()`/`SetIntersection()` (word set operations), `ReplaceSectionBody()` (heading-targeted markdown editing), `AtomicWriteFile()` (temp + rename crash safety) |
+| `mdutil` | `mdutil.go` | Shared markdown/text utilities: `SignificantWords()` (4+ char, stop-word filtered), `Overlap()`/`SetIntersection()` (word set operations), `ReplaceSectionBody()` (heading-targeted markdown editing), `AtomicWriteFile()` (temp + rename crash safety); subsection family: `ReplaceSubsectionBody()`, `InsertSubsection()`, `RemoveSubsection()`, `NormalizeSubheadingSlug()` (text up to first ` — ` separator) |
+| `mdutil` | `carried.go` | `CarriedBullet` type + liberal-on-read parser (`ParseCarriedForward`) + strict-on-write emitter (`EmitCarriedBullets`, `BuildCarriedBullet`); `AddCarriedBullet()`, `RemoveCarriedBullet()`, `GetCarriedBullet()` for resume.md "Carried forward" subsections |
+| `wrapmetrics` | `writer.go` | Host-local JSONL metric writer at `~/.cache/vibe-vault/wrap-metrics.jsonl`; `AppendLine()`, `AppendBundleLines()`, `CacheDir()`, rotation to `wrap-metrics-archive-YYYY.jsonl` at 1000-line threshold via `rotateIfNeeded()` |
+| `meta` | `provenance.go`, `sanitize.go` | `Stamp()` — resolves host/user/cwd/origin_project for provenance metadata. `HomeDir()` — config-aware home directory. `ProjectRoot(cwd, vaultPath)` — walks up the directory tree checking for `agentctx/` first, then `.git/`; returns `ErrIsVaultRoot` if matched directory equals the configured vault path |
 | `sanitize` | `redact.go` | Regex-based XML tag stripping for Claude Code wrapper tags |
 | `memory` | `memory.go` | `Link()`/`Unlink()` for `vv memory` — slug derivation (symlink-resolved + `/` → `-`), project resolution via `session.DetectProject`, migrate pre-existing host-local memory into the vault target (drop identical, move unique, quarantine conflicts to sibling `memory-conflicts/{timestamp}/` under `--force`), establish/remove the `~/.claude/projects/{slug}/memory` ↔ `Projects/{name}/agentctx/memory` symlink. Host-local writes go through to the vault by POSIX symlink semantics; see DESIGN.md #48 |
 

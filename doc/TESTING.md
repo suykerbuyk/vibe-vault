@@ -2,7 +2,7 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**1342 tests** across 36 test packages + **1 integration test** (22 subtests). All passing.
+**1633 tests** across 47 test packages + **1 integration test** (22 subtests). All passing.
 
 > **Note (iter 121):** The detailed per-file table below is out of date relative to the
 > headline counts above — accumulated drift across many iterations. Treat the table
@@ -77,7 +77,18 @@ Run integration: `make integration` (or `go test -run TestIntegration -timeout 6
 | `synthesis/prompt_test.go` | 9 | `BuildPrompt_AllSections`, `BuildPrompt_EmptyKnowledge`, `BuildPrompt_EmptyResume`, `BuildPrompt_GitDiffTruncation`, `BuildPrompt_NoTasks`, `BuildPrompt_NoHistory`, `BuildPrompt_NumberedBullets`, `BuildPrompt_NoCommitsNoDiff`, `NumberBullets_ResetsBetweenSections` |
 | `synthesis/synthesize_test.go` | 9 | `Synthesize_FullResult`, `Synthesize_EmptyResult`, `Synthesize_NilProvider`, `Synthesize_LLMError`, `Synthesize_InvalidJSON`, `Synthesize_InvalidSection`, `Synthesize_InvalidTaskAction`, `Synthesize_InvalidStaleFile`, `Synthesize_NegativeIndex` |
 | `synthesis/run_test.go` | 5 | `Run_NilProvider`, `Run_Disabled`, `Run_EndToEnd`, `Run_LLMError`, `Run_EmptyResult` |
-| `mdutil/mdutil_test.go` | 18 | `SignificantWords_Basic`, `SignificantWords_StopWords`, `SignificantWords_PunctuationTrimming`, `SignificantWords_ShortWordsFiltered`, `IsStopWord`, `Overlap_Matching`, `Overlap_DuplicatesInB`, `Overlap_NoMatch`, `Overlap_Empty`, `SetIntersection_Basic`, `SetIntersection_NoDuplicates`, `SetIntersection_Empty`, `ReplaceSectionBody_Basic`, `ReplaceSectionBody_NotFound`, `ReplaceSectionBody_LastSection`, `ReplaceSectionBody_PreservesOtherSections`, `AtomicWriteFile_CreatesDir`, `AtomicWriteFile_OverwritesExisting` |
+| `mdutil/mdutil_test.go` | 53 | `SignificantWords_Basic`, `SignificantWords_StopWords`, `SignificantWords_PunctuationTrimming`, `SignificantWords_ShortWordsFiltered`, `IsStopWord`, `Overlap_Matching`, `Overlap_DuplicatesInB`, `Overlap_NoMatch`, `Overlap_Empty`, `SetIntersection_Basic`, `SetIntersection_NoDuplicates`, `SetIntersection_Empty`, `ReplaceSectionBody_Basic`, `ReplaceSectionBody_NotFound`, `ReplaceSectionBody_LastSection`, `ReplaceSectionBody_PreservesOtherSections`, `AtomicWriteFile_CreatesDir`, `AtomicWriteFile_OverwritesExisting`; subsection family (35 table-driven): `NormalizeSubheadingSlug_*` (8 variants), `ReplaceSubsectionBody_*` (10 variants incl. HTML comment, code fence, ambiguous multi-match), `InsertSubsection_*` (ModeTop, ModeBottom, ModeAfter, ModeBefore, and edge cases), `RemoveSubsection_*` |
+| `mdutil/carried_test.go` | 35 | Liberal-on-read corpus: `ParseCarriedForward_Empty`, `_SingleCanonical`, `_VariantCanonical`, `_VariantBoldColon`, `_VariantBoldParen`, `_VariantEmDash`, `_VariantPlain`, `_VariantPlainNoSentenceMark`, `_MultilineBoldSlug`, `_MultiBullet`, `_ContinuationLines`; round-trip: `_RoundTrip_*` (5 variants), `_TwelveBullets`; mutation: `AddCarriedBullet_*` (6), `RemoveCarriedBullet_*` (6), `GetCarriedBullet_*` (2), `BuildCarriedBullet_*` (2), `ParseLiberalVariants_AllFive` |
+| `meta/project_root_test.go` | 8 | `TestProjectRoot_GitDir`, `_AgentctxDir`, `_VaultOnly`, `_VaultRootRefused`, `_NotFound`, `_Override`, `_WorktreeGitFile`, `_AgentctxBeforeGit` |
+| `wrapmetrics/writer_test.go` | 8 | `TestAppendCreatesFile`, `TestAppendAppendsLine`, `TestRotationTriggerAt1000Lines`, `TestSchemaFieldsMatchSpec`, `TestProvenanceFieldsPopulated`, `TestRotationSkippedOnErrorWithWarning`, `TestCacheDirUsesVIBE_VAULT_HOME`, `TestDriftBytesIsSignedDelta` |
+| `mcp/tools_project_test.go` | 3 | `TestGetProjectRoot_GitDir`, `_AgentctxDir`, `_VaultRootRefused` |
+| `mcp/tools_commit_msg_test.go` | 5 | `TestSetCommitMsg_CreatesMissing`, `_OverwritesExisting`, `_ProjectPathRequired`, `_ContentRequired`, `_PartialSuccessDiagnostic` |
+| `mcp/tools_thread_test.go` | 19 | `TestThreadInsert_*` (ModeTop, ModeBottom, ModeAfter, SlugAlreadyExists, MissingSlug, ProjectNotFound), `TestThreadReplace_*` (Basic, SlugWithEmDash, SlugNotFound, CarriedForwardRejected, AmbiguousMultiMatch, HTMLCommentInBodyRejected, MissingSlug), `TestThreadRemove_*` (Basic, CarriedForwardRejected, SlugNotFound, AmbiguousMultiMatch, MissingSlug, EmptyOpenThreads) |
+| `mcp/tools_carried_test.go` | 22 | `TestCarriedAdd_*` (ToEmpty, ToSingle, ToMulti, SlugAlreadyExists, SlugAlreadyExists_CaseInsensitive, MissingSlug, MissingTitle, ProjectNotFound, CanonicalBulletForm), `TestCarriedRemove_*` (Single, Multi_First, Multi_Last, CaseInsensitive, SlugNotFound, MissingSlug), `TestCarriedPromote_*` (Basic, SingleBullet, SlugNotFound, TaskAlreadyExists, MissingSlug, MissingNewTaskSlug, TaskFrontmatterShape) |
+| `mcp/tools_render_commit_msg_test.go` | 12 | `TestRenderCommitMsg_Golden`, `_NoStagedChanges`, `_SubjectWithNewline`, `_ProseMarkdownPreserved`, `_IterationZero`, `_IterationNegative`, `_ProjectPathProvided`, `_ProjectPathDerived`, `_ProjectPathNonExistent`, `_SubjectRequired`, `_ProseBodyRequired`, `_OutputStructure` |
+| `mcp/tools_synthesize_wrap_test.go` | 13 | `TestSynthesizeWrap_BundleShape`, `_IterationBlockFormat`, `_CommitMsgStructure`, `_CaptureSessionAlwaysPresent`, `_ThreadsToOpen`, `_CarriedChanges`, `_SHAFingerprint`, `_FilesChangedSupplied`, `_RequiredFieldsMissing`, `_ProseBodyDefaultsToNarrative`, `_DecisionsInCaptureSession`, `TestFingerprintString_Deterministic`, `TestFirstNWords` |
+| `mcp/tools_apply_wrap_bundle_test.go` | 14 | `TestApplyWrapBundle_AppendIteration`, `_ThreadInsert`, `_ThreadRemove`, `_CarriedAdd`, `_CarriedRemove`, `_SetCommitMsg`, `_MetricsWritten`, `_PartialFailure_StopsAtError`, `_BundleMissing`, `_AutoIncrementIteration`, `_DriftSummaryNoSHA`; `TestAnalyse_GoldenWrap` is excluded (lives in `cmd/wrap-trace`) |
+| `cmd/wrap-trace/main_test.go` | 3 | `TestAnalyse_GoldenWrap` (golden-file output comparison), `TestMeasure_GoldenFile` (per-step latency JSON structure), `TestCanonicalTool` (tool normalization) |
 
 ## Integration Test
 
@@ -90,6 +101,13 @@ exercising the full pipeline as subprocess calls. Uses XDG_CONFIG_HOME isolation
 temp directories. 8 JSONL fixtures loaded from `test/testdata/*.jsonl` via `readTestdata()`: normal session, same-day iteration,
 trivial (skipped), different project, UUID-named backfill, checkpoint session, narrative session (with tool results), friction session (with correction patterns). The
 `index_knowledge_seeding` subtest verifies per-project `knowledge.md` files are seeded during index generation. The `inject` subtest tests markdown/JSON output, sections filter, max-tokens truncation, help flag, and unknown project warning. The `export` subtest tests JSON output, project filter, CSV format, and help flag. The `context_sync` subtest verifies schema migration (0→2), shared command propagation, dry-run mode, and idempotent re-sync. Skipped in `-short` mode.
+
+The `mcp` subtest's `tools/list` check uses an **exact-set assertion**: the test enumerates all 31
+expected tool names by name and compares against the server's reported list bidirectionally. A
+tool missing from the expected list fails with `"unexpected tool %q"`, and a tool missing from the
+server's list fails with `"missing expected tool %q"`. The old numeric `len(tools) != 20` check has
+been replaced; add new tools explicitly to `expectedTools` in `test/integration_test.go` to prevent
+silent count drift.
 
 ## HOME-Sandbox Classification
 
