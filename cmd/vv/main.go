@@ -1184,6 +1184,9 @@ func registerMCPTools(srv *mcp.Server, cfg config.Config) {
 	srv.RegisterTool(mcp.NewGetIterationsTool(cfg))
 	srv.RegisterTool(mcp.NewGetProjectRootTool(cfg))
 	srv.RegisterTool(mcp.NewSetCommitMsgTool(cfg))
+	srv.RegisterTool(mcp.NewThreadInsertTool(cfg))
+	srv.RegisterTool(mcp.NewThreadReplaceTool(cfg))
+	srv.RegisterTool(mcp.NewThreadRemoveTool(cfg))
 	srv.RegisterPrompt(mcp.NewSessionGuidelinesPrompt())
 }
 
