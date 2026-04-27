@@ -307,8 +307,12 @@ func TestVVWrapDispatch_RejectsTamperedSkeleton(t *testing.T) {
 	}
 }
 
-// TestVVWrapDispatch_RejectsMissingAPIKey verifies the env-var guard.
-func TestVVWrapDispatch_RejectsMissingAPIKey(t *testing.T) {
+// TestVVWrapDispatch_RejectsMissingKey verifies the resolver guard fires
+// when neither config nor env supply a key for the tier-resolved provider.
+// The error must name BOTH the config recipe (vv config set-key anthropic)
+// AND the legacy env var (ANTHROPIC_API_KEY) so operators in either setup
+// style get unambiguous guidance.
+func TestVVWrapDispatch_RejectsMissingKey(t *testing.T) {
 	withSkeletonCacheDir(t)
 	withAPIKey(t, "")
 	handle := preparedSkeleton(t)
@@ -319,10 +323,87 @@ func TestVVWrapDispatch_RejectsMissingAPIKey(t *testing.T) {
 		"agent_name":      "wrap-executor",
 	})
 	if err == nil {
-		t.Fatalf("expected error for missing ANTHROPIC_API_KEY")
+		t.Fatalf("expected error when both config and env are empty")
 	}
-	if !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
-		t.Errorf("error %q should name ANTHROPIC_API_KEY", err)
+	msg := err.Error()
+	if !strings.Contains(msg, "vv config set-key anthropic") {
+		t.Errorf("error %q must mention 'vv config set-key anthropic'", msg)
+	}
+	if !strings.Contains(msg, "ANTHROPIC_API_KEY") {
+		t.Errorf("error %q must mention ANTHROPIC_API_KEY", msg)
+	}
+}
+
+// TestVVWrapDispatch_ConfigKeyUsed locks the config-first resolver tier:
+// when [providers.anthropic].api_key is set and the env var is empty, the
+// providerFactory receives the config key.
+func TestVVWrapDispatch_ConfigKeyUsed(t *testing.T) {
+	withSkeletonCacheDir(t)
+	withAPIKey(t, "") // ensure env empty so config must be the source
+	handle := preparedSkeleton(t)
+
+	cfg := fixtureWrapConfig()
+	cfg.Providers.Anthropic.APIKey = "FROM_CONFIG"
+
+	var seenKey string
+	mock := &dispatchTestProvider{
+		turns: []dispatchTestTurn{{
+			Tool:  "wrap_executor_finish",
+			Input: json.RawMessage(`{"status":"ok","outputs":{"iteration_narrative":"ok"}}`),
+			Final: true,
+			Stop:  "stop",
+		}},
+	}
+	withProviderFactory(t, func(_, apiKey string) (llm.AgenticProvider, error) {
+		seenKey = apiKey
+		return mock, nil
+	})
+
+	if _, err := callDispatchWithConfig(t, cfg, map[string]any{
+		"skeleton_handle": handle,
+		"tier":            "sonnet",
+		"agent_name":      "wrap-executor",
+	}); err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if seenKey != "FROM_CONFIG" {
+		t.Errorf("providerFactory received apiKey=%q, want FROM_CONFIG", seenKey)
+	}
+}
+
+// TestVVWrapDispatch_EnvKeyFallback locks the env-fallback tier: when the
+// config has no providers entry, the resolver falls through to the env var
+// and that value reaches the providerFactory.
+func TestVVWrapDispatch_EnvKeyFallback(t *testing.T) {
+	withSkeletonCacheDir(t)
+	withAPIKey(t, "FROM_ENV")
+	handle := preparedSkeleton(t)
+
+	cfg := fixtureWrapConfig() // empty Providers — env must be the source
+
+	var seenKey string
+	mock := &dispatchTestProvider{
+		turns: []dispatchTestTurn{{
+			Tool:  "wrap_executor_finish",
+			Input: json.RawMessage(`{"status":"ok","outputs":{"iteration_narrative":"ok"}}`),
+			Final: true,
+			Stop:  "stop",
+		}},
+	}
+	withProviderFactory(t, func(_, apiKey string) (llm.AgenticProvider, error) {
+		seenKey = apiKey
+		return mock, nil
+	})
+
+	if _, err := callDispatchWithConfig(t, cfg, map[string]any{
+		"skeleton_handle": handle,
+		"tier":            "sonnet",
+		"agent_name":      "wrap-executor",
+	}); err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if seenKey != "FROM_ENV" {
+		t.Errorf("providerFactory received apiKey=%q, want FROM_ENV", seenKey)
 	}
 }
 
