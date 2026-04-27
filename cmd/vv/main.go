@@ -101,6 +101,9 @@ func main() {
 	case "effectiveness":
 		runEffectiveness()
 
+	case "config":
+		runConfig()
+
 	case "mcp":
 		runMcp()
 
