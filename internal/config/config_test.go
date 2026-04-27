@@ -556,6 +556,179 @@ func TestDefaultConfig_WrapSection(t *testing.T) {
 	}
 }
 
+// TestLoad_ProvidersSection covers happy-path TOML deserialization for all
+// three providers in [providers.<P>].api_key.
+func TestLoad_ProvidersSection(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("HOME", t.TempDir())
+
+	configDir := filepath.Join(xdg, "vibe-vault")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	tomlContent := `vault_path = "/custom/vault"
+
+[providers.anthropic]
+api_key = "sk-ant-test"
+
+[providers.openai]
+api_key = "sk-openai-test"
+
+[providers.google]
+api_key = "g-test-key"
+`
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(tomlContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got := cfg.Providers.Anthropic.APIKey; got != "sk-ant-test" {
+		t.Errorf("Providers.Anthropic.APIKey = %q, want sk-ant-test", got)
+	}
+	if got := cfg.Providers.OpenAI.APIKey; got != "sk-openai-test" {
+		t.Errorf("Providers.OpenAI.APIKey = %q, want sk-openai-test", got)
+	}
+	if got := cfg.Providers.Google.APIKey; got != "g-test-key" {
+		t.Errorf("Providers.Google.APIKey = %q, want g-test-key", got)
+	}
+}
+
+// TestLoad_NoProvidersSection asserts a config without [providers] silently
+// defaults to an empty ProvidersConfig (forward-compat for old configs).
+func TestLoad_NoProvidersSection(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("HOME", t.TempDir())
+
+	configDir := filepath.Join(xdg, "vibe-vault")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"),
+		[]byte(`vault_path = "/custom/vault"`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.Providers.Anthropic.APIKey != "" {
+		t.Errorf("Anthropic.APIKey = %q, want empty (default)", cfg.Providers.Anthropic.APIKey)
+	}
+	if cfg.Providers.OpenAI.APIKey != "" {
+		t.Errorf("OpenAI.APIKey = %q, want empty (default)", cfg.Providers.OpenAI.APIKey)
+	}
+	if cfg.Providers.Google.APIKey != "" {
+		t.Errorf("Google.APIKey = %q, want empty (default)", cfg.Providers.Google.APIKey)
+	}
+}
+
+// TestLoad_EmptyProvidersSection asserts that a config which declares
+// [providers] but no sub-sections loads cleanly with all keys empty.
+func TestLoad_EmptyProvidersSection(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("HOME", t.TempDir())
+
+	configDir := filepath.Join(xdg, "vibe-vault")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	tomlContent := `vault_path = "/custom/vault"
+
+[providers]
+`
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(tomlContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.Providers.Anthropic.APIKey != "" {
+		t.Errorf("Anthropic.APIKey = %q, want empty", cfg.Providers.Anthropic.APIKey)
+	}
+	if cfg.Providers.OpenAI.APIKey != "" {
+		t.Errorf("OpenAI.APIKey = %q, want empty", cfg.Providers.OpenAI.APIKey)
+	}
+	if cfg.Providers.Google.APIKey != "" {
+		t.Errorf("Google.APIKey = %q, want empty", cfg.Providers.Google.APIKey)
+	}
+}
+
+// TestOverlay_ProvidersAllThreeMerge asserts that an overlay setting keys for
+// all three providers produces a merged result with all three present.
+func TestOverlay_ProvidersAllThreeMerge(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`[providers.anthropic]
+api_key = "sk-ant-overlay"
+
+[providers.openai]
+api_key = "sk-openai-overlay"
+
+[providers.google]
+api_key = "g-overlay"
+`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	base := DefaultConfig()
+	result := base.Overlay(cfgPath)
+
+	if got := result.Providers.Anthropic.APIKey; got != "sk-ant-overlay" {
+		t.Errorf("Anthropic.APIKey = %q, want sk-ant-overlay", got)
+	}
+	if got := result.Providers.OpenAI.APIKey; got != "sk-openai-overlay" {
+		t.Errorf("OpenAI.APIKey = %q, want sk-openai-overlay", got)
+	}
+	if got := result.Providers.Google.APIKey; got != "g-overlay" {
+		t.Errorf("Google.APIKey = %q, want g-overlay", got)
+	}
+	// Base must be unchanged.
+	if base.Providers.Anthropic.APIKey != "" {
+		t.Error("base config Providers.Anthropic was mutated")
+	}
+}
+
+// TestOverlay_ProvidersFieldByField asserts that an overlay setting only one
+// provider's key preserves keys set on other providers in the base config.
+// Mirrors the Wrap.Tiers field-by-field merge expectation.
+func TestOverlay_ProvidersFieldByField(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`[providers.openai]
+api_key = "Y"
+`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	base := DefaultConfig()
+	base.Providers.Anthropic.APIKey = "X"
+
+	result := base.Overlay(cfgPath)
+
+	if got := result.Providers.Anthropic.APIKey; got != "X" {
+		t.Errorf("Anthropic.APIKey = %q, want X (overlay should preserve base)", got)
+	}
+	if got := result.Providers.OpenAI.APIKey; got != "Y" {
+		t.Errorf("OpenAI.APIKey = %q, want Y (overlay should set)", got)
+	}
+	if got := result.Providers.Google.APIKey; got != "" {
+		t.Errorf("Google.APIKey = %q, want empty (untouched)", got)
+	}
+}
+
 func TestProjectsDir_StateDir(t *testing.T) {
 	cfg := Config{VaultPath: "/home/user/vault"}
 
