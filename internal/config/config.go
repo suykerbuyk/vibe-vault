@@ -36,19 +36,16 @@ type Config struct {
 	Providers  ProvidersConfig  `toml:"providers"`
 }
 
-// ProvidersConfig holds per-provider configuration. Phase 1 of the
-// dispatch-api-key-resolution task introduces this section to give operators a
-// config-first place to store API keys; resolution + factory plumbing land in
-// later phases.
+// ProvidersConfig holds the per-provider settings block. API keys default to
+// empty; resolution falls back to the provider's env var via llm.ResolveAPIKey.
 type ProvidersConfig struct {
 	Anthropic ProviderConfig `toml:"anthropic"`
 	OpenAI    ProviderConfig `toml:"openai"`
 	Google    ProviderConfig `toml:"google"`
 }
 
-// ProviderConfig is the per-provider settings block. APIKey is the provider's
-// API key; empty by default. Layered resolution (config → env → actionable
-// error) lands in Phase 2 with internal/llm/keyresolver.go.
+// ProviderConfig is one provider's settings. APIKey is empty when the operator
+// relies on the env-var fallback path.
 type ProviderConfig struct {
 	APIKey string `toml:"api_key"`
 }
