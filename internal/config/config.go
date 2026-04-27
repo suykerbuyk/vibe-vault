@@ -33,6 +33,24 @@ type Config struct {
 	Zed        ZedConfig        `toml:"zed"`
 	Synthesis  SynthesisConfig  `toml:"synthesis"`
 	Wrap       WrapConfig       `toml:"wrap"`
+	Providers  ProvidersConfig  `toml:"providers"`
+}
+
+// ProvidersConfig holds per-provider configuration. Phase 1 of the
+// dispatch-api-key-resolution task introduces this section to give operators a
+// config-first place to store API keys; resolution + factory plumbing land in
+// later phases.
+type ProvidersConfig struct {
+	Anthropic ProviderConfig `toml:"anthropic"`
+	OpenAI    ProviderConfig `toml:"openai"`
+	Google    ProviderConfig `toml:"google"`
+}
+
+// ProviderConfig is the per-provider settings block. APIKey is the provider's
+// API key; empty by default. Layered resolution (config → env → actionable
+// error) lands in Phase 2 with internal/llm/keyresolver.go.
+type ProviderConfig struct {
+	APIKey string `toml:"api_key"`
 }
 
 // WrapConfig holds the [wrap] section of config.toml.
@@ -431,6 +449,19 @@ func (c Config) Overlay(projectConfigPath string) Config {
 			merged[k] = v
 		}
 		c.Wrap.Tiers = merged
+	}
+	// Providers: struct-of-structs, merged field-by-field via md.IsDefined().
+	// Mirrors the Wrap.Tiers approach for the same reason — Overlay() decodes
+	// into a fresh struct, so any provider sub-section the operator omits
+	// must keep the base config's value.
+	if md.IsDefined("providers", "anthropic", "api_key") {
+		c.Providers.Anthropic.APIKey = overlay.Providers.Anthropic.APIKey
+	}
+	if md.IsDefined("providers", "openai", "api_key") {
+		c.Providers.OpenAI.APIKey = overlay.Providers.OpenAI.APIKey
+	}
+	if md.IsDefined("providers", "google", "api_key") {
+		c.Providers.Google.APIKey = overlay.Providers.Google.APIKey
 	}
 
 	return c
