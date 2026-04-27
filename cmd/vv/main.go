@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -1206,6 +1207,27 @@ func registerMCPTools(srv *mcp.Server, cfg config.Config) {
 
 const mcpInstructions = `Call vv_bootstrap_context at session start for full project context. Use vv_capture_session at the end of each work unit.`
 
+const mcpCheckHelp = `Usage: vv mcp check [--tools]
+
+Runs MCP protocol compliance checks against the production server.
+
+Flags:
+  --tools    Print the list of registered tool names (one per line, sorted)
+             and exit. Skips compliance checks.
+`
+
+// mcpCheckStdout is the destination for `vv mcp check` output. Tests override
+// this to capture stdout; production uses os.Stdout.
+var mcpCheckStdout io.Writer = os.Stdout
+
+// printToolNames writes the server's registered tool names to w, one per line,
+// in stable alphabetical order.
+func printToolNames(w io.Writer, srv *mcp.Server) {
+	for _, name := range srv.ToolNames() {
+		fmt.Fprintln(w, name)
+	}
+}
+
 func runMcp() {
 	args := os.Args[2:]
 
@@ -1284,7 +1306,7 @@ func runMcp() {
 			return
 		case "check":
 			if wantsHelp(args[1:]) {
-				fmt.Fprintf(os.Stderr, "Usage: vv mcp check\n\nRuns MCP protocol compliance checks against the production server.\n")
+				fmt.Fprint(os.Stderr, mcpCheckHelp)
 				return
 			}
 			cfg := mustLoadConfig()
@@ -1292,6 +1314,10 @@ func runMcp() {
 			srv := mcp.NewServer(mcp.ServerInfo{Name: "vibe-vault", Version: help.Version}, logger)
 			registerMCPTools(srv, cfg)
 			srv.SetInstructions(mcpInstructions)
+			if hasFlag(args[1:], "--tools") {
+				printToolNames(mcpCheckStdout, srv)
+				return
+			}
 			results := mcp.RunChecks(srv)
 			failed := false
 			for _, r := range results {
@@ -1300,9 +1326,9 @@ func runMcp() {
 					status = "FAIL"
 					failed = true
 				}
-				fmt.Printf("[%s] %s\n", status, r.Name)
+				fmt.Fprintf(mcpCheckStdout, "[%s] %s\n", status, r.Name)
 				if r.Detail != "" {
-					fmt.Printf("       %s\n", r.Detail)
+					fmt.Fprintf(mcpCheckStdout, "       %s\n", r.Detail)
 				}
 			}
 			if failed {
