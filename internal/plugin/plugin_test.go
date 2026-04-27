@@ -192,6 +192,16 @@ func TestGenerate_PathRelativeBinary(t *testing.T) {
 	if cmd != "vv" {
 		t.Errorf(".mcp.json command = %q, want %q", cmd, "vv")
 	}
+
+	// env block must propagate ANTHROPIC_API_KEY so vv_wrap_dispatch and
+	// other LLM-backed handlers see the operator's live shell key.
+	env, ok := entry["env"].(map[string]any)
+	if !ok {
+		t.Fatal(".mcp.json missing env block")
+	}
+	if got := env["ANTHROPIC_API_KEY"]; got != "${ANTHROPIC_API_KEY}" {
+		t.Errorf("env.ANTHROPIC_API_KEY = %q, want %q", got, "${ANTHROPIC_API_KEY}")
+	}
 }
 
 func TestRemove_Cleans(t *testing.T) {

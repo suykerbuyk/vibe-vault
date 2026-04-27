@@ -35,12 +35,10 @@ func InstallToCache(version string) (string, error) {
 		return "", fmt.Errorf("write cache plugin.json: %w", err)
 	}
 
-	// Write MCP config (PATH-relative — see Generate doc).
+	// Write MCP config via the shared mcpServerEntry helper (PATH-relative
+	// command, env passthrough — see plugin.go for the rationale).
 	mcpConfig := map[string]any{
-		pluginName: map[string]any{
-			"command": "vv",
-			"args":    []any{"mcp"},
-		},
+		pluginName: mcpServerEntry(),
 	}
 	if err := writeJSON(filepath.Join(installDir, ".mcp.json"), mcpConfig); err != nil {
 		return "", fmt.Errorf("write cache .mcp.json: %w", err)

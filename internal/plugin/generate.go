@@ -71,14 +71,11 @@ func Generate(version string) (string, error) {
 		return "", fmt.Errorf("write plugin manifest: %w", err)
 	}
 
-	// Write MCP config. Use PATH-relative "vv" so Claude Code's spawn
-	// resolves to whatever vv is first on PATH at session start. See the
-	// Generate doc comment for why an absolute path is the wrong default.
+	// Write MCP config via the shared mcpServerEntry helper so this writer
+	// and InstallToCache cannot drift. See plugin.go for the env-passthrough
+	// rationale and Generate's doc comment for why "vv" is PATH-relative.
 	mcpConfig := map[string]any{
-		pluginName: map[string]any{
-			"command": "vv",
-			"args":    []any{"mcp"},
-		},
+		pluginName: mcpServerEntry(),
 	}
 	if err := writeJSON(MCPConfigPath(), mcpConfig); err != nil {
 		return "", fmt.Errorf("write MCP config: %w", err)
