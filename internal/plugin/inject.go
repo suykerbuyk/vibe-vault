@@ -13,12 +13,10 @@ import (
 
 // InstallToCache writes plugin.json and .mcp.json into the Claude Code
 // plugin cache directory. Returns the install path on success.
+//
+// The MCP config writes "vv" (PATH-relative); see Generate's doc comment
+// for why an absolute binary path is the wrong default.
 func InstallToCache(version string) (string, error) {
-	binaryPath, err := resolveBinary()
-	if err != nil {
-		return "", fmt.Errorf("resolve vv binary: %w", err)
-	}
-
 	installDir := CacheInstallDir(version)
 	pluginMetaDir := filepath.Join(installDir, ".claude-plugin")
 
@@ -37,10 +35,10 @@ func InstallToCache(version string) (string, error) {
 		return "", fmt.Errorf("write cache plugin.json: %w", err)
 	}
 
-	// Write MCP config.
+	// Write MCP config (PATH-relative — see Generate doc).
 	mcpConfig := map[string]any{
 		pluginName: map[string]any{
-			"command": binaryPath,
+			"command": "vv",
 			"args":    []any{"mcp"},
 		},
 	}

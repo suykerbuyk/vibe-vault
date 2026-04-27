@@ -38,7 +38,7 @@ func TestInstallToCache_CorrectPath(t *testing.T) {
 	}
 }
 
-func TestInstallToCache_AbsoluteBinary(t *testing.T) {
+func TestInstallToCache_PathRelativeBinary(t *testing.T) {
 	setupHome(t)
 	installPath, err := InstallToCache("1.0.0")
 	if err != nil {
@@ -51,8 +51,9 @@ func TestInstallToCache_AbsoluteBinary(t *testing.T) {
 		t.Fatal(".mcp.json missing vibe-vault entry")
 	}
 	cmd, _ := entry["command"].(string)
-	if !filepath.IsAbs(cmd) {
-		t.Errorf(".mcp.json command = %q, want absolute path", cmd)
+	// InstallToCache writes "vv" (PATH-relative) — see Generate's doc comment.
+	if cmd != "vv" {
+		t.Errorf(".mcp.json command = %q, want %q", cmd, "vv")
 	}
 }
 

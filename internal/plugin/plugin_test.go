@@ -175,7 +175,7 @@ func TestGenerate_UpdatesVersion(t *testing.T) {
 	}
 }
 
-func TestGenerate_AbsoluteBinaryPath(t *testing.T) {
+func TestGenerate_PathRelativeBinary(t *testing.T) {
 	setupHome(t)
 	if _, err := Generate("1.0.0"); err != nil {
 		t.Fatal(err)
@@ -187,8 +187,10 @@ func TestGenerate_AbsoluteBinaryPath(t *testing.T) {
 		t.Fatal(".mcp.json missing vibe-vault entry")
 	}
 	cmd, _ := entry["command"].(string)
-	if !filepath.IsAbs(cmd) {
-		t.Errorf(".mcp.json command = %q, want absolute path", cmd)
+	// Generate intentionally writes "vv" (PATH-relative) so a stale binary
+	// invoking install can't pin the plugin to its own absolute path.
+	if cmd != "vv" {
+		t.Errorf(".mcp.json command = %q, want %q", cmd, "vv")
 	}
 }
 
