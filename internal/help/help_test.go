@@ -400,6 +400,21 @@ var expectedTerminal = map[string]string{
 		"\n" +
 		"The server logs tool calls to stderr for observability.\n",
 
+	"config": "vv config \u2014 manage vibe-vault configuration\n" +
+		"\n" +
+		"Usage: vv config [set-key]\n" +
+		"\n" +
+		"Manages settings stored in ~/.config/vibe-vault/config.toml.\n" +
+		"\n" +
+		"Subcommands:\n" +
+		"  set-key   Store a per-provider API key (anthropic, openai, google)\n" +
+		"\n" +
+		"The dispatch path (vv_wrap_dispatch) and hook enrichment / synthesis\n" +
+		"both resolve provider keys via a layered lookup: the value in\n" +
+		"config.toml wins, falling back to the provider's environment variable\n" +
+		"(ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY) for operators\n" +
+		"who already have shell-env-based setup.\n",
+
 	"templates": "vv templates \u2014 inspect, compare, and reset vault templates\n" +
 		"\n" +
 		"Usage: vv templates [list | diff | show | reset]\n" +
@@ -478,6 +493,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv vault <command>               Vault git sync (pull, push, status)\n" +
 		"  vv zed <subcommand>              Import Zed agent panel threads into vault\n" +
 		"  vv mcp [install | ...]           Start MCP server (JSON-RPC over stdio)\n" +
+		"  vv config [set-key | ...]        Manage configuration (provider keys, etc.)\n" +
 		"  vv templates [list | ...]        Inspect, compare, and reset vault templates\n" +
 		"  vv version                       Print version\n" +
 		"  vv help                          Show this help\n" +
@@ -497,7 +513,7 @@ func TestFormatUsage(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "context", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "memory", "vault", "zed", "mcp", "templates", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "memory", "vault", "zed", "mcp", "config", "templates", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))

@@ -541,6 +541,62 @@ configured prints an informational message and exits successfully.`,
 	SeeAlso: []string{"vv-mcp(1)", "vv-mcp-install(1)"},
 }
 
+var CmdConfig = Command{
+	Name:       "config",
+	Synopsis:   "manage vibe-vault configuration",
+	Brief:      "Manage configuration (provider keys, etc.)",
+	Usage:      "vv config [set-key]",
+	TableUsage: "vv config [set-key | ...]",
+	Description: `Manages settings stored in ~/.config/vibe-vault/config.toml.
+
+Subcommands:
+  set-key   Store a per-provider API key (anthropic, openai, google)
+
+The dispatch path (vv_wrap_dispatch) and hook enrichment / synthesis
+both resolve provider keys via a layered lookup: the value in
+config.toml wins, falling back to the provider's environment variable
+(ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY) for operators
+who already have shell-env-based setup.`,
+	SeeAlso: []string{"vv(1)", "vv-config-set-key(1)"},
+}
+
+var CmdConfigSetKey = Command{
+	Name:     "config set-key",
+	Synopsis: "store a provider API key in config.toml",
+	Brief:    "Set a per-provider API key",
+	Usage:    "vv config set-key [--force] <provider> <key|->",
+	Args: []Arg{
+		{Name: "provider", Desc: "Provider short name: anthropic, openai, or google"},
+		{Name: "key", Desc: `API key value, or "-" to read from stdin`},
+	},
+	Flags: []Flag{
+		{Name: "--force", Desc: "Overwrite an existing key for this provider"},
+	},
+	Description: `Writes [providers.<provider>].api_key into ~/.config/vibe-vault/config.toml,
+preserving all other lines, comments, and sections (line-oriented edit).
+The file is written atomically with mode 0600; the parent directory is
+chmod'd to 0700.
+
+Stdin form: when the key argument is "-", the value is read from stdin
+and a single trailing newline is trimmed (so "echo $KEY | vv config
+set-key anthropic -" works). Embedded newlines and surrounding
+whitespace are rejected.
+
+Refuses to overwrite an existing non-empty key for the same provider
+unless --force is passed.
+
+Once set, the dispatch handler and hook/synthesis paths resolve their
+key from config first, falling back to the provider's environment
+variable (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY) when the
+config slot is empty.`,
+	Examples: []string{
+		"vv config set-key anthropic sk-ant-...     Store an Anthropic key",
+		"echo $KEY | vv config set-key openai -     Pipe key from stdin",
+		"vv config set-key --force google new-key   Overwrite existing key",
+	},
+	SeeAlso: []string{"vv(1)", "vv-config(1)"},
+}
+
 var CmdVersion = Command{
 	Name:     "version",
 	Synopsis: "print version",
@@ -1061,6 +1117,11 @@ var McpSubcommands = []Command{
 	CmdMcpUninstall,
 }
 
+// ConfigSubcommands is the ordered list of config sub-subcommands.
+var ConfigSubcommands = []Command{
+	CmdConfigSetKey,
+}
+
 // Subcommands is the ordered list of all subcommands.
 var Subcommands = []Command{
 	CmdInit,
@@ -1082,6 +1143,7 @@ var Subcommands = []Command{
 	CmdVault,
 	CmdZed,
 	CmdMcp,
+	CmdConfig,
 	CmdTemplates,
 	CmdVersion,
 }
