@@ -4,6 +4,7 @@
 package mcp
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -18,7 +19,6 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/narrative"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
 	"github.com/suykerbuyk/vibe-vault/internal/transcript"
-	"github.com/suykerbuyk/vibe-vault/internal/wrapmetrics"
 )
 
 // applyWriteRecord records the outcome of a single dispatch step.
@@ -30,12 +30,12 @@ type applyWriteRecord struct {
 
 // driftSummary summarises the total synth-vs-apply drift across all fields.
 type driftSummary struct {
-	FieldsTotal    int  `json:"fields_total"`
-	DriftedFields  int  `json:"drifted_fields"`
+	FieldsTotal     int `json:"fields_total"`
+	DriftedFields   int `json:"drifted_fields"`
 	TotalDriftBytes int `json:"total_drift_bytes"`
 }
 
-// applyResult is the JSON shape returned by vv_apply_wrap_bundle.
+// applyResult is the JSON shape returned by the wrap-apply tool.
 type applyResult struct {
 	AppliedWrites []applyWriteRecord `json:"applied_writes"`
 	DriftSummary  driftSummary       `json:"drift_summary"`
@@ -43,36 +43,56 @@ type applyResult struct {
 	ErrorAtStep   string             `json:"error_at_step,omitempty"`
 }
 
-// NewApplyWrapBundleTool creates the vv_apply_wrap_bundle tool.
+// expectedMutationCount computes the expected number of vault mutations the
+// bundle should perform, derived purely from the skeleton's edit-plan slugs
+// + 1 (iter) + 1 (commit_msg) + 1 (capture). Per Decision 8 of the wrap-
+// model-tiering plan, this is the formula used to detect missing-prose or
+// mis-mapped bodies before any vault write happens.
+func expectedMutationCount(sk WrapSkeleton) int {
+	return 1 + // iter
+		len(sk.ResumeThreadBlocks) + // thread_insert × N
+		len(sk.ResumeThreadsReplace) + // thread_replace × R (H2-v3)
+		len(sk.ResumeThreadsToClose) + // thread_remove × M
+		len(sk.CarriedChangesAdd) + // carried_add × P
+		len(sk.CarriedChangesRemove) + // carried_remove × Q
+		1 + // commit_msg
+		1 // capture
+}
+
+// actualMutationCount counts the populated edit fields in the bundle. A
+// thread or carried entry counts even if its body is empty — the body
+// emptiness is a separate concern caught downstream.
+func actualMutationCount(b WrapBundle) int {
+	return 1 +
+		len(b.ResumeThreadBlocks) +
+		len(b.ResumeThreadsReplace) +
+		len(b.ResumeThreadsToClose) +
+		len(b.CarriedChanges.Add) +
+		len(b.CarriedChanges.Remove) +
+		1 +
+		1
+}
+
+// NewApplyWrapBundleByHandleTool creates the vv_apply_wrap_bundle_by_handle tool.
 //
-// Receives the bundle produced by vv_synthesize_wrap (possibly AI-edited)
-// and dispatches all writes atomically in order:
-//  1. vv_append_iteration (iteration_block)
-//  2. vv_thread_insert for each resume_thread_blocks entry
-//  3. vv_thread_remove for each resume_threads_to_close entry
-//  4. vv_carried_add for each carried_changes.add entry
-//  5. vv_carried_remove for each carried_changes.remove entry
-//  6. vv_set_commit_msg (commit_msg)
-//  7. vv_capture_session (capture_session)
-//
-// For each field, apply-time SHA-256 is computed and both synth-time and
-// apply-time fingerprints are logged to ~/.cache/vibe-vault/wrap-metrics.jsonl.
-// Drift (apply != synth) is logged but does NOT abort the operation.
-//
-// On partial failure, returns applied_writes listing what succeeded plus an
-// error_at_step field. Completed writes are not rolled back.
-func NewApplyWrapBundleTool(cfg config.Config) Tool {
+// Loads a skeleton from the host-local cache via the handle, sha256-verifies
+// it against the handle, reconstructs the full bundle via FillBundle, and
+// dispatches the writes via ApplyBundle.
+func NewApplyWrapBundleByHandleTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
-			Name: "vv_apply_wrap_bundle",
-			Description: "Dispatch all writes from a vv_synthesize_wrap bundle atomically: " +
-				"appends the iteration block, inserts/removes threads, adds/removes " +
-				"carried-forward bullets, writes commit.msg, and calls capture_session. " +
-				"Computes apply-time SHA-256 for each field and logs both synth and apply " +
-				"fingerprints to ~/.cache/vibe-vault/wrap-metrics.jsonl. " +
-				"Drift between synth and apply is observable post-hoc (not blocked). " +
-				"On partial failure, returns applied_writes + error_at_step; completed " +
-				"writes are not rolled back.",
+			Name: "vv_apply_wrap_bundle_by_handle",
+			Description: "Dispatch all writes for a wrap iteration, identified by a " +
+				"skeleton handle plus executor-supplied prose outputs. The skeleton " +
+				"is loaded from host-local cache and sha256-verified against the " +
+				"handle; the bundle is reconstructed in-memory via FillBundle. Apply " +
+				"order: iter -> thread_insert × N -> thread_replace × R -> thread_remove " +
+				"× M -> carried_add × P -> carried_remove × Q -> set_commit_msg -> " +
+				"capture_session. Each field's apply-time SHA-256 is logged to " +
+				"~/.cache/vibe-vault/wrap-metrics.jsonl alongside the synth-time SHA. " +
+				"On partial failure the apply is fail-stop: applied_writes lists what " +
+				"succeeded, error_at_step names the failing step, completed writes are " +
+				"NOT rolled back.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -84,223 +104,82 @@ func NewApplyWrapBundleTool(cfg config.Config) Tool {
 						"type": "string",
 						"description": "Absolute path to the project root (needed for vv_set_commit_msg). If omitted, derived via meta.ProjectRoot()."
 					},
-					"bundle": {
+					"skeleton_handle": {
 						"type": "object",
-						"description": "The bundle object returned by vv_synthesize_wrap (possibly AI-edited)."
+						"description": "{iter, skeleton_path, skeleton_sha256} returned by vv_prepare_wrap_skeleton.",
+						"properties": {
+							"iter":            {"type": "integer"},
+							"skeleton_path":   {"type": "string"},
+							"skeleton_sha256": {"type": "string"}
+						},
+						"required": ["iter", "skeleton_path"]
+					},
+					"outputs": {
+						"type": "object",
+						"description": "Executor-supplied prose: {iteration_narrative, iteration_title, prose_body, commit_subject, date, thread_bodies, carried_bodies, capture_summary, capture_tag, capture_decisions, capture_files_changed, capture_open_threads}.",
+						"properties": {
+							"iteration_narrative":   {"type": "string"},
+							"iteration_title":       {"type": "string"},
+							"prose_body":            {"type": "string"},
+							"commit_subject":        {"type": "string"},
+							"date":                  {"type": "string"},
+							"thread_bodies":         {"type": "object"},
+							"carried_bodies":        {"type": "object"},
+							"capture_summary":       {"type": "string"},
+							"capture_tag":           {"type": "string"},
+							"capture_decisions":     {"type": "array", "items": {"type": "string"}},
+							"capture_files_changed": {"type": "array", "items": {"type": "string"}},
+							"capture_open_threads":  {"type": "array", "items": {"type": "string"}}
+						}
 					}
 				},
-				"required": ["bundle"]
+				"required": ["skeleton_handle", "outputs"]
 			}`),
 		},
 		Handler: func(params json.RawMessage) (string, error) {
 			var args struct {
-				Project     string          `json:"project"`
-				ProjectPath string          `json:"project_path"`
-				Bundle      json.RawMessage `json:"bundle"`
+				Project        string         `json:"project"`
+				ProjectPath    string         `json:"project_path"`
+				SkeletonHandle SkeletonHandle `json:"skeleton_handle"`
+				Outputs        proseInputArgs `json:"outputs"`
 			}
 			if len(params) > 0 {
 				if err := json.Unmarshal(params, &args); err != nil {
 					return "", fmt.Errorf("invalid arguments: %w", err)
 				}
 			}
-			if len(args.Bundle) == 0 {
-				return "", fmt.Errorf("bundle is required")
-			}
 
-			var bundle WrapBundle
-			if err := json.Unmarshal(args.Bundle, &bundle); err != nil {
-				return "", fmt.Errorf("parse bundle: %w", err)
+			skeleton, err := loadSkeletonByHandle(args.SkeletonHandle)
+			if err != nil {
+				return "", err
+			}
+			if strings.Contains(args.Outputs.CommitSubject, "\n") {
+				return "", fmt.Errorf("outputs.commit_subject must be a single line (no newlines)")
+			}
+			bundle := FillBundle(skeleton, args.Outputs.toProseFields())
+
+			// Decision 8: validate expected vs actual mutation count BEFORE any
+			// vault write. Phase 3b's QC tool will surface this earlier with
+			// structured trigger info; here a raw error is sufficient.
+			expected := expectedMutationCount(skeleton)
+			actual := actualMutationCount(bundle)
+			if expected != actual {
+				return "", fmt.Errorf("mutation count mismatch: skeleton expects %d mutations, bundle has %d (no vault writes performed)", expected, actual)
 			}
 
 			project, err := resolveProject(args.Project)
 			if err != nil {
 				return "", err
 			}
-
-			// Resolve project root for commit.msg write.
 			projectRoot, projectRootErr := resolveProjectRoot(args.ProjectPath, cfg.VaultPath)
-
-			// Collect provenance for metrics.
-			host, user, cwd := provenanceForMetrics()
-			iteration := bundle.Iteration
-
-			var (
-				writes      []applyWriteRecord
-				metricLines []wrapmetrics.Line
-				ds          driftSummary
-				errorAtStep string
-			)
-
-			// recordMetricRaw records a metric line given the apply-side SHA and
-			// byte length directly (used when the apply SHA can't be derived from a
-			// simple string — e.g. capture_session which is a struct).
-			recordMetricRaw := func(field, synthSHA, applySHA string, applyBytes int) {
-				driftB := 0
-				synthBytes := applyBytes
-				if applySHA != synthSHA {
-					ds.DriftedFields++
-				}
-				ds.FieldsTotal++
-				ds.TotalDriftBytes += driftB
-
-				metricLines = append(metricLines, wrapmetrics.Line{
-					Timestamp:   time.Now().UTC().Format(time.RFC3339),
-					Field:       field,
-					SynthSHA256: synthSHA,
-					ApplySHA256: applySHA,
-					SynthBytes:  synthBytes,
-					ApplyBytes:  applyBytes,
-					DriftBytes:  driftB,
-				})
+			rootArg := projectRoot
+			if projectRootErr != nil {
+				rootArg = ""
 			}
 
-			// Helper: record a metric line for a string-content field.
-			recordMetric := func(field, synthSHA, content string) {
-				applySHA := fingerprintString(content)
-				recordMetricRaw(field, synthSHA, applySHA, len(content))
-			}
-
-			// --- Step 1: append iteration_block ---
-			{
-				content := bundle.IterationBlock.Content
-				recordMetric("iteration_block", bundle.IterationBlock.SynthSHA256, content)
-
-				err := applyAppendIteration(cfg, project, bundle.Iteration, content)
-				if err != nil {
-					writes = append(writes, applyWriteRecord{Step: "append_iteration", Status: "error", Detail: err.Error()})
-					errorAtStep = "append_iteration"
-					goto done
-				}
-				writes = append(writes, applyWriteRecord{Step: "append_iteration", Status: "ok"})
-			}
-
-			// --- Step 2: thread_insert for each block ---
-			for i, tb := range bundle.ResumeThreadBlocks {
-				content := tb.Body
-				recordMetric(fmt.Sprintf("resume_thread_blocks[%d]", i), tb.SynthSHA256, content)
-
-				err := applyThreadInsert(cfg, project, tb)
-				if err != nil {
-					writes = append(writes, applyWriteRecord{
-						Step:   fmt.Sprintf("thread_insert[%d]:%s", i, tb.Slug),
-						Status: "error",
-						Detail: err.Error(),
-					})
-					errorAtStep = fmt.Sprintf("thread_insert[%d]:%s", i, tb.Slug)
-					goto done
-				}
-				writes = append(writes, applyWriteRecord{Step: fmt.Sprintf("thread_insert[%d]:%s", i, tb.Slug), Status: "ok"})
-			}
-
-			// --- Step 3: thread_remove for each close ---
-			for i, tc := range bundle.ResumeThreadsToClose {
-				recordMetric(fmt.Sprintf("resume_threads_to_close[%d]", i), tc.SynthSHA256, tc.Slug)
-
-				err := applyThreadRemove(cfg, project, tc.Slug)
-				if err != nil {
-					writes = append(writes, applyWriteRecord{
-						Step:   fmt.Sprintf("thread_remove[%d]:%s", i, tc.Slug),
-						Status: "error",
-						Detail: err.Error(),
-					})
-					errorAtStep = fmt.Sprintf("thread_remove[%d]:%s", i, tc.Slug)
-					goto done
-				}
-				writes = append(writes, applyWriteRecord{Step: fmt.Sprintf("thread_remove[%d]:%s", i, tc.Slug), Status: "ok"})
-			}
-
-			// --- Step 4: carried_add ---
-			for i, ca := range bundle.CarriedChanges.Add {
-				content := ca.Slug + "\x00" + ca.Title + "\x00" + ca.Body
-				recordMetric(fmt.Sprintf("carried_changes.add[%d]", i), ca.SynthSHA256, content)
-
-				err := applyCarriedAdd(cfg, project, ca.Slug, ca.Title, ca.Body)
-				if err != nil {
-					writes = append(writes, applyWriteRecord{
-						Step:   fmt.Sprintf("carried_add[%d]:%s", i, ca.Slug),
-						Status: "error",
-						Detail: err.Error(),
-					})
-					errorAtStep = fmt.Sprintf("carried_add[%d]:%s", i, ca.Slug)
-					goto done
-				}
-				writes = append(writes, applyWriteRecord{Step: fmt.Sprintf("carried_add[%d]:%s", i, ca.Slug), Status: "ok"})
-			}
-
-			// --- Step 5: carried_remove ---
-			for i, cr := range bundle.CarriedChanges.Remove {
-				recordMetric(fmt.Sprintf("carried_changes.remove[%d]", i), cr.SynthSHA256, cr.Slug)
-
-				err := applyCarriedRemove(cfg, project, cr.Slug)
-				if err != nil {
-					writes = append(writes, applyWriteRecord{
-						Step:   fmt.Sprintf("carried_remove[%d]:%s", i, cr.Slug),
-						Status: "error",
-						Detail: err.Error(),
-					})
-					errorAtStep = fmt.Sprintf("carried_remove[%d]:%s", i, cr.Slug)
-					goto done
-				}
-				writes = append(writes, applyWriteRecord{Step: fmt.Sprintf("carried_remove[%d]:%s", i, cr.Slug), Status: "ok"})
-			}
-
-			// --- Step 6: set_commit_msg ---
-			{
-				content := bundle.CommitMsg.Content
-				recordMetric("commit_msg", bundle.CommitMsg.SynthSHA256, content)
-
-				if projectRootErr != nil {
-					writes = append(writes, applyWriteRecord{
-						Step:   "set_commit_msg",
-						Status: "error",
-						Detail: fmt.Sprintf("project root not resolved: %v", projectRootErr),
-					})
-					errorAtStep = "set_commit_msg"
-					goto done
-				}
-
-				err := applySetCommitMsg(cfg, project, projectRoot, content)
-				if err != nil {
-					writes = append(writes, applyWriteRecord{Step: "set_commit_msg", Status: "error", Detail: err.Error()})
-					errorAtStep = "set_commit_msg"
-					goto done
-				}
-				writes = append(writes, applyWriteRecord{Step: "set_commit_msg", Status: "ok"})
-			}
-
-			// --- Step 7: capture_session ---
-			{
-				cc := bundle.CaptureSession.Content
-				// Fingerprint the struct the same way synthesize did: fingerprintJSON.
-				applyCaptureSHA, fpErr := fingerprintJSON(cc)
-				if fpErr != nil {
-					applyCaptureSHA = ""
-				}
-				captureBytes := 0
-				if captureJSON, jsonErr := json.Marshal(cc); jsonErr == nil {
-					captureBytes = len(captureJSON)
-				}
-				recordMetricRaw("capture_session", bundle.CaptureSession.SynthSHA256, applyCaptureSHA, captureBytes)
-
-				err := applyCaptureSesssion(cfg, project, cc)
-				if err != nil {
-					writes = append(writes, applyWriteRecord{Step: "capture_session", Status: "error", Detail: err.Error()})
-					errorAtStep = "capture_session"
-					goto done
-				}
-				writes = append(writes, applyWriteRecord{Step: "capture_session", Status: "ok"})
-			}
-
-		done:
-			// Write metric lines — non-fatal on error.
-			cacheDir, _ := wrapmetrics.CacheDir()
-			_ = wrapmetrics.AppendBundleLines(host, user, cwd, project, iteration, metricLines)
-
-			result := applyResult{
-				AppliedWrites: writes,
-				DriftSummary:  ds,
-				MetricFile:    filepath.Join(cacheDir, wrapmetrics.ActiveFile),
-				ErrorAtStep:   errorAtStep,
+			result, applyErr := ApplyBundle(context.TODO(), cfg, project, rootArg, bundle)
+			if applyErr != nil {
+				return "", applyErr
 			}
 			out, marshalErr := json.MarshalIndent(result, "", "  ")
 			if marshalErr != nil {
@@ -348,13 +227,7 @@ func applyAppendIteration(cfg config.Config, project string, iterNum int, blockC
 		}
 	}
 
-	// The blockContent from synthesize already has the formatted block
-	// (heading + narrative + trailer). We need to re-derive if iterNum changed.
-	// However, the apply tool receives the verbatim block from the bundle —
-	// if iterNum was 0 at synth time the heading will say "Iteration 0".
-	// Detect that and re-build with the resolved number.
 	if strings.Contains(blockContent, "### Iteration 0 —") {
-		// Re-build: extract title, narrative, date from the block.
 		rebuilt, ok := rebuildIterationBlock(blockContent, iterNum, cfg.VaultPath)
 		if ok {
 			blockContent = rebuilt
@@ -374,16 +247,13 @@ func applyAppendIteration(cfg config.Config, project string, iterNum int, blockC
 // Returns (rebuilt, true) on success, ("", false) on parse failure.
 func rebuildIterationBlock(block string, iterNum int, vaultPath string) (string, bool) {
 	lines := strings.Split(block, "\n")
-	// Find the heading line: "### Iteration N — title (date)"
 	for i, line := range lines {
 		if strings.HasPrefix(line, "### Iteration ") {
-			// Extract title+date suffix after "### Iteration N — ".
 			dashIdx := strings.Index(line, " — ")
 			if dashIdx < 0 {
 				return "", false
 			}
-			suffix := line[dashIdx+3:] // "title (date)"
-			// Extract date from "(date)" at end.
+			suffix := line[dashIdx+3:]
 			lparen := strings.LastIndex(suffix, "(")
 			rparen := strings.LastIndex(suffix, ")")
 			if lparen < 0 || rparen < 0 || rparen < lparen {
@@ -392,9 +262,7 @@ func rebuildIterationBlock(block string, iterNum int, vaultPath string) (string,
 			date := suffix[lparen+1 : rparen]
 			title := strings.TrimSpace(suffix[:lparen])
 
-			// Narrative is everything between the heading line and the provenance trailer.
 			narrative := strings.Join(lines[i+2:], "\n")
-			// Strip provenance trailer (<!-- recorded: ... -->) if present.
 			if idx := strings.Index(narrative, "\n\n<!-- recorded:"); idx >= 0 {
 				narrative = narrative[:idx]
 			}
@@ -532,11 +400,7 @@ func applyCaptureSesssion(cfg config.Config, _ string, cc BundleCaptureContent) 
 		return fmt.Errorf("capture session: %w", err)
 	}
 	if result.Skipped {
-		// Not an error — just log-level info.
 		_ = result.Reason
 	}
 	return nil
 }
-
-// detectBranch is already defined in tools.go — used here without re-declaration.
-// (it's in the same package, so no import needed.)

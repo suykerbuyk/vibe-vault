@@ -1,144 +1,138 @@
-Update resume.md and its dependent documents to reflect the current state
-of the project. These files serve as the single source of truth for
-restoring AI thread context and resuming work on this codebase.
+# /wrap
 
-resume.md is a THIN GATEWAY — not a diary. Keep it focused on current state,
-open threads, and pointers. Stable reference material belongs in doc/ under
-source control. Completed work details belong in iterations.md only.
+Wrap the current iteration into the vault using the wrap-executor subagent.
 
-## Canonical wrap flow (Phase 5+)
+This procedure dispatches a cheaper-tier model (sonnet by default) at the
+executor seat so the orchestrator session does not pay full Opus cost for
+every wrap. The orchestrator owns the natural-language ladder: it walks
+`[wrap].escalation_ladder` and stops at the first tier whose outputs pass
+the quality gate.
 
-The canonical wrap flow is **synthesize → AI-inspects/edits → apply-bundle**.
-One synthesize call, one apply call, all writes dispatched atomically:
+## Pre-flight
 
-1. AI composes the iteration narrative and structural inputs.
-2. AI calls `vv_synthesize_wrap(iteration_narrative, title, subject, ...)` →
-   receives a JSON bundle with all derived sub-artifacts, each with a
-   synthesize-time SHA-256 fingerprint.
-3. AI inspects and optionally edits the bundle in conversation context
-   ("edit, don't regenerate").
-4. AI calls `vv_apply_wrap_bundle(bundle)` — one call dispatches all writes:
-   appends the iteration block, inserts/removes resume threads, adds/removes
-   carried-forward bullets, writes commit.msg, and records a capture_session.
+1. Run `vv mcp check --tools` and assert these tools are present (fail
+   loudly if any are missing):
+   - `vv_prepare_wrap_skeleton`
+   - `vv_synthesize_wrap_bundle`
+   - `vv_apply_wrap_bundle_by_handle`
+   - `vv_wrap_quality_check`
+   - `vv_wrap_dispatch`
 
-`vv_apply_wrap_bundle` returns `{applied_writes, drift_summary, metric_file}`.
-Drift (apply_sha256 != synth_sha256 for any field) is logged to
-`~/.cache/vibe-vault/wrap-metrics.jsonl` but does NOT block apply.
+   Note: `vv_get_agent_definition` is v2-portability scaffolding and is
+   NOT required for v1 dispatch.
+2. Verify pre-commit clean: `make pre-commit`.
 
-**capture_session is always present** in the bundle — it is never optional.
+## Procedure
 
-## Surgical APIs (available for hand-edits between wraps)
+### Stage 0 — Skeleton preparation
 
-The per-tool APIs below remain available for one-off mutations between wraps
-or when the AI needs to surgically update a single field. They are NOT called
-from the canonical wrap flow above (vv_apply_wrap_bundle handles all of this
-internally).
+Compute orchestrator facts (NOT prose). The skeleton carries structural
+inputs only; the executor produces the prose:
 
-### Current State and other full-section rewrites
+- `iter` (next iteration number, int)
+- `project` (project name)
+- `files_changed` (from `git diff --name-only`)
+- `test_count_delta` (compare test counts vs prior wrap, single int sum)
+- `decisions` (key technical decisions)
+- `threads_to_open` (slugs + anchor positions; bodies filled by executor)
+- `threads_to_replace` (slugs; bodies filled by executor)
+- `threads_to_close` (slugs)
+- `carried_to_add` (slugs + titles; bodies filled by executor)
+- `carried_to_remove` (slugs)
+- `task_retirements`
 
-- Update resume.md using `vv_update_resume` for **Current State** (and
-  any other non-Open Threads sections that need a full rewrite): Current
-  State should hold only evergreen invariants (test count, iteration count,
-  schema version, module path, MCP tool count, embedded template count).
-  Do NOT add shipped-feature descriptions, narrative paragraphs, file
-  inventories, architecture diagrams, design decisions, or module tables
-  to resume.md. Shipped-capability descriptions belong in
-  `agentctx/features.md`; stable reference material belongs in `doc/` files
+Call `vv_prepare_wrap_skeleton(...)` with these facts. Capture the returned
+`SkeletonHandle{iter, skeleton_path, skeleton_sha256}` — every Stage 1/2
+tool requires this handle for compare-and-set safety.
 
-### Open Threads surgical edits
+### Stage 1 — Dispatch loop
 
-- **Open a new thread** — `vv_thread_insert(position, slug, body)` where
-  `position` is `{"mode": "top"}` / `{"mode": "bottom"}` /
-  `{"mode": "after", "anchor_slug": "..."}` / `{"mode": "before", "anchor_slug": "..."}`.
-  The `slug` is the identifier (text up to the first ` — ` or full heading
-  if no em-dash separator). The `body` is everything after the heading line.
-- **Update an existing thread** — `vv_thread_replace(slug, body)`. The tool
-  preserves the original heading verbatim; supply only the new body content.
-- **Close a resolved thread** — `vv_thread_remove(slug)`.
-- All three tools reject `slug = "Carried forward"` — that section is
-  managed by `vv_carried_*` tools (see below).
-- Zero slug matches → hard error listing available slugs. One match →
-  silent proceed. Multiple matches → first occurrence updated with a
-  `candidates_warning` in the result.
-- Only fall back to `vv_update_resume(section="Open Threads", ...)` if
-  multiple threads need restructuring in a single shot (e.g., adding 3+
-  new threads at once) or if the section needs a clean-slate rewrite.
+Read `[wrap].default_model` from `~/.config/vibe-vault/config.toml`. Walk
+`[wrap].escalation_ladder` starting at `default_model`:
 
-### Carried forward surgical edits
+```
+prior_attempts = []
+for tier in escalation_ladder:
+    result = vv_wrap_dispatch(
+        skeleton_handle = handle,
+        tier            = tier,
+        agent_name      = "wrap-executor",
+        prior_attempts  = prior_attempts,
+    )
+    if result.escalate_reason:
+        prior_attempts.append({tier, escalate_reason: result.escalate_reason})
+        continue
+    qc = vv_wrap_quality_check(skeleton_handle = handle, outputs = result.outputs)
+    if qc.passed:
+        outputs = result.outputs
+        break
+    prior_attempts.append({tier, escalate_reason: "qc_failed: " + qc.failures})
 
-- **Add a new item** — `vv_carried_add(slug, title, body?)`.
-  `slug` is the unique identifier (e.g. `dry-run-coverage-gap`);
-  `title` is the short description; `body` is optional detail prose.
-  Errors if the slug already exists (case-insensitive).
-- **Remove a resolved item** — `vv_carried_remove(slug)`.
-  Case-insensitive slug match. Hard error if not found, listing all
-  available slugs.
-- **Promote to a task** — `vv_carried_promote_to_task(slug, new_task_slug)`.
-  Creates `agentctx/tasks/{new_task_slug}.md` with the bullet body
-  verbatim under a minimal frontmatter header, then removes the bullet.
-  Use when a carried item has grown large enough to warrant its own
-  task file. Hard error if slug not found or target task already exists.
-- Canonical bullet form is `- **slug** — title body`. All tool-emitted
-  bullets use this form; the parser accepts liberal variants on read
-  (`- **slug:**`, `- **slug (note)**`, plain `- text`). Emit canonical
-  form when writing new items manually.
+if outputs is None:
+    report "all tiers exhausted across the ladder"; exit
+```
 
-### Iteration and commit.msg surgical tools
+The quality gate runs BEFORE the apply call so a failed tier's outputs
+never reach the vault.
 
-- `vv_append_iteration(title, narrative, iteration?, date?)` — append a
-  single iteration block to iterations.md directly (bypasses synthesize).
-- `vv_render_commit_msg(project_path, iteration, subject, prose_body,
-  unit_tests, integration_subtests, lint_findings)` — assemble the full
-  commit message string for inspection. Returns `{rendered, bytes}`.
-- `vv_set_commit_msg(project_path, content)` — write commit.msg atomically
-  to both vault and project root. On partial failure returns an actionable
-  diagnostic with a manual `cp` command.
+### Stage 2 — Apply
 
-## Remaining wrap steps (all flows)
+Call `vv_apply_wrap_bundle_by_handle(skeleton_handle, outputs)`. Then run
+the git operations:
 
-After `vv_apply_wrap_bundle` (or the surgical equivalents) complete:
+- `git add` the project files listed in `skeleton.files_changed` (use
+  explicit paths; never `git add -A` or `git add .`).
+- `git -C <vault> add -A && git -C <vault> commit -m "<short summary>" &&
+  git -C <vault> push <remote> main` for each remote returned by
+  `git -C <vault> remote`.
 
-- Read the current resume.md using `vv_get_resume` and compare against the
-  actual codebase state (files, tests, architecture).
-- When a new capability ships, add (or update) an entry in
-  `agentctx/features.md` under the appropriate section heading. Keep it
-  brief: 1–2 sentences on what it does, where it lives
-  (package/file/flag), and the iteration that introduced it.
-- If stable project documentation changed (architecture, design decisions,
-  test structure), update the relevant doc/ file.
-- Add a corresponding summary row to the Project History table in resume.md,
-  keeping only the 5 most recent rows (drop the oldest row when adding a new
-  one if the table already has 5). Older iterations remain retrievable via
-  `vv_get_iterations` or directly from `iterations.md`.
-- Move any completed plans from resume.md to the Completed Plans section
-  in iterations.md, replacing them with a single-line pointer.
-- Retire completed tasks: use `vv_list_tasks` to check each active task
-  against the session's work and resume.md history — if a task has been
-  implemented and committed, use `vv_manage_task` with `action: retire`
-  to move it to done/, and update the resume.md file inventory accordingly.
-- Ensure the commit.msg (written by vv_apply_wrap_bundle or vv_set_commit_msg)
-  is complete and standalone in documenting all the code changes, features
-  added, and bugs or warnings resolved. Don't be terse, be verbose.
-- Stage all modified and newly added project files (use git add with explicit
-  file paths — never use git add -A or git add .). Only stage files that are
-  inside the git repo. Do NOT stage commit.msg — neither copy is repo-tracked.
+## Flags
+
+- `/wrap` — uses `[wrap].default_model` as the starting tier.
+- `/wrap --model sonnet|opus|haiku|<custom>` — pin the starting tier.
+  Operator-defined tiers in `[wrap.tiers]` are accepted; v1 supports only
+  `anthropic:` providers.
+- `/wrap --inline` — alias for `--model opus`, run inline (no dispatch).
+  Use this when you specifically need the orchestrator session to handle
+  the wrap (e.g. for debugging the dispatch path itself).
+- `/wrap --no-cache` — re-prepare the skeleton ONCE at the top of the
+  procedure, then cache the locks for the rest of the wrap.
+
+## Schema reminders (avoid harness friction)
+
+Tool input schemas use Go type semantics, not free-form prose:
+
+- `vv_prepare_wrap_skeleton`: `iter` is int, `test_count_delta` is int
+  (a single sum, NOT an object with per-package counts).
+- `vv_apply_wrap_bundle_by_handle`: `outputs` is an object. The harness
+  XML-param protocol may serialize an object as a string; if you see
+  `cannot unmarshal string into Go value of type`, fall back to the
+  surgical apply path: `vv_append_iteration` + `vv_thread_insert` +
+  `vv_thread_replace` + `vv_thread_remove` + `vv_carried_add` +
+  `vv_carried_remove` + `vv_set_commit_msg` + `vv_capture_session`.
+- `vv_wrap_dispatch`: `tier` is a string read against `[wrap.tiers]`. If
+  the operator hasn't defined the tier you pass, the dispatch errors
+  with a pointer at the config section.
+
+## Why this layout
+
+Phase 4 of wrap-model-tiering (iter 162) routes wrap-executor work
+through `vv_wrap_dispatch` to reduce orchestrator-side token output.
+Iter 161 baseline was ~17 minutes / 60K tokens for an inline-Opus wrap
+(bucket (c), full Phases 1-4). The dispatch path lets a sonnet executor
+handle ~80% of wraps and only escalates to opus when sonnet's quality
+gate fails. Per-dispatch telemetry lands in
+`~/.cache/vibe-vault/wrap-dispatch.jsonl`; aggregate it with
+`vv stats wrap` to track tier durations, escalation rates, and top
+escalation reasons.
+
+The orchestrator owns the ladder rather than the server because the
+ladder is a natural-language judgement (when to escalate, which prior
+attempts to surface in the next prompt) — keeping that logic close to
+the user-facing chat session reads cleaner than a server-side state
+machine.
 
 Do not add "Co-Authored-By" lines to commit messages or source files.
 
-After staging project files, sync vault changes to all remotes:
-
-1. **Discover remotes**: Run `git remote` in the vault directory (read
-   `vault_path` from `~/.config/vibe-vault/config.toml`) to dynamically
-   discover all configured remotes. Do NOT assume any particular remote name
-   (e.g., "origin") — vaults typically use names like `github`, `vault`, etc.
-2. **Commit vault changes**: Run `git -C <vault_path> add -A` then
-   `git -C <vault_path> commit -m "<short summary>"`. If nothing to commit,
-   skip.
-3. **Push to each remote**: For each discovered remote, run
-   `git -C <vault_path> push <remote> main`. If a push fails, show the error
-   and continue to the next remote — do not abort the entire wrap.
-4. If all pushes fail (no remote, network error), warn and proceed — local
-   state is still valid.
-
-Do not ask for confirmation — just do the updates, stage the files, show what
-changed, and note that the user should review before committing.
+Do not ask for confirmation — just do the updates, stage the files, show
+what changed, and note that the user should review before committing.

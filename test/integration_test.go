@@ -2,6 +2,7 @@ package test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -20,9 +21,12 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/llm"
 	"github.com/suykerbuyk/vibe-vault/internal/mcp"
 	"github.com/suykerbuyk/vibe-vault/internal/testutil/gitx"
 	"github.com/suykerbuyk/vibe-vault/internal/vaultfs"
+	"github.com/suykerbuyk/vibe-vault/internal/wrapbundlecache"
+	"github.com/suykerbuyk/vibe-vault/internal/wrapdispatch"
 	"github.com/suykerbuyk/vibe-vault/templates"
 )
 
@@ -1437,7 +1441,7 @@ func TestIntegration(t *testing.T) {
 			t.Error("initialize: missing serverInfo")
 		}
 
-		// Response 1: tools/list — exact-set check for all 39 registered tools.
+		// Response 1: tools/list — exact-set check for all 43 registered tools.
 		// Update this list when adding or removing tools; the exact-set check
 		// prevents silent breakage from numeric drift (O2 from iter-150).
 		expectedTools := []string{
@@ -1470,8 +1474,10 @@ func TestIntegration(t *testing.T) {
 			"vv_carried_remove",
 			"vv_carried_promote_to_task",
 			"vv_render_commit_msg",
-			"vv_synthesize_wrap",
-			"vv_apply_wrap_bundle",
+			"vv_prepare_wrap_skeleton",
+			"vv_synthesize_wrap_bundle",
+			"vv_apply_wrap_bundle_by_handle",
+			"vv_wrap_quality_check",
 			"vv_vault_read",
 			"vv_vault_list",
 			"vv_vault_exists",
@@ -1480,6 +1486,8 @@ func TestIntegration(t *testing.T) {
 			"vv_vault_edit",
 			"vv_vault_delete",
 			"vv_vault_move",
+			"vv_get_agent_definition",
+			"vv_wrap_dispatch",
 		}
 		toolsResult := responses[1]["result"].(map[string]any)
 		tools := toolsResult["tools"].([]any)
@@ -3626,5 +3634,425 @@ func TestIntegration_AutoMemoryWrite_VisibleViaHostSymlink(t *testing.T) {
 	}
 	if string(gotHost) != body {
 		t.Errorf("host content = %q, want %q", gotHost, body)
+	}
+}
+
+// withSkeletonCacheDir routes wrapbundlecache to a t.TempDir() for the
+// duration of the test, and (only if the caller hasn't already pinned it)
+// sets VIBE_VAULT_HOME to a sibling tempdir so any wrapmetrics.CacheDir()
+// reads/writes triggered downstream by handler tests (notably
+// vv_wrap_dispatch's DispatchLine emission) land in test scratch storage
+// rather than polluting ~/.cache/vibe-vault/wrap-dispatch.jsonl.
+// Mirrors the helper in package mcp's test files.
+func withSkeletonCacheDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	wrapbundlecache.SetCacheDirForTesting(dir)
+	t.Cleanup(func() { wrapbundlecache.SetCacheDirForTesting("") })
+	if os.Getenv("VIBE_VAULT_HOME") == "" {
+		t.Setenv("VIBE_VAULT_HOME", t.TempDir())
+	}
+	return dir
+}
+
+// TestIntegration_PrepareWrapSkeleton_PersistsToCache calls
+// vv_prepare_wrap_skeleton via the in-process tool surface and asserts the
+// skeleton file is written at the expected path with the returned sha256.
+func TestIntegration_PrepareWrapSkeleton_PersistsToCache(t *testing.T) {
+	dir := withSkeletonCacheDir(t)
+
+	tool := mcp.NewPrepareWrapSkeletonTool()
+	out, err := callVaultTool(t, tool, map[string]any{
+		"iter":          42,
+		"project":       "vibe-vault",
+		"files_changed": []string{"a.go"},
+	})
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	var resp struct {
+		Iter           int    `json:"iter"`
+		SkeletonPath   string `json:"skeleton_path"`
+		SkeletonSHA256 string `json:"skeleton_sha256"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &resp); jerr != nil {
+		t.Fatalf("unmarshal: %v\n%s", jerr, out)
+	}
+	wantPath := filepath.Join(dir, "iter-42-skeleton.json")
+	if resp.SkeletonPath != wantPath {
+		t.Errorf("path=%q, want %q", resp.SkeletonPath, wantPath)
+	}
+	data, err := os.ReadFile(resp.SkeletonPath)
+	if err != nil {
+		t.Fatalf("read skeleton: %v", err)
+	}
+	sum := sha256.Sum256(data)
+	if resp.SkeletonSHA256 != hex.EncodeToString(sum[:]) {
+		t.Errorf("sha mismatch")
+	}
+}
+
+// TestIntegration_SynthesizeWrapBundle_FillsFromSkeleton chains a prepare +
+// synthesize round-trip and asserts the bundle has both skeleton facts and
+// the supplied prose.
+func TestIntegration_SynthesizeWrapBundle_FillsFromSkeleton(t *testing.T) {
+	withSkeletonCacheDir(t)
+
+	prepare := mcp.NewPrepareWrapSkeletonTool()
+	prepOut, err := callVaultTool(t, prepare, map[string]any{
+		"iter":    77,
+		"project": "vibe-vault",
+		"threads_to_open": []map[string]any{
+			{"slug": "open-1"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	var handle mcp.SkeletonHandle
+	if jerr := json.Unmarshal([]byte(prepOut), &handle); jerr != nil {
+		t.Fatalf("unmarshal handle: %v", jerr)
+	}
+
+	synth := mcp.NewSynthesizeWrapTool(config.Config{})
+	synthOut, err := callVaultTool(t, synth, map[string]any{
+		"skeleton_handle":     handle,
+		"iteration_narrative": "Did stuff.",
+		"iteration_title":     "Phase 3a",
+		"commit_subject":      "feat(mcp): test",
+		"thread_bodies":       map[string]string{"open-1": "thread body"},
+	})
+	if err != nil {
+		t.Fatalf("synthesize: %v", err)
+	}
+	var bundle mcp.WrapBundle
+	if err := json.Unmarshal([]byte(synthOut), &bundle); err != nil {
+		t.Fatalf("unmarshal bundle: %v\n%s", err, synthOut)
+	}
+	if bundle.Iteration != 77 {
+		t.Errorf("Iteration=%d, want 77", bundle.Iteration)
+	}
+	if !strings.Contains(bundle.IterationBlock.Content, "Phase 3a") {
+		t.Errorf("iter block missing title")
+	}
+	if len(bundle.ResumeThreadBlocks) != 1 || bundle.ResumeThreadBlocks[0].Body != "thread body" {
+		t.Errorf("threads not filled: %+v", bundle.ResumeThreadBlocks)
+	}
+}
+
+// TestIntegration_BundleCacheRotation_KeepsMostRecentThree prepares 4
+// skeletons in succession and asserts the oldest one (iter 1) is removed
+// from the cache after the 4th call.
+func TestIntegration_BundleCacheRotation_KeepsMostRecentThree(t *testing.T) {
+	dir := withSkeletonCacheDir(t)
+	tool := mcp.NewPrepareWrapSkeletonTool()
+
+	for _, iter := range []int{1, 2, 3, 4} {
+		_, err := callVaultTool(t, tool, map[string]any{
+			"iter":    iter,
+			"project": "vibe-vault",
+		})
+		if err != nil {
+			t.Fatalf("prepare iter=%d: %v", iter, err)
+		}
+	}
+
+	// iters {2,3,4} must exist; iter 1 must be gone.
+	for _, iter := range []int{2, 3, 4} {
+		path := filepath.Join(dir, fmt.Sprintf("iter-%d-skeleton.json", iter))
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("iter %d should still exist: %v", iter, err)
+		}
+	}
+	gone := filepath.Join(dir, "iter-1-skeleton.json")
+	if _, err := os.Stat(gone); err == nil {
+		t.Errorf("iter 1 should have been rotated out")
+	}
+}
+
+// TestIntegration_WrapQualityCheck_DetectsExpectedFailures_IncludingThreadReplace
+// drives the full prepare → QC round-trip through vv_wrap_quality_check.
+// It seeds a vault with one ### existing-thread anchor, prepares a
+// skeleton with thread_insert (slug already present in vault) +
+// thread_replace (slug NOT present) + carried_add (already present),
+// then calls QC with a generic narrative + WIP commit subject. Expected:
+// passed=false with multi_match_ambiguity (3 of them), semantic_presence,
+// and commit_subject_invalid failures present.
+func TestIntegration_WrapQualityCheck_DetectsExpectedFailures_IncludingThreadReplace(t *testing.T) {
+	withSkeletonCacheDir(t)
+
+	vault := t.TempDir()
+	stateDir := filepath.Join(vault, ".vibe-vault")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "session-index.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+
+	resumeBody := "# Resume\n\n## Open Threads\n\n### existing-thread\n\nExisting body.\n\n### Carried forward\n\n- **stale-item** — stale title\n\n## Project History\n"
+	resumePath := filepath.Join(vault, "Projects", "myproject", "agentctx", "resume.md")
+	if err := os.MkdirAll(filepath.Dir(resumePath), 0o755); err != nil {
+		t.Fatalf("mkdir vault: %v", err)
+	}
+	if err := os.WriteFile(resumePath, []byte(resumeBody), 0o644); err != nil {
+		t.Fatalf("write resume: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.VaultPath = vault
+
+	prepare := mcp.NewPrepareWrapSkeletonTool()
+	prepOut, err := callVaultTool(t, prepare, map[string]any{
+		"iter":    200,
+		"project": "myproject",
+		"threads_to_open": []map[string]any{
+			{"slug": "existing-thread"}, // already exists → ambiguity
+		},
+		"threads_to_replace": []map[string]any{
+			{"slug": "missing-slug"}, // not present → no anchor
+		},
+		"carried_to_add": []map[string]any{
+			{"slug": "stale-item", "title": "duplicate"}, // already present
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	var handle mcp.SkeletonHandle
+	if jerr := json.Unmarshal([]byte(prepOut), &handle); jerr != nil {
+		t.Fatalf("unmarshal handle: %v", jerr)
+	}
+
+	qc := mcp.NewWrapQualityCheckTool(cfg)
+	qcOut, err := callVaultTool(t, qc, map[string]any{
+		"project":         "myproject",
+		"skeleton_handle": handle,
+		"outputs": map[string]any{
+			"iteration_narrative": "We made some changes today. Things look good.",
+			"iteration_title":     "QC integration",
+			"commit_subject":      "WIP",
+			"thread_bodies": map[string]string{
+				"existing-thread": "duplicate insert body",
+				"missing-slug":    "replace body",
+			},
+			"carried_bodies": map[string]string{"stale-item": "dup body"},
+			"capture_summary": "summary",
+		},
+	})
+	if err != nil {
+		t.Fatalf("qc: %v", err)
+	}
+
+	var res struct {
+		Passed   bool `json:"passed"`
+		Failures []struct {
+			TriggerID string `json:"trigger_id"`
+			Detail    string `json:"detail"`
+		} `json:"failures"`
+	}
+	if jerr := json.Unmarshal([]byte(qcOut), &res); jerr != nil {
+		t.Fatalf("unmarshal qc: %v\n%s", jerr, qcOut)
+	}
+	if res.Passed {
+		t.Fatalf("expected passed=false; failures=%+v", res.Failures)
+	}
+
+	gotTriggers := make(map[string]int)
+	for _, f := range res.Failures {
+		gotTriggers[f.TriggerID]++
+	}
+	for _, want := range []string{"multi_match_ambiguity", "semantic_presence_failure", "commit_subject_invalid"} {
+		if gotTriggers[want] == 0 {
+			t.Errorf("expected trigger %q in failures; got %+v", want, res.Failures)
+		}
+	}
+	if gotTriggers["multi_match_ambiguity"] < 3 {
+		t.Errorf("expected at least 3 multi_match_ambiguity failures (insert dup + replace missing + carried dup); got %d in %+v",
+			gotTriggers["multi_match_ambiguity"], res.Failures)
+	}
+
+	// H3-v2 invariant: vault unchanged after QC.
+	resumeAfter, err := os.ReadFile(resumePath)
+	if err != nil {
+		t.Fatalf("read resume after: %v", err)
+	}
+	if string(resumeAfter) != resumeBody {
+		t.Errorf("QC mutated resume.md (H3-v2 invariant violated)")
+	}
+}
+
+// integrationDispatchProvider is a minimal scripted llm.AgenticProvider used
+// by the wrap_dispatch full-pipeline integration test. The closure delegates
+// the entire turn so the test can drive synth + finish in sequence.
+type integrationDispatchProvider struct {
+	respond func(req llm.ToolsRequest) (*llm.ToolsResponse, error)
+}
+
+func (p *integrationDispatchProvider) Name() string { return "integration-mock" }
+func (p *integrationDispatchProvider) ChatCompletion(_ context.Context, _ llm.Request) (*llm.Response, error) {
+	return nil, errors.New("not implemented")
+}
+func (p *integrationDispatchProvider) RunTools(_ context.Context, req llm.ToolsRequest) (*llm.ToolsResponse, error) {
+	return p.respond(req)
+}
+
+// TestIntegration_WrapDispatch_FullPipeline_WithMockProvider walks the four
+// MCP wrap-pipeline tools end-to-end with a scripted provider injected via
+// mcp.SetProviderFactoryForTesting:
+//
+//  1. vv_prepare_wrap_skeleton writes the skeleton to a temp cache.
+//  2. vv_synthesize_wrap_bundle (the Phase 3a path) confirms the cached
+//     skeleton + prose round-trip still works.
+//  3. vv_wrap_dispatch runs the executor loop with the mock provider; the
+//     mock invokes vv_synthesize_wrap_bundle (routed through FillBundle by
+//     the OQ-5 direct helper) and then wrap_executor_finish(status="ok").
+//
+// Asserts: the dispatch envelope returns outputs (no escalate_reason),
+// dispatch_metrics is populated, and the synth tool_result the mock saw
+// during the loop parsed as a real WrapBundle (proving the OQ-5 invariant
+// at the integration level). No real LLM call is made.
+func TestIntegration_WrapDispatch_FullPipeline_WithMockProvider(t *testing.T) {
+	withSkeletonCacheDir(t)
+
+	prevKey, hadPrevKey := os.LookupEnv("ANTHROPIC_API_KEY")
+	_ = os.Setenv("ANTHROPIC_API_KEY", "test-stub-key")
+	t.Cleanup(func() {
+		if hadPrevKey {
+			_ = os.Setenv("ANTHROPIC_API_KEY", prevKey)
+		} else {
+			_ = os.Unsetenv("ANTHROPIC_API_KEY")
+		}
+	})
+
+	// Step 1: prepare a skeleton via the registered MCP tool.
+	prepare := mcp.NewPrepareWrapSkeletonTool()
+	prepOut, err := callVaultTool(t, prepare, map[string]any{
+		"iter":          7,
+		"project":       "phase3c-pipeline",
+		"files_changed": []string{"internal/wrapdispatch/dispatch.go"},
+		"threads_to_open": []map[string]any{
+			{"slug": "demo-thread"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	var handle mcp.SkeletonHandle
+	if jerr := json.Unmarshal([]byte(prepOut), &handle); jerr != nil {
+		t.Fatalf("unmarshal handle: %v", jerr)
+	}
+	if handle.SkeletonSHA256 == "" {
+		t.Fatalf("missing sha256 in prepare response")
+	}
+
+	// Step 2: prove the Phase 3a synth path still works.
+	synthTool := mcp.NewSynthesizeWrapTool(config.Config{})
+	synthOut, err := callVaultTool(t, synthTool, map[string]any{
+		"skeleton_handle":     handle,
+		"iteration_narrative": "Phase 3c full-pipeline check",
+		"iteration_title":     "Phase 3c",
+		"commit_subject":      "feat(mcp): wrap_dispatch pipeline",
+		"thread_bodies":       map[string]string{"demo-thread": "demo body"},
+	})
+	if err != nil {
+		t.Fatalf("synth: %v", err)
+	}
+	var bundle mcp.WrapBundle
+	if jerr := json.Unmarshal([]byte(synthOut), &bundle); jerr != nil {
+		t.Fatalf("unmarshal synth bundle: %v", jerr)
+	}
+	if bundle.Iteration != 7 {
+		t.Errorf("synth bundle iteration=%d, want 7", bundle.Iteration)
+	}
+
+	// Step 3: drive the dispatch with a scripted provider that:
+	//   - first invokes vv_synthesize_wrap_bundle (the OQ-5 routing path)
+	//   - then invokes wrap_executor_finish(status="ok")
+	var sawBundleFromSynth bool
+	mockResp := func(req llm.ToolsRequest) (*llm.ToolsResponse, error) {
+		// Confirm both tools are exposed; bail loudly if not.
+		var sawSynth, sawFinish bool
+		for _, ts := range req.Tools {
+			if ts.Name == "vv_synthesize_wrap_bundle" {
+				sawSynth = true
+			}
+			if ts.Name == "wrap_executor_finish" {
+				sawFinish = true
+			}
+		}
+		if !sawSynth || !sawFinish {
+			t.Errorf("tools not exposed: synth=%v finish=%v", sawSynth, sawFinish)
+		}
+
+		// Synth call routes through FillBundle (OQ-5).
+		synthArgs := json.RawMessage(`{"prose":{"iteration_narrative":"draft","iteration_title":"Phase 3c","thread_bodies":{"demo-thread":"executor body"}}}`)
+		bundleJSON, isErr := req.ToolExecutor("vv_synthesize_wrap_bundle", synthArgs)
+		if isErr {
+			t.Errorf("synth tool returned error: %s", string(bundleJSON))
+		}
+		var b mcp.WrapBundle
+		if jerr := json.Unmarshal(bundleJSON, &b); jerr != nil {
+			t.Errorf("synth tool result not a WrapBundle: %v\n%s", jerr, bundleJSON)
+		}
+		if b.Iteration == 7 {
+			sawBundleFromSynth = true
+		}
+
+		// Finish.
+		finishArgs := json.RawMessage(`{"status":"ok","outputs":{"iteration_narrative":"executor final","iteration_title":"Phase 3c","commit_subject":"feat(mcp): wrap_dispatch pipeline","thread_bodies":{"demo-thread":"executor body"},"capture_summary":"end-to-end OK"}}`)
+		req.ToolExecutor("wrap_executor_finish", finishArgs)
+
+		return &llm.ToolsResponse{
+			StopReason: "stop",
+			Usage:      llm.UsageStats{InputTokens: 64, OutputTokens: 32},
+		}, nil
+	}
+	mcp.SetProviderFactoryForTesting(func(_, _ string) (llm.AgenticProvider, error) {
+		return &integrationDispatchProvider{respond: mockResp}, nil
+	})
+	t.Cleanup(func() { mcp.SetProviderFactoryForTesting(nil) })
+
+	dispatchTool := mcp.NewWrapDispatchTool(config.Config{Wrap: config.WrapConfig{
+		Tiers: map[string]string{
+			"haiku":  "anthropic:claude-haiku-4-5",
+			"sonnet": "anthropic:claude-sonnet-4-6",
+			"opus":   "anthropic:claude-opus-4-7",
+		},
+	}})
+	dispOut, err := callVaultTool(t, dispatchTool, map[string]any{
+		"skeleton_handle": handle,
+		"tier":            "sonnet",
+		"agent_name":      "wrap-executor",
+	})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	var env struct {
+		Outputs         json.RawMessage              `json:"outputs"`
+		EscalateReason  string                       `json:"escalate_reason"`
+		DispatchMetrics wrapdispatch.DispatchMetrics `json:"dispatch_metrics"`
+	}
+	if jerr := json.Unmarshal([]byte(dispOut), &env); jerr != nil {
+		t.Fatalf("unmarshal dispatch envelope: %v\n%s", jerr, dispOut)
+	}
+	if env.EscalateReason != "" {
+		t.Errorf("EscalateReason=%q, want empty", env.EscalateReason)
+	}
+	if len(env.Outputs) == 0 {
+		t.Fatalf("Outputs empty; raw=%s", dispOut)
+	}
+	if env.DispatchMetrics.ProviderModel != "anthropic:claude-sonnet-4-6" {
+		t.Errorf("ProviderModel=%q", env.DispatchMetrics.ProviderModel)
+	}
+	if env.DispatchMetrics.ToolCallCount != 2 {
+		t.Errorf("ToolCallCount=%d, want 2 (synth + finish)", env.DispatchMetrics.ToolCallCount)
+	}
+	if env.DispatchMetrics.InputTokens != 64 || env.DispatchMetrics.OutputTokens != 32 {
+		t.Errorf("token counts = %+v", env.DispatchMetrics)
+	}
+	if !sawBundleFromSynth {
+		t.Errorf("OQ-5 invariant violated: synth tool_result did not parse as a WrapBundle from FillBundle")
 	}
 }

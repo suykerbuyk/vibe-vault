@@ -5,405 +5,215 @@ package mcp
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/suykerbuyk/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/config"
+	"github.com/suykerbuyk/vibe-vault/internal/wrapbundlecache"
 )
 
-// newSynthesizetool returns a NewSynthesizeWrapTool backed by a minimal test vault.
-func newSynthesizeTool(t *testing.T) Tool {
+// seedSkeleton writes a skeleton to the cache and returns the handle.
+func seedSkeleton(t *testing.T, facts SkeletonFacts) SkeletonHandle {
 	t.Helper()
-	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
-		"Projects/myproject/agentctx/.keep": "",
-	})
-	return NewSynthesizeWrapTool(cfg)
+	sk := BuildSkeleton(facts)
+	data, err := json.MarshalIndent(sk, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal skeleton: %v", err)
+	}
+	path, sha, err := wrapbundlecache.Write(facts.Iter, data)
+	if err != nil {
+		t.Fatalf("Write skeleton: %v", err)
+	}
+	return SkeletonHandle{
+		Iter:           facts.Iter,
+		SkeletonPath:   path,
+		SkeletonSHA256: sha,
+	}
 }
 
-// minimalSynthesizeArgs returns a valid minimal input payload.
-func minimalSynthesizeArgs(projectPath string) map[string]any {
-	return map[string]any{
-		"project":             "myproject",
-		"project_path":        projectPath,
-		"iteration":           10,
-		"iteration_narrative": "Added new feature X and fixed bug Y.",
-		"title":               "Phase 5 wrap",
-		"subject":             "feat(mcp): add vv_synthesize_wrap",
-		"prose_body":          "This phase adds the synthesize tool.\n\nSee plan for details.",
-		"test_count_delta": map[string]any{
-			"unit_tests":           1700,
-			"integration_subtests": 33,
-			"lint_findings":        0,
+func TestVVSynthesizeWrapBundle_HappyPath(t *testing.T) {
+	withSkeletonCacheDir(t)
+
+	handle := seedSkeleton(t, SkeletonFacts{
+		Iter:         12,
+		Project:      "myproject",
+		FilesChanged: []string{"a.go", "b.go"},
+		ResumeThreadBlocks: []SkeletonThreadOpen{
+			{Slug: "open-thread"},
 		},
-	}
-}
-
-// TestSynthesizeWrap_BundleShape verifies the returned bundle has all required
-// top-level fields with the expected types.
-func TestSynthesizeWrap_BundleShape(t *testing.T) {
-	withFakeGit(t, "M  foo.go\n", " 1 file changed, 10 insertions(+)\n", nil, nil)
-
-	tool := newSynthesizeTool(t)
-	params, _ := json.Marshal(minimalSynthesizeArgs(t.TempDir()))
-
-	result, err := tool.Handler(params)
-	if err != nil {
-		t.Fatalf("Handler: %v", err)
-	}
-
-	var bundle WrapBundle
-	if err := json.Unmarshal([]byte(result), &bundle); err != nil {
-		t.Fatalf("unmarshal bundle: %v\n%s", err, result)
-	}
-
-	// Top-level field presence.
-	if bundle.IterationBlock.Content == "" {
-		t.Error("iteration_block.content is empty")
-	}
-	if bundle.IterationBlock.SynthSHA256 == "" {
-		t.Error("iteration_block.synth_sha256 is empty")
-	}
-	if bundle.CommitMsg.Content == "" {
-		t.Error("commit_msg.content is empty")
-	}
-	if bundle.CommitMsg.SynthSHA256 == "" {
-		t.Error("commit_msg.synth_sha256 is empty")
-	}
-	if bundle.CaptureSession.SynthSHA256 == "" {
-		t.Error("capture_session.synth_sha256 is empty")
-	}
-	if bundle.SynthTimestamp == "" {
-		t.Error("synth_timestamp is empty")
-	}
-	if bundle.Iteration != 10 {
-		t.Errorf("iteration=%d, want 10", bundle.Iteration)
-	}
-}
-
-// TestSynthesizeWrap_IterationBlockFormat verifies the iteration_block content
-// contains the canonical heading line.
-func TestSynthesizeWrap_IterationBlockFormat(t *testing.T) {
-	withFakeGit(t, "", "", nil, nil)
-
-	tool := newSynthesizeTool(t)
-	args := minimalSynthesizeArgs(t.TempDir())
-	args["date"] = "2026-04-25"
-	params, _ := json.Marshal(args)
-
-	result, err := tool.Handler(params)
-	if err != nil {
-		t.Fatalf("Handler: %v", err)
-	}
-
-	var bundle WrapBundle
-	json.Unmarshal([]byte(result), &bundle)
-
-	heading := "### Iteration 10 — Phase 5 wrap (2026-04-25)"
-	if !strings.Contains(bundle.IterationBlock.Content, heading) {
-		t.Errorf("iteration_block missing heading %q\ngot: %s", heading, bundle.IterationBlock.Content)
-	}
-	if !strings.Contains(bundle.IterationBlock.Content, "Added new feature X") {
-		t.Errorf("iteration_block missing narrative text")
-	}
-}
-
-// TestSynthesizeWrap_CommitMsgStructure verifies the commit message has all
-// required sections.
-func TestSynthesizeWrap_CommitMsgStructure(t *testing.T) {
-	withFakeGit(t, "M  foo.go\n", " 1 file changed, 10 insertions(+)\n", nil, nil)
-
-	tool := newSynthesizeTool(t)
-	params, _ := json.Marshal(minimalSynthesizeArgs(t.TempDir()))
-
-	result, err := tool.Handler(params)
-	if err != nil {
-		t.Fatalf("Handler: %v", err)
-	}
-
-	var bundle WrapBundle
-	json.Unmarshal([]byte(result), &bundle)
-
-	wantParts := []string{
-		"feat(mcp): add vv_synthesize_wrap",
-		"## Files changed",
-		"foo.go",
-		"## Test counts",
-		"- Unit tests: 1700",
-		"- Integration subtests: 33",
-		"- Lint findings: 0",
-		"## Iteration 10",
-	}
-	for _, want := range wantParts {
-		if !strings.Contains(bundle.CommitMsg.Content, want) {
-			t.Errorf("commit_msg missing %q\nfull:\n%s", want, bundle.CommitMsg.Content)
-		}
-	}
-}
-
-// TestSynthesizeWrap_CaptureSessionAlwaysPresent verifies capture_session is
-// in every bundle unconditionally (Phase 0 M4 requirement).
-func TestSynthesizeWrap_CaptureSessionAlwaysPresent(t *testing.T) {
-	withFakeGit(t, "", "", nil, nil)
-
-	tool := newSynthesizeTool(t)
-	// Minimal args — no decisions, no files, no threads.
-	params, _ := json.Marshal(map[string]any{
-		"iteration_narrative": "Minimal wrap.",
-		"title":               "Minimal",
-		"subject":             "chore: minimal",
 	})
 
-	result, err := tool.Handler(params)
-	if err != nil {
-		t.Fatalf("Handler: %v", err)
-	}
-
-	var bundle WrapBundle
-	json.Unmarshal([]byte(result), &bundle)
-
-	if bundle.CaptureSession.Content.Summary == "" {
-		t.Error("capture_session.content.summary should be non-empty even with minimal input")
-	}
-	if bundle.CaptureSession.SynthSHA256 == "" {
-		t.Error("capture_session.synth_sha256 should always be set")
-	}
-}
-
-// TestSynthesizeWrap_ThreadsToOpen verifies resume_thread_blocks are populated.
-func TestSynthesizeWrap_ThreadsToOpen(t *testing.T) {
-	withFakeGit(t, "", "", nil, nil)
-
-	tool := newSynthesizeTool(t)
-	args := minimalSynthesizeArgs(t.TempDir())
-	args["threads_to_open"] = []map[string]any{
-		{
-			"position": map[string]any{"mode": "top"},
-			"slug":     "my-new-thread",
-			"body":     "This is the thread body.",
+	tool := NewSynthesizeWrapTool(config.Config{})
+	args := map[string]any{
+		"skeleton_handle":     handle,
+		"iteration_narrative": "Did stuff.",
+		"iteration_title":     "Phase 3a",
+		"commit_subject":      "feat(mcp): test",
+		"thread_bodies": map[string]string{
+			"open-thread": "Body of the open thread.",
 		},
+		"capture_summary": "Wrap summary.",
 	}
-	args["threads_to_close"] = []string{"old-thread"}
 	params, _ := json.Marshal(args)
-
-	result, err := tool.Handler(params)
+	out, err := tool.Handler(params)
 	if err != nil {
 		t.Fatalf("Handler: %v", err)
 	}
-
 	var bundle WrapBundle
-	json.Unmarshal([]byte(result), &bundle)
+	if err := json.Unmarshal([]byte(out), &bundle); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
 
+	if bundle.Iteration != 12 {
+		t.Errorf("Iteration=%d, want 12", bundle.Iteration)
+	}
+	if !strings.Contains(bundle.IterationBlock.Content, "Phase 3a") {
+		t.Errorf("iteration block missing title: %s", bundle.IterationBlock.Content)
+	}
+	if !strings.Contains(bundle.CommitMsg.Content, "feat(mcp): test") {
+		t.Errorf("commit subject missing: %s", bundle.CommitMsg.Content)
+	}
 	if len(bundle.ResumeThreadBlocks) != 1 {
-		t.Fatalf("resume_thread_blocks len=%d, want 1", len(bundle.ResumeThreadBlocks))
+		t.Fatalf("threads len=%d, want 1", len(bundle.ResumeThreadBlocks))
 	}
-	tb := bundle.ResumeThreadBlocks[0]
-	if tb.Slug != "my-new-thread" {
-		t.Errorf("thread slug=%q, want my-new-thread", tb.Slug)
+	if bundle.ResumeThreadBlocks[0].Body != "Body of the open thread." {
+		t.Errorf("thread body=%q", bundle.ResumeThreadBlocks[0].Body)
 	}
-	if tb.SynthSHA256 == "" {
-		t.Error("thread synth_sha256 is empty")
-	}
-
-	if len(bundle.ResumeThreadsToClose) != 1 {
-		t.Fatalf("resume_threads_to_close len=%d, want 1", len(bundle.ResumeThreadsToClose))
-	}
-	if bundle.ResumeThreadsToClose[0].Slug != "old-thread" {
-		t.Errorf("close slug=%q, want old-thread", bundle.ResumeThreadsToClose[0].Slug)
+	if bundle.CaptureSession.Content.Summary != "Wrap summary." {
+		t.Errorf("capture summary=%q", bundle.CaptureSession.Content.Summary)
 	}
 }
 
-// TestSynthesizeWrap_CarriedChanges verifies carried_changes.add and .remove.
-func TestSynthesizeWrap_CarriedChanges(t *testing.T) {
-	withFakeGit(t, "", "", nil, nil)
+func TestVVSynthesizeWrapBundle_DetectsTamperedSkeleton(t *testing.T) {
+	withSkeletonCacheDir(t)
 
-	tool := newSynthesizeTool(t)
-	args := minimalSynthesizeArgs(t.TempDir())
-	args["carried_to_add"] = []map[string]any{
-		{"slug": "new-item", "title": "New carried item", "body": "Details here."},
+	handle := seedSkeleton(t, SkeletonFacts{Iter: 4, Project: "p"})
+	// Mutate the file on disk.
+	if err := os.WriteFile(handle.SkeletonPath, []byte(`{"iter":99,"project":"hacked"}`), 0o600); err != nil {
+		t.Fatalf("mutate skeleton: %v", err)
 	}
-	args["carried_to_remove"] = []string{"stale-item"}
+
+	tool := NewSynthesizeWrapTool(config.Config{})
+	args := map[string]any{"skeleton_handle": handle}
 	params, _ := json.Marshal(args)
-
-	result, err := tool.Handler(params)
-	if err != nil {
-		t.Fatalf("Handler: %v", err)
+	_, err := tool.Handler(params)
+	if err == nil {
+		t.Fatalf("expected sha-mismatch error")
 	}
-
-	var bundle WrapBundle
-	json.Unmarshal([]byte(result), &bundle)
-
-	if len(bundle.CarriedChanges.Add) != 1 {
-		t.Fatalf("carried_changes.add len=%d, want 1", len(bundle.CarriedChanges.Add))
-	}
-	ca := bundle.CarriedChanges.Add[0]
-	if ca.Slug != "new-item" {
-		t.Errorf("add slug=%q, want new-item", ca.Slug)
-	}
-	if ca.SynthSHA256 == "" {
-		t.Error("add synth_sha256 is empty")
-	}
-
-	if len(bundle.CarriedChanges.Remove) != 1 {
-		t.Fatalf("carried_changes.remove len=%d, want 1", len(bundle.CarriedChanges.Remove))
-	}
-	cr := bundle.CarriedChanges.Remove[0]
-	if cr.Slug != "stale-item" {
-		t.Errorf("remove slug=%q, want stale-item", cr.Slug)
+	if !strings.Contains(err.Error(), "modified") && !strings.Contains(err.Error(), "sha") {
+		t.Errorf("error=%q, want sha-mismatch wording", err.Error())
 	}
 }
 
-// TestSynthesizeWrap_SHAFingerprint verifies that changing content changes the
-// synth_sha256.
-func TestSynthesizeWrap_SHAFingerprint(t *testing.T) {
-	withFakeGit(t, "", "", nil, nil)
-
-	tool := newSynthesizeTool(t)
-
-	run := func(narrative string) string {
-		args := map[string]any{
-			"iteration_narrative": narrative,
-			"title":               "Test",
-			"subject":             "chore: test",
-		}
-		params, _ := json.Marshal(args)
-		result, err := tool.Handler(params)
-		if err != nil {
-			t.Fatalf("Handler: %v", err)
-		}
-		var bundle WrapBundle
-		json.Unmarshal([]byte(result), &bundle)
-		return bundle.IterationBlock.SynthSHA256
-	}
-
-	sha1 := run("First narrative content.")
-	sha2 := run("Second different narrative content.")
-	if sha1 == sha2 {
-		t.Error("different content produced the same synth_sha256")
-	}
-}
-
-// TestSynthesizeWrap_FilesChangedSupplied verifies that when files_changed is
-// supplied, the commit_msg uses it directly.
-func TestSynthesizeWrap_FilesChangedSupplied(t *testing.T) {
-	// Do NOT fake git — we want to verify the explicit list is used.
-	withFakeGit(t, "", "", nil, nil)
-
-	tool := newSynthesizeTool(t)
-	args := minimalSynthesizeArgs(t.TempDir())
-	args["files_changed"] = []string{"explicit/file.go", "another/file.go"}
-	params, _ := json.Marshal(args)
-
-	result, err := tool.Handler(params)
-	if err != nil {
-		t.Fatalf("Handler: %v", err)
-	}
-
-	var bundle WrapBundle
-	json.Unmarshal([]byte(result), &bundle)
-
-	if !strings.Contains(bundle.CommitMsg.Content, "- explicit/file.go") {
-		t.Errorf("commit_msg missing explicit file\nfull:\n%s", bundle.CommitMsg.Content)
-	}
-	if !strings.Contains(bundle.CommitMsg.Content, "- another/file.go") {
-		t.Errorf("commit_msg missing second explicit file\nfull:\n%s", bundle.CommitMsg.Content)
-	}
-}
-
-// TestSynthesizeWrap_RequiredFieldsMissing verifies hard errors for missing
-// required fields.
-func TestSynthesizeWrap_RequiredFieldsMissing(t *testing.T) {
-	tool := newSynthesizeTool(t)
+func TestVVSynthesizeWrapBundle_RejectsMissingHandle(t *testing.T) {
+	withSkeletonCacheDir(t)
+	tool := NewSynthesizeWrapTool(config.Config{})
 
 	cases := []struct {
-		name   string
-		args   map[string]any
-		errMsg string
+		name string
+		args map[string]any
+		want string
 	}{
-		{
-			name:   "missing iteration_narrative",
-			args:   map[string]any{"title": "T", "subject": "s"},
-			errMsg: "iteration_narrative is required",
-		},
-		{
-			name:   "missing title",
-			args:   map[string]any{"iteration_narrative": "N", "subject": "s"},
-			errMsg: "title is required",
-		},
-		{
-			name:   "missing subject",
-			args:   map[string]any{"iteration_narrative": "N", "title": "T"},
-			errMsg: "subject is required",
-		},
-		{
-			name:   "subject with newline",
-			args:   map[string]any{"iteration_narrative": "N", "title": "T", "subject": "line1\nline2"},
-			errMsg: "single line",
-		},
+		{"empty handle", map[string]any{"skeleton_handle": map[string]any{}}, "iter must be > 0"},
+		{"missing path", map[string]any{"skeleton_handle": map[string]any{"iter": 1}}, "skeleton_path is required"},
 	}
-
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			params, _ := json.Marshal(tc.args)
 			_, err := tool.Handler(params)
 			if err == nil {
-				t.Fatalf("expected error containing %q, got nil", tc.errMsg)
+				t.Fatalf("expected error containing %q", tc.want)
 			}
-			if !strings.Contains(err.Error(), tc.errMsg) {
-				t.Errorf("error=%q, want %q", err.Error(), tc.errMsg)
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error=%q, want contains %q", err.Error(), tc.want)
 			}
 		})
 	}
 }
 
-// TestSynthesizeWrap_ProseBodyDefaultsToNarrative verifies that when
-// prose_body is omitted, the commit message body uses iteration_narrative.
-func TestSynthesizeWrap_ProseBodyDefaultsToNarrative(t *testing.T) {
-	withFakeGit(t, "", "", nil, nil)
+func TestVVSynthesizeWrapBundle_BundleNotCached(t *testing.T) {
+	dir := withSkeletonCacheDir(t)
 
-	tool := newSynthesizeTool(t)
-	narrative := "This is the narrative that should appear in the commit body."
-	params, _ := json.Marshal(map[string]any{
-		"iteration_narrative": narrative,
-		"title":               "Test",
-		"subject":             "chore: test",
-	})
+	handle := seedSkeleton(t, SkeletonFacts{Iter: 7, Project: "p"})
 
-	result, err := tool.Handler(params)
+	// Snapshot cache contents after the prepare call.
+	beforeEntries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("Handler: %v", err)
+		t.Fatalf("ReadDir: %v", err)
 	}
 
-	var bundle WrapBundle
-	json.Unmarshal([]byte(result), &bundle)
+	tool := NewSynthesizeWrapTool(config.Config{})
+	args := map[string]any{
+		"skeleton_handle":     handle,
+		"iteration_narrative": "x",
+		"iteration_title":     "t",
+		"commit_subject":      "chore: t",
+	}
+	params, _ := json.Marshal(args)
+	if _, herr := tool.Handler(params); herr != nil {
+		t.Fatalf("Handler: %v", herr)
+	}
 
-	if !strings.Contains(bundle.CommitMsg.Content, narrative) {
-		t.Errorf("commit_msg body doesn't contain narrative when prose_body omitted\nfull:\n%s", bundle.CommitMsg.Content)
+	afterEntries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(afterEntries) != len(beforeEntries) {
+		t.Errorf("cache dir grew after synthesize: before=%d after=%d (bundle should NOT be cached)",
+			len(beforeEntries), len(afterEntries))
+	}
+	// And the only file in dir is the skeleton from seedSkeleton.
+	want := filepath.Base(handle.SkeletonPath)
+	for _, e := range afterEntries {
+		if e.Name() != want {
+			t.Errorf("unexpected file in cache: %q", e.Name())
+		}
 	}
 }
 
-// TestSynthesizeWrap_DecisionsInCaptureSession verifies decisions flow to
-// capture_session.
-func TestSynthesizeWrap_DecisionsInCaptureSession(t *testing.T) {
-	withFakeGit(t, "", "", nil, nil)
+func TestVVSynthesizeWrapBundle_PreservesThreadReplaceBodies(t *testing.T) {
+	withSkeletonCacheDir(t)
 
-	tool := newSynthesizeTool(t)
-	args := minimalSynthesizeArgs(t.TempDir())
-	args["decisions"] = []string{"chose approach A", "rejected B"}
+	handle := seedSkeleton(t, SkeletonFacts{
+		Iter:    9,
+		Project: "p",
+		ResumeThreadsReplace: []SkeletonThreadReplace{
+			{Slug: "alpha"},
+			{Slug: "beta"},
+		},
+	})
+
+	tool := NewSynthesizeWrapTool(config.Config{})
+	args := map[string]any{
+		"skeleton_handle":     handle,
+		"iteration_narrative": "n",
+		"iteration_title":     "t",
+		"commit_subject":      "chore: t",
+		"thread_bodies": map[string]string{
+			"alpha": "alpha-body",
+			"beta":  "beta-body",
+		},
+	}
 	params, _ := json.Marshal(args)
-
-	result, err := tool.Handler(params)
+	out, err := tool.Handler(params)
 	if err != nil {
 		t.Fatalf("Handler: %v", err)
 	}
-
 	var bundle WrapBundle
-	json.Unmarshal([]byte(result), &bundle)
-
-	if len(bundle.CaptureSession.Content.Decisions) != 2 {
-		t.Errorf("decisions len=%d, want 2", len(bundle.CaptureSession.Content.Decisions))
+	if err := json.Unmarshal([]byte(out), &bundle); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-	if bundle.CaptureSession.Content.Decisions[0] != "chose approach A" {
-		t.Errorf("decision[0]=%q", bundle.CaptureSession.Content.Decisions[0])
+	if len(bundle.ResumeThreadsReplace) != 2 {
+		t.Fatalf("replace len=%d", len(bundle.ResumeThreadsReplace))
+	}
+	bodies := map[string]string{}
+	for _, r := range bundle.ResumeThreadsReplace {
+		bodies[r.Slug] = r.Body
+	}
+	if bodies["alpha"] != "alpha-body" || bodies["beta"] != "beta-body" {
+		t.Errorf("replace bodies=%v", bodies)
 	}
 }
 
@@ -412,16 +222,10 @@ func TestSynthesizeWrap_DecisionsInCaptureSession(t *testing.T) {
 func TestFingerprintString_Deterministic(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		got := fingerprintString("hello world")
-		// SHA-256 of "hello world" is well-known.
-		want := "b94d27b9934d3e08a52e52d7da7dabfac484efe04294e576e93f8d5be17abba6"
-		// Note: actual SHA-256 of "hello world" may differ; we just check consistency.
 		if fingerprintString("hello world") != got {
 			t.Error("fingerprintString is not deterministic")
 		}
-		_ = want
 	}
-
-	// Different input → different fingerprint.
 	if fingerprintString("a") == fingerprintString("b") {
 		t.Error("different inputs produced same fingerprint")
 	}

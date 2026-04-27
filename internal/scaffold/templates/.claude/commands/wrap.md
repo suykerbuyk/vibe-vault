@@ -4,6 +4,15 @@ resume.md is a THIN GATEWAY — not a diary. Keep it focused on current state,
 open threads, and pointers. Stable reference material belongs in doc/ under
 source control. Completed work details belong in iterations.md only.
 
+If your project has the vibe-vault MCP server wired up, prefer the
+dispatch-loop procedure documented at
+`<vault>/Projects/<project>/agentctx/commands/wrap.md` (synced via
+`vv context sync`) — it routes wrap-executor work through a cheaper
+sonnet model and only escalates to opus when the quality gate fails.
+
+The inline procedure below remains the fallback for projects without
+the dispatch infrastructure.
+
 Specifically:
 - Ensure all code compiles without errors
 - Ensure all unit and integration tests pass

@@ -42,6 +42,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/templates"
 	"github.com/suykerbuyk/vibe-vault/internal/trends"
 	"github.com/suykerbuyk/vibe-vault/internal/vaultsync"
+	"github.com/suykerbuyk/vibe-vault/internal/wrapmetrics"
 	"github.com/suykerbuyk/vibe-vault/internal/zed"
 )
 
@@ -111,6 +112,9 @@ func main() {
 
 	case "templates":
 		runTemplates()
+
+	case "internal":
+		runInternal()
 
 	case "version":
 		if wantsHelp(os.Args[2:]) {
@@ -435,6 +439,15 @@ func runCheck() {
 }
 
 func runStats() {
+	// Sub-dispatch on the second positional: `vv stats wrap` is a Phase 4
+	// addition that aggregates the jsonl telemetry files written by the
+	// wrap-executor dispatch loop. Anything else falls through to the
+	// existing session-index aggregator.
+	if len(os.Args) >= 3 && os.Args[2] == "wrap" {
+		runStatsWrap()
+		return
+	}
+
 	if wantsHelp(os.Args[2:]) {
 		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdStats))
 		return
@@ -452,6 +465,50 @@ func runStats() {
 	entries := index.FilterBySource(idx.Entries, source)
 	summary := stats.Compute(entries, project)
 	fmt.Print(stats.Format(summary, project))
+}
+
+// runStatsWrap reads ~/.cache/vibe-vault/wrap-dispatch.jsonl and
+// ~/.cache/vibe-vault/wrap-metrics.jsonl, aggregates them via
+// wrapmetrics.ComputeWrapStats, and prints the rendered report. Both
+// files are host-local and append-only; an empty pair prints the
+// "no data yet" sentinel and exits 0.
+func runStatsWrap() {
+	if wantsHelp(os.Args[3:]) {
+		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdStatsWrap))
+		return
+	}
+
+	limit := 0 // 0 == read all
+	if l := flagValue(os.Args[3:], "--limit"); l != "" {
+		n, err := strconv.Atoi(l)
+		if err != nil || n < 1 {
+			fatal("--limit must be a positive integer")
+		}
+		limit = n
+	}
+
+	out, err := computeStatsWrap(limit)
+	if err != nil {
+		fatal("%v", err)
+	}
+	fmt.Print(out)
+}
+
+// computeStatsWrap is the testable core of runStatsWrap: it reads the
+// jsonl files via wrapmetrics, aggregates via ComputeWrapStats, and
+// returns the rendered text report. Errors from either jsonl reader
+// surface to the caller wrapped with the file name.
+func computeStatsWrap(limit int) (string, error) {
+	dispatch, err := wrapmetrics.ReadDispatchLines(limit)
+	if err != nil {
+		return "", fmt.Errorf("read wrap-dispatch.jsonl: %w", err)
+	}
+	drift, err := wrapmetrics.ReadDriftLines()
+	if err != nil {
+		return "", fmt.Errorf("read wrap-metrics.jsonl: %w", err)
+	}
+	summary := wrapmetrics.ComputeWrapStats(dispatch, drift)
+	return wrapmetrics.FormatWrapStats(summary), nil
 }
 
 func runFriction() {
@@ -1192,8 +1249,11 @@ func registerMCPTools(srv *mcp.Server, cfg config.Config) {
 	srv.RegisterTool(mcp.NewCarriedRemoveTool(cfg))
 	srv.RegisterTool(mcp.NewCarriedPromoteToTaskTool(cfg))
 	srv.RegisterTool(mcp.NewRenderCommitMsgTool(cfg))
+	srv.RegisterTool(mcp.NewPrepareWrapSkeletonTool())
 	srv.RegisterTool(mcp.NewSynthesizeWrapTool(cfg))
-	srv.RegisterTool(mcp.NewApplyWrapBundleTool(cfg))
+	srv.RegisterTool(mcp.NewApplyWrapBundleByHandleTool(cfg))
+	srv.RegisterTool(mcp.NewWrapQualityCheckTool(cfg))
+	srv.RegisterTool(mcp.NewWrapDispatchTool(cfg))
 	srv.RegisterTool(mcp.NewVaultReadTool(cfg))
 	srv.RegisterTool(mcp.NewVaultListTool(cfg))
 	srv.RegisterTool(mcp.NewVaultExistsTool(cfg))
@@ -1202,6 +1262,7 @@ func registerMCPTools(srv *mcp.Server, cfg config.Config) {
 	srv.RegisterTool(mcp.NewVaultEditTool(cfg))
 	srv.RegisterTool(mcp.NewVaultDeleteTool(cfg))
 	srv.RegisterTool(mcp.NewVaultMoveTool(cfg))
+	srv.RegisterTool(mcp.NewGetAgentDefinitionTool())
 	srv.RegisterPrompt(mcp.NewSessionGuidelinesPrompt())
 }
 

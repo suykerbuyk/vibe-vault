@@ -4,7 +4,6 @@
 package llm
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,24 +12,18 @@ import (
 	"strings"
 )
 
-// Anthropic implements Provider for the Anthropic Messages API.
+// Anthropic implements Provider for the Anthropic Messages API (single-turn
+// chat completion). Multi-turn tool-use is provided by AnthropicAgentic in
+// anthropic_agentic.go; both share *anthropicHTTPCore for HTTP plumbing.
 type Anthropic struct {
-	baseURL string
-	apiKey  string
-	model   string
-	client  *http.Client
+	*anthropicHTTPCore
 }
 
-// NewAnthropic creates an Anthropic provider.
+// NewAnthropic creates an Anthropic provider. The signature is preserved
+// from the pre-refactor version so existing callers keep compiling unchanged.
 func NewAnthropic(baseURL, apiKey, model string) (*Anthropic, error) {
-	if baseURL == "" {
-		baseURL = "https://api.anthropic.com"
-	}
 	return &Anthropic{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  apiKey,
-		model:   model,
-		client:  &http.Client{},
+		anthropicHTTPCore: newAnthropicHTTPCore(baseURL, apiKey, model, nil),
 	}, nil
 }
 
@@ -54,18 +47,9 @@ func (a *Anthropic) ChatCompletion(ctx context.Context, req Request) (*Response,
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := a.baseURL + "/v1/messages"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	resp, err := a.do(ctx, payload, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-api-key", a.apiKey)
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
-
-	resp, err := a.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
