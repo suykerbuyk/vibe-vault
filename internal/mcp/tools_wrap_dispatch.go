@@ -256,11 +256,15 @@ func NewWrapDispatchTool(cfg config.Config) Tool {
 				return "", err
 			}
 
-			// Resolve API key. We hardcode ANTHROPIC_API_KEY for v1 (Phase 4
-			// will read api_key_env from config). Empty key fails fast.
-			apiKey := os.Getenv("ANTHROPIC_API_KEY")
-			if apiKey == "" {
-				return "", fmt.Errorf("ANTHROPIC_API_KEY not set")
+			// Extract the provider prefix from the tier-resolved
+			// "<provider>:<model>" string and resolve its API key via the
+			// shared layered resolver: providers.<P>.api_key from config
+			// wins, env var is the fallback, both-empty returns an
+			// actionable error pointing at vv config set-key + the env var.
+			tierProvider, _, _ := strings.Cut(providerModel, ":")
+			apiKey, err := llm.ResolveAPIKey(tierProvider, cfg.Providers)
+			if err != nil {
+				return "", err
 			}
 
 			// Instantiate the AgenticProvider via the test-seam factory.
