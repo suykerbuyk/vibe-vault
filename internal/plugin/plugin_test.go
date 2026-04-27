@@ -193,14 +193,18 @@ func TestGenerate_PathRelativeBinary(t *testing.T) {
 		t.Errorf(".mcp.json command = %q, want %q", cmd, "vv")
 	}
 
-	// env block must propagate ANTHROPIC_API_KEY so vv_wrap_dispatch and
-	// other LLM-backed handlers see the operator's live shell key.
+	// env block must propagate ANTHROPIC_API_KEY, OPENAI_API_KEY, and
+	// GOOGLE_API_KEY so vv_wrap_dispatch and other LLM-backed handlers see
+	// the operator's live shell keys (env-fallback tier of ResolveAPIKey).
 	env, ok := entry["env"].(map[string]any)
 	if !ok {
 		t.Fatal(".mcp.json missing env block")
 	}
-	if got := env["ANTHROPIC_API_KEY"]; got != "${ANTHROPIC_API_KEY}" {
-		t.Errorf("env.ANTHROPIC_API_KEY = %q, want %q", got, "${ANTHROPIC_API_KEY}")
+	for _, key := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY"} {
+		want := "${" + key + "}"
+		if got := env[key]; got != want {
+			t.Errorf("env.%s = %q, want %q", key, got, want)
+		}
 	}
 }
 
