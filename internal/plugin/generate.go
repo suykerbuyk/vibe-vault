@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -21,12 +20,15 @@ import (
 //	    .mcp.json                                  ← MCP server config
 //
 // Returns the marketplace root path on success.
+//
+// The MCP config writes "vv" (PATH-relative) rather than an absolute binary
+// path so the plugin always invokes whichever vv resolves first in PATH at
+// session start. Baking an absolute path here is brittle: if the install was
+// triggered by a stale binary on PATH (or one invoked explicitly), os.Executable
+// can capture that stale path and pin the plugin to it across rebuilds. PATH
+// lookup mirrors how settings.json mcpServers.vibe-vault is configured and
+// converges on the operator's installed binary automatically.
 func Generate(version string) (string, error) {
-	binaryPath, err := resolveBinary()
-	if err != nil {
-		return "", fmt.Errorf("resolve vv binary: %w", err)
-	}
-
 	mktDir := MarketplaceDir()
 	plugDir := PluginDir()
 
@@ -69,10 +71,12 @@ func Generate(version string) (string, error) {
 		return "", fmt.Errorf("write plugin manifest: %w", err)
 	}
 
-	// Write MCP config.
+	// Write MCP config. Use PATH-relative "vv" so Claude Code's spawn
+	// resolves to whatever vv is first on PATH at session start. See the
+	// Generate doc comment for why an absolute path is the wrong default.
 	mcpConfig := map[string]any{
 		pluginName: map[string]any{
-			"command": binaryPath,
+			"command": "vv",
 			"args":    []any{"mcp"},
 		},
 	}
@@ -91,27 +95,6 @@ func Remove() error {
 		return nil
 	}
 	return os.RemoveAll(mktDir)
-}
-
-// resolveBinary returns the absolute path to the vv binary.
-// Prefers exec.LookPath (matches how Claude Code's Bun spawn resolves
-// commands), falling back to os.Executable if LookPath fails.
-func resolveBinary() (string, error) {
-	if p, err := exec.LookPath("vv"); err == nil {
-		if abs, err := filepath.Abs(p); err == nil {
-			return abs, nil
-		}
-		return p, nil
-	}
-
-	p, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("cannot locate vv binary: %w", err)
-	}
-	if resolved, err := filepath.EvalSymlinks(p); err == nil {
-		return resolved, nil
-	}
-	return p, nil
 }
 
 // writeJSON marshals v as pretty-printed JSON and writes it atomically.

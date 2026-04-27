@@ -1229,3 +1229,46 @@ Key architectural and design decisions in vibe-vault, with rationale.
 
     Parallel push is deferred. Re-open conditions: a third remote
     appears, or measurement shows push exceeds 15% of wrap latency.
+
+82. **Plugin `.mcp.json` writes `"command": "vv"` (PATH-relative), not an
+    absolute binary path.** The Claude Code plugin's MCP config at
+    `~/.local/share/vibe-vault/claude-plugin/vibe-vault/.mcp.json` (and
+    its mirror in the harness cache) invokes `vv` via PATH lookup at
+    session start, mirroring how `~/.claude/settings.json`
+    `mcpServers.vibe-vault` is configured.
+
+    **Rationale.** The prior implementation (`internal/plugin/generate.go`
+    `resolveBinary()` helper) attempted `exec.LookPath("vv")` first and
+    fell back to `os.Executable()`, then wrote the resolved absolute path
+    into the plugin config. This produced a footgun: when the user had
+    multiple `vv` binaries on the system (e.g., `~/.local/bin/vv` from
+    `make install` and `~/code/go/bin/vv` from a stale `go install`),
+    invoking the install via the stale binary directly caused
+    `os.Executable()` to return the stale path, which then got pinned
+    into the plugin config. The harness loaded that plugin config at
+    session start and spawned the stale binary, exposing only its older
+    tool surface — visible to the user as "MCP server tool surface lags
+    running binary" even though `vv mcp check` against the canonical
+    `~/.local/bin/vv` reported the correct tool count. The lag persisted
+    through `make install` cycles because the plugin config itself was
+    never rewritten.
+
+    PATH lookup converges on whatever the operator's shell resolves `vv`
+    to first, which is the canonical install in every supported setup.
+    The cost is one PATH lookup at MCP server spawn time (microseconds);
+    the benefit is automatic convergence on `make install` updates and
+    elimination of the absolute-path-pinning failure mode.
+
+    `resolveBinary()` was removed entirely; both `Generate()` (used by
+    `vv mcp install --claude-plugin`) and `InstallToCache()` (used by
+    the same command's cache-write path) now write `"command": "vv"`
+    literally. Tests `TestGenerate_PathRelativeBinary` and
+    `TestInstallToCache_PathRelativeBinary` enforce the literal value
+    rather than the prior `filepath.IsAbs()` predicate.
+
+    Re-open conditions: if a future Claude Code release passes a custom
+    PATH to spawned MCP servers that omits the operator's vv install
+    location, this decision would need to revert to absolute paths
+    (with the stale-binary pinning addressed by some other mechanism,
+    e.g., always invoking install via the freshly-built binary in
+    `Makefile`).
