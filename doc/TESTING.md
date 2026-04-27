@@ -2,7 +2,7 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**1938 tests** across 51 test packages + **1 integration test** (31 subtests) + **21 vault-accessor integration tests** + **5 wrap-dispatch integration tests**. All passing.
+**1938 tests** across 50 test packages + **1 integration test** (31 subtests) + **21 vault-accessor integration tests** + **5 wrap-dispatch integration tests**. All passing.
 
 > **Note (iter 121):** The detailed per-file table below is out of date relative to the
 > headline counts above — accumulated drift across many iterations. Treat the table
