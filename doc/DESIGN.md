@@ -1639,3 +1639,93 @@ Key architectural and design decisions in vibe-vault, with rationale.
     `internal/mcp/tools_prepare_skeleton_test.go`,
     `test/integration_test.go` (the test-isolation fix in commit
     `8ed4a2f`). Phase 4 commits `1bb15a5..52eb607` plus `8ed4a2f`.
+
+89. **API key resolution: config-first / env-fallback / actionable-error,
+    shared resolver across hook + synthesis + dispatch.** The operator's
+    Pro Max subscription handles orchestrator AI usage; the standalone
+    provider APIs that back hook enrichment, session synthesis, and
+    `vv_wrap_dispatch` bill against **separately metered keys** that
+    don't fit Claude Code's ambient-shell-env model (the operator
+    deliberately unsets `ANTHROPIC_API_KEY` before launching Claude Code
+    to keep the subscription path clean). Iter 163 first hit this with a
+    raw "ANTHROPIC_API_KEY not set" error; iter 164 added env passthrough
+    to the plugin `.mcp.json`; iter 165 (this decision) introduced
+    explicit per-provider config storage with a layered resolver.
+
+    **Decision.** A new `[providers.<P>].api_key` schema in
+    `~/.config/vibe-vault/config.toml` stores keys for `anthropic`,
+    `openai`, and `google` (the three providers in `internal/llm/`
+    today). A new exported helper `llm.ResolveAPIKey(provider,
+    providers)` (`internal/llm/keyresolver.go`) returns the key with
+    three-tier precedence:
+
+    1. `providers.<P>.APIKey` (config.toml) — wins if non-empty.
+    2. `os.Getenv(envVarFor(provider))` — fallback for operators with
+       env-var-based setup.
+    3. Both empty → return an actionable error naming **both**
+       `vv config set-key <provider> <key>` AND the provider's env var,
+       so operators in either setup style get unambiguous guidance.
+
+    `envVarFor` maps `anthropic→ANTHROPIC_API_KEY`,
+    `openai→OPENAI_API_KEY`, `google→GOOGLE_API_KEY`. Unknown providers
+    return an error naming the supported set.
+
+    **Resolver is shared, factory is not.** `NewProvider(enrich,
+    providers)` (`internal/llm/provider.go`) routes by
+    `[enrichment].provider` for the hook + synthesis path. The
+    dispatch handler in `internal/mcp/tools_wrap_dispatch.go` routes by
+    the tier-string-prefix extracted from `[wrap.tiers]`
+    ("anthropic:claude-sonnet-4-6" → provider="anthropic"). **Different
+    routing axes, identical resolution semantics** — so the resolver is a
+    small exported helper called by both call sites, not a factory
+    wrapper. Folding the resolver into `NewProvider`'s body would have
+    left dispatch out (the v2 plan review caught this).
+
+    **Storage and write semantics.** `vv config set-key <provider>
+    <key|->` (`cmd/vv/config_setkey.go`) writes the key via a
+    line-oriented in-place editor pattern-matching
+    `internal/config/write.go:updateVaultPath()` so unrelated lines,
+    sections, and comments survive untouched. Atomic temp+rename in the
+    same directory at mode 0600 (pattern-matches
+    `internal/wrapbundlecache/cache.go`); parent directory chmod'd to
+    0700 defensively. Stdin form (`-`) trims a single trailing newline
+    but rejects embedded newlines, leading/trailing whitespace, and
+    empty values. `--force` required to overwrite an existing key. The
+    same line-oriented edit pattern means `vv init` re-runs are
+    key-blind — `WriteDefault()` only touches `vault_path`, locked by
+    `TestWriteDefault_PreservesProviderKeys`.
+
+    **Defaults.** `Validate()` does NOT require keys; configs with no
+    `[providers]` section load cleanly to an empty `ProvidersConfig{}`
+    (BurntSushi/toml zero-value default). `vv init` stamps three
+    commented `[providers.<P>]` stubs at the end of the generated
+    config — discoverable for the operator who needs them, zero new
+    setup for the operator who doesn't. `Overlay()` merges providers
+    field-by-field via the existing `md.IsDefined()` pattern.
+
+    **Plugin .mcp.json env block — preemptive expansion.**
+    `internal/plugin/plugin.go` `mcpEnvPassthroughKeys` lists all three
+    provider env vars (not just `ANTHROPIC_API_KEY`). Cost is two extra
+    list entries plus two test-loop extensions; harmless when the env
+    vars are unset (Claude Code expands `${VAR}` to empty). Removes a
+    future "why doesn't my OPENAI key reach the subprocess" support
+    query.
+
+    **Consequences.** Env-var fallback preserved for existing setups —
+    no migration needed. `vv config set-key` is the one-command path
+    forward for operators who want config-based keys. The standalone
+    provider APIs no longer require ambient shell env, decoupling
+    dispatch billing from Claude Code's env-handling semantics.
+
+    Source: `internal/llm/keyresolver.go`,
+    `internal/llm/keyresolver_test.go`, `internal/llm/provider.go`,
+    `internal/config/config.go` (`ProvidersConfig`, `ProviderConfig`,
+    `Overlay`), `internal/config/write.go` (`WriteDefault` +
+    `ProjectConfigTemplate` stubs), `internal/config/write_test.go`
+    (`TestWriteDefault_PreservesProviderKeys`),
+    `internal/mcp/tools_wrap_dispatch.go`,
+    `internal/mcp/tools_wrap_dispatch_test.go`,
+    `cmd/vv/config_setkey.go`, `cmd/vv/config_setkey_test.go`,
+    `internal/help/commands.go` (`CmdConfig` + `CmdConfigSetKey`),
+    `internal/plugin/plugin.go` (`mcpEnvPassthroughKeys`),
+    `internal/plugin/plugin_test.go`, `internal/plugin/inject_test.go`.
