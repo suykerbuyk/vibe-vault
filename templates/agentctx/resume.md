@@ -17,11 +17,42 @@ project: {{PROJECT}}
 
 ## Current State
 
-<!-- Iteration count, test count, what phase the project is in -->
+<!-- Iteration count, test count, what phase the project is in.
+     The block between vv:current-state markers below is machine-rendered
+     by /wrap (DESIGN #90). Iterations / MCP / Embedded counts are
+     auto-rendered; test count and any other prose remain operator-authored
+     adjacent to the marker block. -->
+
+<!-- vv:current-state:start -->
+- **Iterations:** 0 complete
+- **MCP:** 0 tools + 1 prompt
+- **Embedded:** 0 templates
+<!-- vv:current-state:end -->
 
 ## Open Threads
 
-<!-- Active tasks, unresolved questions, next steps -->
+<!-- Active tasks, unresolved questions, next steps.
+     The Active tasks block between vv:active-tasks markers is
+     machine-rendered from tasks/*.md on every /wrap (DESIGN #90).
+     Free-form narrative threads go outside the marker pair. -->
+
+<!-- vv:active-tasks:start -->
+### Active tasks (0)
+
+_No active tasks._
+<!-- vv:active-tasks:end -->
+
+## Project History (recent)
+
+<!-- The last N=10 iteration rows between vv:project-history-tail
+     markers are machine-rendered from iterations.md on every /wrap
+     (DESIGN #90). Older rows fall outside the marker region and remain
+     prose-authored archive. -->
+
+<!-- vv:project-history-tail:start -->
+| #   | Date       | Summary |
+| --- | ---------- | ------- |
+<!-- vv:project-history-tail:end -->
 
 ## Reference Documents
 
