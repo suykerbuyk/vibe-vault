@@ -51,6 +51,18 @@ func (s *Server) RegisterTool(t Tool) {
 	s.tools[t.Definition.Name] = t
 }
 
+// ToolNames returns the registered tool names in stable alphabetical order.
+// Useful for inventory/diagnostic output (e.g. `vv mcp check --tools`) without
+// going through the JSON-RPC protocol.
+func (s *Server) ToolNames() []string {
+	names := make([]string, 0, len(s.tools))
+	for name := range s.tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // RegisterPrompt adds a prompt to the server.
 func (s *Server) RegisterPrompt(p Prompt) {
 	s.prompts[p.Definition.Name] = p
