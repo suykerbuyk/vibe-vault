@@ -10,34 +10,42 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
 
-// NewProvider creates a Provider from enrichment config.
-// Returns (nil, nil) if enrichment is disabled or the API key is not set.
-func NewProvider(cfg config.EnrichmentConfig) (Provider, error) {
-	if !cfg.Enabled {
+// NewProvider creates a Provider from enrichment config and the layered
+// providers config block.
+//
+// Returns (nil, nil) when enrichment is disabled (the operator opted out).
+// When enrichment is enabled, the API key is resolved via ResolveAPIKey
+// (config-first, env-fallback, actionable-error-on-both-empty); a missing
+// key surfaces as an error so callers can guide the operator at use time.
+func NewProvider(enrich config.EnrichmentConfig, providers config.ProvidersConfig) (Provider, error) {
+	if !enrich.Enabled {
 		return nil, nil
 	}
 
-	keyEnv := cfg.APIKeyEnv
-	if keyEnv == "" {
-		keyEnv = config.DefaultAPIKeyEnv(cfg.Provider)
+	// Normalize the provider name. The legacy switch below treats "" as
+	// "openai"; ResolveAPIKey requires a strict provider name from the
+	// supported set, so we collapse the empty form before resolving.
+	provider := enrich.Provider
+	if provider == "" {
+		provider = "openai"
 	}
-	apiKey := os.Getenv(keyEnv)
-	if apiKey == "" {
-		return nil, nil
+
+	apiKey, err := ResolveAPIKey(provider, providers)
+	if err != nil {
+		return nil, err
 	}
 
 	var base Provider
-	var err error
 
-	switch cfg.Provider {
+	switch enrich.Provider {
 	case "openai", "":
-		base, err = NewOpenAI(cfg.BaseURL, apiKey, cfg.Model)
+		base, err = NewOpenAI(enrich.BaseURL, apiKey, enrich.Model)
 	case "anthropic":
-		base, err = NewAnthropic(cfg.BaseURL, apiKey, cfg.Model)
+		base, err = NewAnthropic(enrich.BaseURL, apiKey, enrich.Model)
 	case "google":
-		base, err = NewGoogle(apiKey, cfg.Model)
+		base, err = NewGoogle(apiKey, enrich.Model)
 	default:
-		return nil, fmt.Errorf("unknown LLM provider: %q", cfg.Provider)
+		return nil, fmt.Errorf("unknown LLM provider: %q", enrich.Provider)
 	}
 	if err != nil {
 		return nil, err
