@@ -88,6 +88,21 @@ compress = true
 # Propagates learnings to knowledge.md, flags stale entries, updates resume.
 enabled = true
 timeout_seconds = 15
+
+# [providers.anthropic]
+# api_key = "sk-ant-..."
+# # Required by vv_wrap_dispatch (the wrap executor cheap-tier path)
+# # and by hook enrichment / session synthesis when [enrichment].provider
+# # = "anthropic". Bills against this key, NOT against your Claude Code
+# # subscription. Set via: vv config set-key anthropic <key>
+
+# [providers.openai]
+# api_key = "sk-..."
+# # Set via: vv config set-key openai <key>
+
+# [providers.google]
+# api_key = "..."
+# # Set via: vv config set-key google <key>
 `, portablePath)
 
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -179,6 +194,21 @@ func ProjectConfigTemplate() string {
 # [synthesis]
 # enabled = true
 # timeout_seconds = 15
+
+# [providers.anthropic]
+# api_key = "sk-ant-..."
+# # Required by vv_wrap_dispatch (the wrap executor cheap-tier path)
+# # and by hook enrichment / session synthesis when [enrichment].provider
+# # = "anthropic". Bills against this key, NOT against your Claude Code
+# # subscription. Set via: vv config set-key anthropic <key>
+
+# [providers.openai]
+# api_key = "sk-..."
+# # Set via: vv config set-key openai <key>
+
+# [providers.google]
+# api_key = "..."
+# # Set via: vv config set-key google <key>
 `
 }
 
