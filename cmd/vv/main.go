@@ -386,7 +386,7 @@ func runProcess() {
 		fatal("usage: vv process <transcript.jsonl>")
 	}
 
-	provider, err := llm.NewProvider(cfg.Enrichment)
+	provider, err := llm.NewProvider(cfg.Enrichment, cfg.Providers)
 	if err != nil {
 		log.Printf("warning: LLM provider init failed: %v", err)
 	}
@@ -1661,7 +1661,7 @@ func runReprocess() {
 	var provider llm.Provider
 	if !dryRun {
 		var providerErr error
-		provider, providerErr = llm.NewProvider(cfg.Enrichment)
+		provider, providerErr = llm.NewProvider(cfg.Enrichment, cfg.Providers)
 		if providerErr != nil {
 			log.Printf("warning: LLM provider init failed: %v", providerErr)
 		}

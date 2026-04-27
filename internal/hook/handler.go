@@ -154,8 +154,10 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 		return fmt.Errorf("no transcript_path in hook input")
 	}
 
-	// Create LLM provider (nil if disabled or API key not set).
-	provider, providerErr := llm.NewProvider(cfg.Enrichment)
+	// Create LLM provider (nil if disabled). When enabled, the layered key
+	// resolver (providers.<P>.api_key → env-var → actionable error) runs
+	// inside NewProvider.
+	provider, providerErr := llm.NewProvider(cfg.Enrichment, cfg.Providers)
 	if providerErr != nil {
 		log.Printf("warning: LLM provider init failed: %v", providerErr)
 	}
