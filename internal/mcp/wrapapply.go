@@ -4,7 +4,7 @@
 // File wrapapply.go houses ApplyBundle — the in-process orchestrator that
 // executes every mutation class in a WrapBundle against the vault.
 //
-// Apply order (extended for H2-v3 thread_replace):
+// Apply order (extended for H2-v3 thread_replace + state-block re-render):
 //
 //	iter
 //	  → thread_insert × N
@@ -14,9 +14,16 @@
 //	  → carried_remove × Q
 //	  → set_commit_msg × 1
 //	  → capture × 1
+//	  → resume_state_blocks × 1     (Step 9; state-derived sub-regions)
 //
 // On the first error, ApplyBundle stops and returns the partial result
 // (the wrap is fail-stop, NOT transactional — see Decision 63 in DESIGN.md).
+//
+// ApplyBundle is NOT re-entrant on resume.md: Step 9 reads then writes the
+// file in one apply cycle, so two concurrent /wrap invocations on the same
+// project could race. v1 ships without file locking on the assumption that
+// a single operator runs /wrap serially; revisit if multi-operator wraps
+// surface as a failure pattern.
 //
 // ApplyBundle is exported as a Go-callable helper so the Phase 3c dispatch
 // handler can invoke it directly without re-entering the MCP loop. The
@@ -203,6 +210,30 @@ func ApplyBundle(_ context.Context, cfg config.Config, project, projectRoot stri
 			return finishApply(host, user, cwd, project, iteration, writes, ds, metricLines, errorAtStep), nil
 		}
 		writes = append(writes, applyWriteRecord{Step: "capture_session", Status: "ok"})
+	}
+
+	// Step 9: resume_state_blocks. Re-renders the three marker-bounded
+	// sub-regions of resume.md (active-tasks, current-state, project-history-tail)
+	// from filesystem ground truth on every wrap, fixing the dispatch-path
+	// drift class verified across iters 165–166. Step 9 must remain LAST so
+	// any prior `vv_update_resume` calls in the same wrap that clobbered
+	// markers are healed by `wraprender.ApplyMarkerBlocks` here.
+	//
+	// Metric-line special case: the bundle never carries marker content, so
+	// synth-vs-apply drift accounting is meaningless for this step. We
+	// record synth_sha = apply_sha = fingerprint(rendered_content) so
+	// `recordMetricRaw` does NOT increment `ds.DriftedFields` for Step 9
+	// (it still increments `ds.FieldsTotal` for accountability).
+	{
+		rendered, err := applyResumeStateBlocks(cfg, project, projectRoot)
+		if err != nil {
+			writes = append(writes, applyWriteRecord{Step: "resume_state_blocks", Status: "error", Detail: err.Error()})
+			errorAtStep = "resume_state_blocks"
+			return finishApply(host, user, cwd, project, iteration, writes, ds, metricLines, errorAtStep), nil
+		}
+		sha := fingerprintString(rendered)
+		recordMetricRaw("resume_state_blocks", sha, sha, len(rendered))
+		writes = append(writes, applyWriteRecord{Step: "resume_state_blocks", Status: "ok"})
 	}
 
 	return finishApply(host, user, cwd, project, iteration, writes, ds, metricLines, errorAtStep), nil

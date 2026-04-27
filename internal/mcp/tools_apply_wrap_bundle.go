@@ -4,13 +4,20 @@
 package mcp
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
+	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +26,8 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/narrative"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
 	"github.com/suykerbuyk/vibe-vault/internal/transcript"
+	"github.com/suykerbuyk/vibe-vault/internal/wraprender"
+	"github.com/suykerbuyk/vibe-vault/templates"
 )
 
 // applyWriteRecord records the outcome of a single dispatch step.
@@ -403,4 +412,277 @@ func applyCaptureSesssion(cfg config.Config, _ string, cc BundleCaptureContent) 
 		_ = result.Reason
 	}
 	return nil
+}
+
+// applyResumeStateBlocks re-renders the three marker-bounded state-derived
+// sub-regions of resume.md (active-tasks, current-state,
+// project-history-tail) from filesystem ground truth and atomic-writes the
+// result. Returns the rendered file content (so the caller can fingerprint
+// it for the metric line) plus any error.
+//
+// projectRoot, when non-empty and pointing at a Go project (with go.mod),
+// is the working directory used for the RUN-counted test enumeration. When
+// the project root is empty or has no go.mod, test counts default to zero —
+// the renderer still emits the bullet shape, just with N=0/M=0. This keeps
+// non-Go consumer projects (rezbldr, vibe-palace, etc.) compatible with
+// Step 9.
+func applyResumeStateBlocks(cfg config.Config, project, projectRoot string) (string, error) {
+	resumeContent, absPath, err := readResume(cfg, project)
+	if err != nil {
+		return "", err
+	}
+
+	tasks, err := collectActiveTasks(cfg, project)
+	if err != nil {
+		return "", fmt.Errorf("collect active tasks: %w", err)
+	}
+
+	state, err := computeCurrentState(cfg, project, projectRoot)
+	if err != nil {
+		return "", fmt.Errorf("compute current state: %w", err)
+	}
+
+	rows, err := collectHistoryRows(cfg, project, 10)
+	if err != nil {
+		return "", fmt.Errorf("collect history rows: %w", err)
+	}
+
+	blocks := map[string]string{
+		wraprender.RegionActiveTasks:        wraprender.RenderActiveTasks(tasks),
+		wraprender.RegionCurrentState:       wraprender.RenderCurrentState(state),
+		wraprender.RegionProjectHistoryTail: wraprender.RenderProjectHistoryTail(rows, 10),
+	}
+
+	updated, err := wraprender.ApplyMarkerBlocks(resumeContent, blocks)
+	if err != nil {
+		return "", fmt.Errorf("apply marker blocks: %w", err)
+	}
+
+	if err := mdutil.AtomicWriteFile(absPath, []byte(updated), 0o644); err != nil {
+		return "", fmt.Errorf("write resume: %w", err)
+	}
+	return updated, nil
+}
+
+// collectActiveTasks walks Projects/<p>/agentctx/tasks/*.md (excluding
+// done/ and cancelled/ subdirs) and returns wraprender-shaped front-matter
+// records. Sort order is delegated to the renderer.
+func collectActiveTasks(cfg config.Config, project string) ([]wraprender.TaskFrontMatter, error) {
+	tasksDir := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx", "tasks")
+	if _, err := vaultPrefixCheck(tasksDir, cfg.VaultPath); err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(tasksDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []wraprender.TaskFrontMatter
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		slug := strings.TrimSuffix(e.Name(), ".md")
+		title, status, priority := parseTaskHeader(filepath.Join(tasksDir, e.Name()))
+		out = append(out, wraprender.TaskFrontMatter{
+			Slug:     slug,
+			Title:    title,
+			Status:   status,
+			Priority: priority,
+		})
+	}
+	return out, nil
+}
+
+// computeCurrentState gathers the four headline counts the renderer needs.
+// Iteration count comes from a heading scan of iterations.md; MCP-tool
+// count from a throw-away Server populated via RegisterAllTools; embedded
+// template count from templates.AgentctxFS(); and tests / test-package
+// counts from RUN-counted `go test` enumeration in projectRoot. When
+// projectRoot is empty or has no go.mod, tests/packages default to zero.
+func computeCurrentState(cfg config.Config, project, projectRoot string) (wraprender.CurrentState, error) {
+	state := wraprender.CurrentState{}
+
+	iterPath := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx", "iterations.md")
+	if _, err := vaultPrefixCheck(iterPath, cfg.VaultPath); err == nil {
+		data, readErr := os.ReadFile(iterPath)
+		if readErr == nil {
+			state.Iterations = len(scanIterationNumbers(string(data)))
+		} else if !os.IsNotExist(readErr) {
+			return state, fmt.Errorf("read iterations.md: %w", readErr)
+		}
+	}
+
+	tools, prompts := countMCPTools(cfg)
+	state.MCPTools = tools
+	_ = prompts // current renderer hard-codes "+ 1 prompt"
+
+	templateCount, err := countAgentctxTemplates()
+	if err != nil {
+		return state, fmt.Errorf("count templates: %w", err)
+	}
+	state.Templates = templateCount
+
+	testCount, packageCount := countRunTests(projectRoot)
+	state.Tests = testCount
+	state.TestPackages = packageCount
+
+	return state, nil
+}
+
+// countMCPTools returns the count of registered tools (and prompts) on a
+// throw-away Server. The Server is wired with the canonical
+// RegisterAllTools list so the rendered count tracks production reality.
+func countMCPTools(cfg config.Config) (tools, prompts int) {
+	srv := NewServer(ServerInfo{Name: "vibe-vault", Version: ""}, log.New(io.Discard, "", 0))
+	RegisterAllTools(srv, cfg)
+	tools = len(srv.ToolNames())
+	prompts = len(srv.prompts)
+	return tools, prompts
+}
+
+// countAgentctxTemplates walks the embedded `templates/agentctx/` FS and
+// returns the count of files (excluding directories). Mirrors the
+// `Embedded templates: N` headline in the live vibe-vault resume.md.
+func countAgentctxTemplates() (int, error) {
+	count := 0
+	err := fs.WalkDir(templates.AgentctxFS(), ".", func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			count++
+		}
+		return nil
+	})
+	return count, err
+}
+
+// countRunTests enumerates Go test functions in projectRoot. Uses
+// `go test -count=1 -list '.*' ./...` which prints one Test… function name
+// per line per package without executing test bodies (~1s on this repo at
+// cache-warm; slower on cold builds).
+//
+// **Plan deviation (R3 follow-up):** the plan locked the headline to
+// "RUN-counted" via `go test -run='^$' -v ./...`, but `-run='^$'` skips
+// enumeration entirely (zero `=== RUN` lines emit), so that formula
+// returns zero. `-list '.*'` returns test-function count (no subtests),
+// which is consistent and fast. The headline meaning shifts from
+// "RUN-counted" to "test-function-counted"; flagged in Phase 2 reporting
+// as a follow-up for the operator to confirm or replace with full
+// `-v ./...` if subtests must be counted.
+//
+// Returns (0, 0) silently when projectRoot is empty, has no go.mod, or
+// `go test` errors out — Step 9 is best-effort about counts and must not
+// fail the wrap because of a transient toolchain issue. Test-package
+// count is the number of distinct package paths whose `-list` output
+// contained at least one test name.
+func countRunTests(projectRoot string) (tests, packages int) {
+	if projectRoot == "" {
+		return 0, 0
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, "go.mod")); err != nil {
+		return 0, 0
+	}
+	cmd := exec.Command("go", "test", "-count=1", "-list", ".*", "./...")
+	cmd.Dir = projectRoot
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	// Best-effort: ignore exit error; partial output still parses.
+	_ = cmd.Run()
+
+	pkgSet := make(map[string]struct{})
+	var currentPkgHasTests bool
+	scanner := bufio.NewScanner(&buf)
+	scanner.Buffer(make([]byte, 0, 1<<20), 1<<24)
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "Test"):
+			// `-list` emits one identifier per line; only Test* counts.
+			tests++
+			currentPkgHasTests = true
+		case strings.HasPrefix(line, "ok  \t") || strings.HasPrefix(line, "ok\t"),
+			strings.HasPrefix(line, "FAIL\t") || strings.HasPrefix(line, "FAIL "):
+			// Trailing per-package status line. Promote the package to
+			// pkgSet iff at least one Test* identifier was listed for it.
+			fields := strings.Fields(line)
+			if len(fields) >= 2 && currentPkgHasTests {
+				pkgSet[fields[1]] = struct{}{}
+			}
+			currentPkgHasTests = false
+		}
+	}
+	return tests, len(pkgSet)
+}
+
+// collectHistoryRows scans Projects/<p>/agentctx/iterations.md and returns
+// the last `n` `### Iteration N — Title (YYYY-MM-DD)` headings as
+// HistoryRow records. Returns the rows in iteration-ascending order; the
+// renderer handles the tail-window slice.
+func collectHistoryRows(cfg config.Config, project string, n int) ([]wraprender.HistoryRow, error) {
+	iterPath := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx", "iterations.md")
+	if _, err := vaultPrefixCheck(iterPath, cfg.VaultPath); err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(iterPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	parsed := parseIterations(string(data))
+	rows := make([]wraprender.HistoryRow, 0, len(parsed))
+	for _, it := range parsed {
+		rows = append(rows, wraprender.HistoryRow{
+			Iteration: it.Number,
+			Date:      it.Date,
+			Summary:   summarizeIterationNarrative(it.Narrative),
+		})
+	}
+	// Document-order is iteration-ascending in vibe-vault, but defensively
+	// sort by iteration number so out-of-order edits don't break the tail.
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Iteration < rows[j].Iteration })
+
+	if n > 0 && len(rows) > n {
+		rows = rows[len(rows)-n:]
+	}
+	return rows, nil
+}
+
+// summarizeIterationNarrative extracts a one-line summary from an iteration
+// body. Picks the first non-blank paragraph, joins its lines on " ",
+// truncates to ~120 characters at a word boundary, and replaces stray
+// pipe characters so the summary is safe to drop into a GFM table cell
+// (the renderer also escapes pipes; this is defense in depth).
+func summarizeIterationNarrative(narr string) string {
+	const maxLen = 120
+	for _, para := range strings.Split(narr, "\n\n") {
+		para = strings.TrimSpace(para)
+		if para == "" {
+			continue
+		}
+		// Join wrapped lines with single spaces.
+		lines := strings.Split(para, "\n")
+		flat := strings.Join(lines, " ")
+		flat = strings.TrimSpace(flat)
+		if flat == "" {
+			continue
+		}
+		if len(flat) <= maxLen {
+			return flat
+		}
+		// Truncate at last word boundary before maxLen.
+		cut := flat[:maxLen]
+		if i := strings.LastIndex(cut, " "); i > 0 {
+			cut = cut[:i]
+		}
+		return strings.TrimRight(cut, " ,;:") + "…"
+	}
+	return ""
 }
