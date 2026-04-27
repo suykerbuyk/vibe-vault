@@ -26,7 +26,18 @@ const (
 // Claude Code expands ${VAR} references against the parent process env at
 // spawn time, so the subprocess sees the operator's live key. Without this,
 // vv_wrap_dispatch (and other LLM-backed handlers) cannot reach the provider.
-var mcpEnvPassthroughKeys = []string{"ANTHROPIC_API_KEY"}
+//
+// Three providers listed preemptively: ResolveAPIKey's env-fallback tier
+// needs the var to actually reach the MCP-server subprocess. With all three
+// present, an operator who switches providers (or sets any of the three keys
+// in their shell) gets the env-fallback path through Claude Code's plugin
+// spawn — no .mcp.json edit needed. Cost is two extra entries; harmless when
+// the env vars are unset (Claude Code expands ${VAR} to empty).
+var mcpEnvPassthroughKeys = []string{
+	"ANTHROPIC_API_KEY",
+	"OPENAI_API_KEY",
+	"GOOGLE_API_KEY",
+}
 
 // mcpServerEntry returns the canonical .mcp.json entry for the vibe-vault
 // MCP server. Single source of truth used by both Generate (marketplace
