@@ -26,12 +26,19 @@ man: ## Regenerate man pages only
 	go run -ldflags="-X github.com/suykerbuyk/vibe-vault/internal/help.Version=$(shell git describe --tags --always 2>/dev/null || echo dev)" ./cmd/gen-man $(MANDIR)
 
 ##@ Test
-.PHONY: test integration check vet lint coverage bench fuzz
+.PHONY: test integration integration-llm check vet lint coverage bench fuzz
 test: ## Run unit tests (-short)
 	go test -short ./...
 
 integration: ## Run integration tests
 	go test -run TestIntegration -timeout 60s -count=1 ./test/
+
+integration-llm: ## Live Anthropic LLM round-trip (requires ANTHROPIC_API_KEY; otherwise skips)
+	@if [ -z "$$ANTHROPIC_API_KEY" ]; then \
+		echo "ANTHROPIC_API_KEY not set; skipping"; \
+	else \
+		go test -tags=integration_anthropic -run='TestIntegration_Anthropic' -count=1 ./internal/llm/...; \
+	fi
 
 check: ## Run vet + unit + integration tests
 	go vet ./...
@@ -58,14 +65,17 @@ fuzz: ## Run fuzz tests (30s per package)
 	done
 
 ##@ Install
-.PHONY: install uninstall
-install: build ## Build and install binary + man pages to PREFIX
+.PHONY: install uninstall agents
+install: build agents ## Build and install binary + man pages to PREFIX
 	install -d $(BINDIR)
 	install -m 755 $(BINARY) $(BINDIR)/$(BINARY)
 	install -d $(MANPREFIX)/man1
 	install -m 644 $(MANDIR)/*.1 $(MANPREFIX)/man1/
 	@echo "Installed $(BINARY) to $(BINDIR)/$(BINARY)"
 	@echo "Installed man pages to $(MANPREFIX)/man1/"
+
+agents: build ## Regenerate .claude/agents/ from the embedded agentregistry catalogue
+	./$(BINARY) internal generate-agents
 
 uninstall: ## Remove installed binary and man pages
 	rm -f $(BINDIR)/$(BINARY)

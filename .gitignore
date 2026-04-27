@@ -5,5 +5,7 @@
 /commit.msg
 /.claude/*
 !/.claude/settings.json
+!/.claude/agents/
+!/.claude/agents/**
 man/*.1
 

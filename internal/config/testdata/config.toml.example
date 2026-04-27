@@ -1,0 +1,35 @@
+# Example ~/.config/vibe-vault/config.toml documenting the [wrap] section
+# added by Phase 4 of wrap-model-tiering.
+#
+# When the [wrap] section is absent the defaults apply: DefaultModel="opus",
+# empty EscalationLadder, and the three-tier Tiers map shown below. The
+# operator's typical override flips DefaultModel to "sonnet" and sets
+# EscalationLadder=["sonnet","opus"] so /wrap starts cheap and only escalates
+# to Opus when sonnet's quality gate fails.
+
+vault_path = "~/obsidian/vibe-vault"
+
+[domains]
+work = "~/work"
+personal = "~/personal"
+opensource = "~/opensource"
+
+[archive]
+compress = true
+
+# wrap-model-tiering Phase 4 — orchestrator-side dispatch knobs.
+#
+# default_model:     starting tier for /wrap when no --model flag overrides.
+# escalation_ladder: walked starting at default_model. Each entry must
+#                    appear as a key in [wrap.tiers]; Validate enforces this
+#                    at load and surfaces a clear error if not.
+# [wrap.tiers]:      tier label -> "provider:model" string. v1 supports only
+#                    "anthropic:" providers; other prefixes fail Validate.
+[wrap]
+default_model = "sonnet"
+escalation_ladder = ["sonnet", "opus"]
+
+[wrap.tiers]
+haiku  = "anthropic:claude-haiku-4-5"
+sonnet = "anthropic:claude-sonnet-4-6"
+opus   = "anthropic:claude-opus-4-7"

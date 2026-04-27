@@ -1,7 +1,7 @@
 // Copyright 2026 John Suykerbuyk <john@syketech.com>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-// Package wrapmetrics writes host-local drift metrics for vv_apply_wrap_bundle
+// Package wrapmetrics writes host-local drift metrics for vv_apply_wrap_bundle_by_handle
 // operations.
 //
 // Each call to AppendLine writes one JSONL record to

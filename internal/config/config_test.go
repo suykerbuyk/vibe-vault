@@ -379,6 +379,183 @@ func TestSessionTags(t *testing.T) {
 	}
 }
 
+// TestLoad_PartialMapOverride verifies BurntSushi/toml's automatic map merge
+// in the Load() path: pre-populating cfg.Wrap.Tiers with defaults BEFORE
+// toml.DecodeFile means an overlay that overrides a single tier merges into
+// the defaults rather than replacing the whole map.
+//
+// This is the H3-v3 "(a) Load() automatic merge" path — the gotcha is the
+// difference vs. Overlay(), which decodes into a fresh struct and so needs
+// explicit map-merge code (covered by TestOverlay_PartialMapMerge).
+func TestLoad_PartialMapOverride(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("HOME", t.TempDir())
+	configDir := filepath.Join(xdg, "vibe-vault")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	tomlContent := `[wrap.tiers]
+sonnet = "anthropic:claude-sonnet-4-6-pinned"
+`
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(tomlContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// All three default tier keys must survive the overlay (BurntSushi merge).
+	if got := cfg.Wrap.Tiers["sonnet"]; got != "anthropic:claude-sonnet-4-6-pinned" {
+		t.Errorf("Tiers[sonnet] = %q, want overridden value", got)
+	}
+	if got := cfg.Wrap.Tiers["haiku"]; got != "anthropic:claude-haiku-4-5" {
+		t.Errorf("Tiers[haiku] = %q, want default (merge should preserve)", got)
+	}
+	if got := cfg.Wrap.Tiers["opus"]; got != "anthropic:claude-opus-4-7" {
+		t.Errorf("Tiers[opus] = %q, want default (merge should preserve)", got)
+	}
+}
+
+// TestOverlay_PartialMapMerge verifies the new explicit merge code in
+// Overlay(). Without that code, Tiers would whole-replace and the base
+// haiku/opus entries would silently disappear.
+func TestOverlay_PartialMapMerge(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`[wrap.tiers]
+sonnet = "anthropic:claude-sonnet-4-6-pinned"
+`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	base := DefaultConfig()
+	result := base.Overlay(cfgPath)
+
+	if got := result.Wrap.Tiers["sonnet"]; got != "anthropic:claude-sonnet-4-6-pinned" {
+		t.Errorf("Tiers[sonnet] = %q, want overridden value", got)
+	}
+	if got := result.Wrap.Tiers["haiku"]; got != "anthropic:claude-haiku-4-5" {
+		t.Errorf("Tiers[haiku] = %q, want default (Overlay merge should preserve)", got)
+	}
+	if got := result.Wrap.Tiers["opus"]; got != "anthropic:claude-opus-4-7" {
+		t.Errorf("Tiers[opus] = %q, want default (Overlay merge should preserve)", got)
+	}
+	// Base map must not have been mutated by the merge.
+	if base.Wrap.Tiers["sonnet"] != "anthropic:claude-sonnet-4-6" {
+		t.Error("base config Tiers map was mutated")
+	}
+}
+
+// TestOverlay_WrapDefaultModelAndLadder covers the simpler scalar/slice
+// fields in the Wrap overlay path.
+func TestOverlay_WrapDefaultModelAndLadder(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`[wrap]
+default_model = "sonnet"
+escalation_ladder = ["sonnet", "opus"]
+`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	base := DefaultConfig()
+	result := base.Overlay(cfgPath)
+
+	if result.Wrap.DefaultModel != "sonnet" {
+		t.Errorf("DefaultModel = %q, want sonnet", result.Wrap.DefaultModel)
+	}
+	if len(result.Wrap.EscalationLadder) != 2 || result.Wrap.EscalationLadder[0] != "sonnet" {
+		t.Errorf("EscalationLadder = %v, want [sonnet opus]", result.Wrap.EscalationLadder)
+	}
+}
+
+// TestValidate_HappyPath confirms a well-formed config passes validation.
+func TestValidate_HappyPath(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Wrap.DefaultModel = "sonnet"
+	cfg.Wrap.EscalationLadder = []string{"sonnet", "opus"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+// TestValidate_EscalationLadder asserts a ladder entry not in Tiers errors.
+func TestValidate_EscalationLadder(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Wrap.EscalationLadder = []string{"nonexistent"}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for undefined ladder tier")
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("error %q should name the offending tier", err)
+	}
+}
+
+// TestValidate_DefaultModelUndefined asserts a DefaultModel not in Tiers errors.
+func TestValidate_DefaultModelUndefined(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Wrap.DefaultModel = "phantom"
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for undefined default_model")
+	}
+	if !strings.Contains(err.Error(), "phantom") {
+		t.Errorf("error %q should name the offending tier", err)
+	}
+}
+
+// TestValidate_NonAnthropicProviderRejected asserts v1's anthropic-only
+// invariant is enforced fail-fast at config load.
+func TestValidate_NonAnthropicProviderRejected(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Wrap.Tiers["fast"] = "openai:gpt-4o"
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for non-anthropic provider")
+	}
+	if !strings.Contains(err.Error(), "anthropic") {
+		t.Errorf("error %q should mention v1 anthropic-only restriction", err)
+	}
+}
+
+// TestValidate_BadTierFormat asserts a malformed "provider:model" value is rejected.
+func TestValidate_BadTierFormat(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Wrap.Tiers["fast"] = "no-colon-here"
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for malformed tier value")
+	}
+}
+
+// TestValidate_EmptyWrapSection allows empty Tiers (operator opts out).
+func TestValidate_EmptyWrapSection(t *testing.T) {
+	cfg := Config{}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("empty Wrap section should validate, got: %v", err)
+	}
+}
+
+// TestDefaultConfig_WrapSection covers the new defaults block.
+func TestDefaultConfig_WrapSection(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Wrap.DefaultModel != "opus" {
+		t.Errorf("DefaultModel = %q, want opus", cfg.Wrap.DefaultModel)
+	}
+	if len(cfg.Wrap.EscalationLadder) != 0 {
+		t.Errorf("EscalationLadder = %v, want empty", cfg.Wrap.EscalationLadder)
+	}
+	for _, tier := range []string{"haiku", "sonnet", "opus"} {
+		if _, ok := cfg.Wrap.Tiers[tier]; !ok {
+			t.Errorf("default Tiers missing %q", tier)
+		}
+	}
+}
+
 func TestProjectsDir_StateDir(t *testing.T) {
 	cfg := Config{VaultPath: "/home/user/vault"}
 

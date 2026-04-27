@@ -834,7 +834,7 @@ Key architectural and design decisions in vibe-vault, with rationale.
     pass.
 
 58. **No runtime drift gate between synthesize and apply:** When
-    `vv_apply_wrap_bundle` computes apply-time SHA-256 fingerprints
+    `vv_apply_wrap_bundle_by_handle` computes apply-time SHA-256 fingerprints
     for each bundle field and finds them differing from the synth-time
     fingerprints embedded in the bundle, the divergence is logged to
     `wrap-metrics.jsonl` but does **not** abort the operation.
@@ -872,9 +872,9 @@ Key architectural and design decisions in vibe-vault, with rationale.
     where the signal is.
 
 61. **`vv_capture_session` always present in synthesize bundle:**
-    `vv_synthesize_wrap` unconditionally includes a `capture_session`
+    `vv_synthesize_wrap_bundle` unconditionally includes a `capture_session`
     field in the `WrapBundle`. Downstream consumers of
-    `vv_apply_wrap_bundle` always call `vv_capture_session` as the
+    `vv_apply_wrap_bundle_by_handle` always call `vv_capture_session` as the
     final dispatch step.
 
     **Rationale.** A Phase 0 grep of the codebase confirmed that
@@ -897,7 +897,7 @@ Key architectural and design decisions in vibe-vault, with rationale.
     root?" — requiring the AI to call it first keeps each tool's
     responsibility narrow and makes the call chain auditable.
 
-63. **Apply-bundle is fail-stop, not transactional:** `vv_apply_wrap_bundle`
+63. **Apply-bundle is fail-stop, not transactional:** `vv_apply_wrap_bundle_by_handle`
     dispatches writes sequentially; on the first error it returns
     immediately with an `applied_writes` list of completed steps and an
     `error_at_step` field identifying where the failure occurred.
@@ -1272,3 +1272,370 @@ Key architectural and design decisions in vibe-vault, with rationale.
     (with the stale-binary pinning addressed by some other mechanism,
     e.g., always invoking install via the freshly-built binary in
     `Makefile`).
+
+83. **Reuse `internal/llm/` for agentic dispatch; sibling
+    `AgenticProvider` interface alongside text-only `Provider`.** The
+    pre-existing `internal/llm/Provider` interface (`internal/llm/types.go`)
+    is text-only — single-turn `ChatCompletion(ctx, request) (Response, error)`
+    with no tool-use plumbing. The `wrap-model-tiering` epic introduces a
+    multi-turn tool-use dispatch loop for the wrap executor. Two options
+    were considered for the new surface: (a) a parallel `internal/llmrouter/`
+    package that owns the tool-use abstractions independently of the
+    text-only path, and (b) a sibling interface inside the existing
+    `internal/llm/` package that extends the text-only interface.
+
+    **Rationale.** Chose (b). `AgenticProvider interface { Provider;
+    RunTools(ctx, ToolsRequest) (ToolsResponse, error) }` lives in
+    `internal/llm/types.go` next to `Provider`, so a single package owns
+    every LLM provider abstraction in the codebase. Splitting the package
+    would have duplicated retry, header, model-resolution, and base-URL
+    plumbing across two trees with no compensating boundary — `RunTools`
+    and `ChatCompletion` against the same vendor share API key, base URL,
+    and HTTP client by construction.
+
+    **C1-v2 fix (HTTP plumbing extraction).** Embedding alone produced a
+    stutter where `Anthropic.do(req)` and `AnthropicAgentic.do(req)` were
+    near-identical 40-line copies of header injection + retry +
+    response-status branching. Decision 83 factors that into
+    `internal/llm/anthropichttp.go` — `anthropicHTTPCore` carries the
+    shared base URL, model name, API key, max-tokens, retry policy, and
+    HTTP client; both `Anthropic` (text-only) and `AnthropicAgentic`
+    (tool-use) embed `*anthropicHTTPCore` and reach common request
+    plumbing through method promotion. The pattern anticipates v2
+    multi-provider expansion: when the `openai-compatible` agentic
+    dispatcher lands (serving OpenAI / Grok / Ollama / vLLM via one
+    code path), a parallel `internal/llm/openaihttp.go` will carry the
+    OpenAI-shaped core and serve both the existing `OpenAI` and a future
+    `OpenAIAgentic`.
+
+    **v1 scope.** Anthropic-only. `[wrap.tiers]` config validation rejects
+    any `provider:` prefix other than `anthropic:` at config-load time.
+    v2 (deferred) lifts that constraint behind an `openai-compatible`
+    dispatcher.
+
+    Source: `internal/llm/anthropichttp.go`, `internal/llm/anthropic_agentic.go`,
+    `internal/llm/types.go` (Phase 1 commits `d27e795..28a3a04`).
+    Re-open conditions: if v2 multi-provider lift surfaces a friction
+    that the embedding pattern cannot cleanly express (e.g., shared retry
+    semantics need provider-specific divergence), revisit the
+    parallel-package option then.
+
+84. **Two-stage /wrap dispatch with orchestrator quality gate; QC runs
+    BEFORE apply (H3-v2). Architecture A1: dispatch loop server-side via
+    `vv_wrap_dispatch` MCP tool; `internal/wrapdispatch/` runs in-process
+    inside the MCP server.** /wrap was iter-157 inline-Opus — the
+    orchestrator-side procedure direct-emitted iteration narrative,
+    thread updates, carried bullets, commit message, and capture summary
+    in a single Opus turn. Iter 161 baseline measurement showed 17 min
+    wall-clock and ~60K AI-output tokens per /wrap (operator-confirmed).
+    Decision 19's three-bucket gate placed the epic firmly in
+    bucket (c) — projected wall-clock savings ≥2 min from a Sonnet swap
+    on the executor warrants the full Phases 1-4 lift.
+
+    **Architecture A1 (pinned in plan v5 per operator direction).** The
+    dispatch loop runs server-side, in-process, inside the MCP server
+    process via a new MCP tool
+    `vv_wrap_dispatch(skeleton_handle, tier, agent_name, prior_attempts?)`.
+    The orchestrator's `commands/wrap.md` invokes this tool exactly ONCE
+    per tier; the handler returns proposed outputs (or an `escalate_reason`)
+    plus dispatch metrics. The orchestrator never sees the per-LLM-tool-call
+    fan-out — that machinery lives behind the MCP boundary.
+
+    Why server-side: the alternative (A2) would have placed the loop in
+    `commands/wrap.md` itself, requiring the orchestrator (Opus) to
+    impersonate a tool-dispatch runtime. That doubles the Opus token
+    cost (the orchestrator now reads every executor turn) and puts the
+    breakable retry / escalation logic into prose markdown rather than
+    typed Go code. A1 isolates the dispatch state machine in
+    `internal/wrapdispatch/dispatch.go` where it is unit-testable with
+    a mock `AgenticProvider` and a recorded fixture for each escalation
+    branch.
+
+    **H3-v2 sequencing.** Quality gate runs BEFORE apply, against
+    proposed outputs in memory — NOT against vault state. A failed QC
+    returns an `escalate_reason`; the orchestrator advances to the next
+    tier with proposed outputs discarded. The vault is atomic from its
+    perspective: either the bundle applies fully, or the vault is
+    untouched. Under earlier sequencing (apply-then-QC) a failed gate
+    would have left the vault partially mutated, and the next escalation
+    tier would have re-applied on top, producing duplicate threads /
+    carried bullets / iteration blocks. H3-v2 rules out that class.
+
+    **H4-v3 demotion.** The terminal signal `wrap_executor_finish(status,
+    reason?, outputs?)` is an in-loop tool spec passed via
+    `ToolsRequest.Tools` — it is NOT a registered MCP tool. The dispatch
+    handler's local `ToolExecutor` callback recognizes the call, captures
+    the args into a Go variable, and returns. Treating it as a registered
+    MCP tool would have leaked an internal handshake into the public tool
+    surface and the integration-test exact-set assertion.
+
+    **OQ-5 directive (synthesize routing).** When the executor invokes
+    `vv_synthesize_wrap_bundle` from inside the dispatch loop, the
+    handler's local `ToolExecutor` calls
+    `internal/mcp/wrapbundle.go::FillBundle()` directly via Go function
+    call — NOT via a re-entrant MCP roundtrip back through the server
+    transport. The pattern follows the existing in-process dispatch
+    precedent in `tools_apply_wrap_bundle.go` (peer handler bodies
+    invoked directly; see DESIGN #50). Re-entrant MCP would have
+    required the dispatch handler to construct JSON-RPC requests
+    against its own server and parse the responses back out — pure
+    overhead with no testability win.
+
+    **OQ-6 directive (transport timeout).** stdio MCP transport
+    accommodates 1-3 minute dispatch durations with no mitigation.
+    The custom MCP implementation in `internal/mcp/server.go` has no
+    per-request timeout; client (Claude Code harness) timeouts default
+    to "indefinite while parent process is alive." The handler emits
+    one stderr progress line per executor LLM tool-call so the
+    operator sees a heartbeat during the wait
+    (`[wrap-dispatch] tier=sonnet attempt=1 t=23s tool=vv_synthesize_wrap_bundle`).
+    Future revisit if Claude Code introduces a hard MCP timeout — at
+    that point the dispatcher would split into prepare/poll handles.
+
+    Source: `internal/mcp/tools_wrap_dispatch.go`,
+    `internal/wrapdispatch/dispatch.go`, `internal/mcp/wrapapply.go`
+    (Phase 3c commits `407c320..f81e955`; the H3-v2 sequencing relies
+    on Phase 3b's `vv_wrap_quality_check` from commits
+    `4c645a6..e15c7cb`).
+
+85. **MCP-served agent registry via `vv_get_agent_definition`;
+    build-time generation of `.claude/agents/<name>.md` artifacts. BOTH
+    the MCP tool AND the generated file are v2-portability scaffolding;
+    v1's `vv_wrap_dispatch` handler reads the registry via direct Go
+    call.** The `wrap-model-tiering` epic introduces the `wrap-executor`
+    agent definition — a system prompt plus tool whitelist plus
+    escalation triggers plus output_format contract that drives the
+    dispatch executor's behavior. Three distribution surfaces are shipped
+    in v1, of which only one is consumed by v1's own dispatch path:
+
+    - **In-binary embedded registry** (`internal/agentregistry/embedded.go`
+      with `//go:embed agents/*.md`). The `wrap-executor.md` source of
+      truth lives at `internal/agentregistry/agents/wrap-executor.md`
+      and is read by v1's `vv_wrap_dispatch` handler via
+      `agentregistry.Lookup("wrap-executor")` — a direct Go function
+      call inside the MCP server process.
+    - **Generated `.claude/agents/<name>.md` artifact** via
+      `vv internal generate-agents` (target `make agents`, hooked into
+      `make install`). For orchestrators that do NOT embed the
+      vibe-vault binary — i.e., a v2 future where /wrap runs from a
+      session host that cannot link `internal/agentregistry` directly.
+    - **MCP tool `vv_get_agent_definition(name)`** as an alternative
+      read path for orchestrators that DO speak MCP but lack direct Go
+      access.
+
+    **v1 NEVER consumes the MCP tool or the generated file.** H1-v3
+    explicitly removed `vv_get_agent_definition` from
+    `vv_wrap_dispatch`'s pre-flight assertion list, and the
+    `commands/wrap.md` rewrite does not read
+    `.claude/agents/wrap-executor.md`. An operator-facing comment at the
+    top of the generated file declares that scope explicitly so a future
+    reader does not assume v1 round-trips through it.
+
+    **Why ship them in v1 anyway.** Defining the contract once upfront
+    avoids retrofitting two distribution surfaces later when v2 lands —
+    the registry sha256 stamping and frontmatter shape are settled in
+    v1 against tests, so v2 only needs to wire the consumers. Cost is
+    one new MCP tool entry on the surface (43 → 43 with this slot
+    counted) and a regenerated artifact under `.claude/agents/`. The
+    registry source-of-truth is `internal/agentregistry/agents/`, which
+    keeps the MCP tool and the generated file byte-identical by
+    construction.
+
+    Source: `internal/agentregistry/{registry,embedded}.go`,
+    `internal/agentregistry/agents/wrap-executor.md`,
+    `internal/mcp/tools_agents.go`, `cmd/vv/internal.go`, generated
+    `.claude/agents/wrap-executor.md` (Phase 2 commits
+    `b196887..eda3baa`).
+
+86. **Skeleton + prose split; orchestrator-facts cached host-local in
+    `~/.cache/vibe-vault/wrap-bundles/iter-<N>-skeleton.json`; per-tier
+    prose ephemeral; log-rotate keeps three most recent skeletons.**
+    C2-v3 finding (plan v5 review): the original Phase 3 contract
+    required the synthesizer to emit prose the executor had not yet
+    generated, putting cart before horse. The bundle splits into two
+    artifacts:
+
+    - **Skeleton** — orchestrator-supplied facts only, no prose. Built
+      once per /wrap via `vv_prepare_wrap_skeleton` (Phase 3a). Persisted
+      to `~/.cache/vibe-vault/wrap-bundles/iter-<N>-skeleton.json` by
+      `internal/wrapbundlecache/cache.go`. Survives MCP server restarts
+      (consequential: a /wrap interrupted by a server crash does not
+      need to re-collect orchestrator facts). Log-rotate keeps the
+      three most recent skeletons; older skeletons are deleted on
+      every cache write.
+    - **Bundle** — skeleton plus executor-supplied prose
+      (iteration_narrative, capture_session.summary, decisions, files,
+      thread bodies, carried titles, commit-message body). Built
+      in-memory via `vv_synthesize_wrap_bundle(skeleton_handle,
+      prose-fields)` returning the full bundle. NOT cached — each
+      tier's prose is ephemeral, and an escalation discards prior-tier
+      prose entirely.
+
+    **H2-v3 schema bump (thread-replace).** `WrapBundle` and
+    `WrapSkeleton` carry `resume_threads_to_replace` / `ResumeThreadsReplace`
+    for thread-REPLACE operations. Iter-159 added `vv_thread_replace`
+    as a peer to `vv_thread_insert` / `vv_thread_remove`; the wrap
+    pipeline now plumbs it end-to-end. Apply order extends to:
+    `iter → thread_insert × N → thread_replace × R (NEW) → thread_remove
+    × M → carried_add × P → carried_remove × Q → set_commit_msg × 1 →
+    capture × 1`. The mutation-count check in
+    `vv_wrap_quality_check` (DESIGN #87) and the count formula in
+    `vv_apply_wrap_bundle_by_handle` were updated in lockstep — the
+    formula reads `3 + N + R + M + P + Q` (the constant 3 covers
+    iter + commit_msg + capture).
+
+    **Compare-and-set guard via skeleton sha256.** The handle returned
+    by `vv_prepare_wrap_skeleton` includes `skeleton_sha256`; subsequent
+    calls (`vv_synthesize_wrap_bundle`, `vv_apply_wrap_bundle_by_handle`,
+    `vv_wrap_quality_check`, `vv_wrap_dispatch`) verify the on-disk
+    skeleton's sha matches the handle's. Mismatch returns `"skeleton
+    cache file modified after handle issued"` and refuses the call.
+    This protects against concurrent /wrap runs racing through the
+    same iter, and against manual edits to the cache file between
+    handle issuance and consumption. The check is structural across
+    all four consumer tools — no path bypasses it.
+
+    **Decision 23 fold (no shims).** The handle-based variants REPLACE
+    the inline tools outright. `vv_synthesize_wrap` (singleton tool
+    that read everything itself and returned a one-shot bundle) is
+    renamed `vv_synthesize_wrap_bundle` and now requires a skeleton
+    handle; `vv_apply_wrap_bundle` is renamed
+    `vv_apply_wrap_bundle_by_handle` and likewise requires the handle.
+    No backward-compat shims — orchestrators that called the old names
+    get an explicit "tool not found" error and must update.
+    `commands/wrap.md` was rewritten to call the handle-based names in
+    the same epic.
+
+    Source: `internal/wrapbundlecache/cache.go`,
+    `internal/mcp/wrapbundle.go`, `internal/mcp/tools_prepare_skeleton.go`,
+    `internal/mcp/tools_synthesize_wrap.go`,
+    `internal/mcp/tools_apply_wrap_bundle.go` (Phase 3a commits
+    `f5d96f5..6f2da4c`).
+
+87. **Server-side quality gate runs four trigger checks against
+    proposed outputs without touching vault state; the H3-v2 invariant
+    is structural.** Decision 8 of the wrap-model-tiering plan defines
+    six escalation triggers. Four are owned by `vv_wrap_quality_check`
+    (the tool); the other two — `mcp_tool_error_after_retry` and
+    `missing_terminal_signal` — fire from the `internal/wrapdispatch`
+    loop directly. The four QC triggers:
+
+    1. **`multi_match_ambiguity`** — dry-run thread-and-carried lookup
+       against live vault state. Multi-match for replace/remove
+       operations (i.e., the slug resolves to ≥2 subsections) or a
+       missing anchor for replace/remove fires the trigger. The check
+       is read-only against `Projects/<name>/agentctx/resume.md`.
+    2. **`mutation_count_mismatch`** — derived count from the skeleton
+       (`3 + N + R + M + P + Q`, where the constant 3 is
+       iter + commit_msg + capture; R is the H2-v3 thread-replace
+       term) versus the actual count present in the filled bundle.
+       Off-by-one in v3 review (C2-v2) was caught and corrected to
+       include thread-replace. Tested by
+       `TestVVWrapQualityCheck_DetectsMutationCountMismatch_CorrectFormulaIncludesThreadReplace`.
+    3. **`semantic_presence_failure`** — every paragraph in
+       `iteration_narrative` must cite at least one of {commit SHA,
+       file path, function name, decision number}. The narrative as
+       a whole must additionally include a commit-range SHA span
+       (`a1b2c3d..e4f5a6b`-shape). M3-v3 file-path regex was
+       empirically loosened from `/[a-zA-Z0-9_./-]+` (strict
+       leading-slash) to a slash-bearing path with typical source
+       extensions (`.go`, `.md`, `.toml`, `.json`, etc.) because the
+       leading-slash form fails every existing iteration narrative
+       in this project's vault. Tested by
+       `TestSemanticPresenceFailures_FilePathRegexAcceptsNoLeadingSlash`.
+    4. **`commit_subject_invalid`** — non-empty AND not in the
+       rejection list `["WIP", "wip", "fix", "update", "change",
+       "edit"]`. Empty subject fires too. The list is the project's
+       conventional-commit gate (a non-anchored hint subject would
+       defeat the convention).
+
+    **H3-v2 invariant (NON-NEGOTIABLE).** QC reads vault state for the
+    dry-run check but NEVER mutates it. `TestVVWrapQualityCheck_NoVaultMutation`
+    (and the integration counterpart
+    `TestIntegration_WrapQualityCheck_DetectsExpectedFailures_IncludingThreadReplace`)
+    compare resume.md and iterations.md byte-for-byte before vs after
+    a QC run; passing this test is structural to the H3-v2 contract,
+    not optional. A future change that introduces any mutation under
+    QC fails this test by construction.
+
+    **Why before-apply.** Under earlier sequencing (apply-then-QC) a
+    failed gate would leave the vault partially mutated; the next
+    escalation tier would re-apply on top, producing duplicates. Under
+    H3-v2 sequencing, proposed outputs sit in memory until QC passes;
+    apply is atomic from the vault's perspective, and a failed gate
+    leaves the vault untouched.
+
+    Source: `internal/mcp/tools_quality_check.go`,
+    `internal/mcp/tools_quality_check_test.go` (Phase 3b commits
+    `4c645a6..e15c7cb`).
+
+88. **Per-wrap dispatch metrics in parallel `wrap-dispatch.jsonl`
+    artifact; existing per-field `wrap-metrics.jsonl` untouched.
+    `[wrap]` config schema with H3-v3 Overlay map-merge fix; `vv stats
+    wrap` aggregates both.** C4 finding: the existing
+    `wrap-metrics.jsonl` writer (`internal/wrapmetrics/writer.go`)
+    carries per-field drift records (synth_sha256 vs apply_sha256 per
+    bundle field). Per-wrap dispatch metrics (per-tier durations,
+    escalation reasons, token usage) need a different record schema.
+    Two options: (a) extend the existing `Line` struct with optional
+    dispatch fields, (b) sibling jsonl with a separate schema.
+
+    **Chose (b).** A new `~/.cache/vibe-vault/wrap-dispatch.jsonl`
+    sibling to the existing per-field jsonl, with a `DispatchLine`
+    record schema: `tier`, `provider_model`, `duration_ms`, `outcome`
+    (`ok` / `escalate` / `error`), `expected_mutations`,
+    `actual_mutations`, `input_tokens`, `output_tokens`,
+    `escalate_reason`. The two writers are independent
+    (`internal/wrapmetrics/dispatch_writer.go` does not import
+    `writer.go`); `vv stats wrap` reads both files and renders two
+    independent reports (median duration per tier, escalation rate,
+    top reasons; AND median drift_bytes per field).
+
+    **`[wrap]` config schema** (Decision 3 in the plan):
+    - `default_model = "sonnet"` (operator's actual value; the default
+      when the section is absent is `"opus"` to preserve iter-157
+      behavior).
+    - `escalation_ladder = ["sonnet", "opus"]`.
+    - `[wrap.tiers]` map: tier name → `provider:model` string. v1
+      enforces an `anthropic:` prefix at config validation time
+      (`TestValidate_NonAnthropicProviderRejected`); v2 lifts the
+      restriction.
+
+    **H3-v3 Overlay map-merge fix.** `Overlay()`
+    (`internal/config/config.go`) uses field-by-field `md.IsDefined()`
+    copying. Existing `Pricing.Models` slice is whole-replacement on
+    overlay (the iter-78 baseline for that field). For `Wrap.Tiers` we
+    need MERGE semantics — a per-project overlay that defines only
+    `[wrap.tiers.opus] = "anthropic:claude-opus-4-7"` should not erase
+    the operator-global `[wrap.tiers.sonnet]` entry. Explicit
+    map-merge code was added in `Overlay()` (clone-then-merge to avoid
+    mutating the caller's map). The `Load()` path leverages
+    BurntSushi/toml's automatic map-merge semantics into a
+    pre-populated map.
+
+    The two paths are tested separately: `TestLoad_PartialMapOverride`
+    exercises the Load merge; `TestOverlay_PartialMapMerge` exercises
+    the in-memory Overlay merge (which the toml library does not
+    cover because Overlay merges from Go structs, not TOML files).
+    M1-v2 + H3-v3 split test coverage was the cue that the two paths
+    were divergent until this fix.
+
+    **Test isolation note (post-Phase-4 fix in commit `8ed4a2f`).**
+    Handler tests that exercise the full `vv_wrap_dispatch` path were
+    leaking dispatch jsonl entries into the operator's real
+    `~/.cache/vibe-vault/wrap-dispatch.jsonl`. `withSkeletonCacheDir`
+    only redirected `wrapbundlecache.CacheDir`, not
+    `wrapmetrics.CacheDir()`. Fix: the helper now pins
+    `VIBE_VAULT_HOME` to a tempdir if not already set by the caller.
+    Discovered via /restart's `vv stats wrap` smoke producing
+    synthetic test data (a tier=`sonnet` line with mock provider
+    fingerprints). The leak is now caught at write time by HOME-sandbox
+    canary `no_real_vault_mutation`.
+
+    Source: `internal/wrapmetrics/dispatch_writer.go`,
+    `internal/config/config.go` (`WrapConfig` + `Overlay` map-merge),
+    `internal/wrapmetrics/stats.go`, `cmd/vv/main.go` (the
+    `stats wrap` subcommand),
+    `internal/mcp/tools_prepare_skeleton_test.go`,
+    `test/integration_test.go` (the test-isolation fix in commit
+    `8ed4a2f`). Phase 4 commits `1bb15a5..52eb607` plus `8ed4a2f`.

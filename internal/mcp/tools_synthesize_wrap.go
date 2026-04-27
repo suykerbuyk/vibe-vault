@@ -5,13 +5,14 @@ package mcp
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 	"github.com/suykerbuyk/vibe-vault/internal/meta"
+	"github.com/suykerbuyk/vibe-vault/internal/wrapbundlecache"
 )
 
 // ---- Bundle types -----------------------------------------------------------
@@ -34,6 +35,14 @@ type BundleThreadBlock struct {
 // BundleThreadClose is a thread removal entry ready for vv_thread_remove.
 type BundleThreadClose struct {
 	Slug        string `json:"slug"`
+	SynthSHA256 string `json:"synth_sha256"`
+}
+
+// BundleThreadReplace is a thread-body replacement entry ready for
+// vv_thread_replace (H2-v3 in the wrap-model-tiering plan).
+type BundleThreadReplace struct {
+	Slug        string `json:"slug"`
+	Body        string `json:"body"`
 	SynthSHA256 string `json:"synth_sha256"`
 }
 
@@ -72,17 +81,18 @@ type BundleCaptureContent struct {
 	OpenThreads  []string `json:"open_threads"`
 }
 
-// WrapBundle is the top-level structure returned by vv_synthesize_wrap and
-// consumed by vv_apply_wrap_bundle.
+// WrapBundle is the top-level structure returned by the wrap-synthesis tool
+// and consumed by the wrap-apply tool.
 type WrapBundle struct {
-	IterationBlock      BundleFieldWithContent `json:"iteration_block"`
-	CommitMsg           BundleFieldWithContent `json:"commit_msg"`
-	ResumeThreadBlocks  []BundleThreadBlock    `json:"resume_thread_blocks"`
-	ResumeThreadsToClose []BundleThreadClose   `json:"resume_threads_to_close"`
-	CarriedChanges      BundleCarriedChanges   `json:"carried_changes"`
-	CaptureSession      BundleCaptureSession   `json:"capture_session"`
-	SynthTimestamp      string                 `json:"synth_timestamp"`
-	Iteration           int                    `json:"iteration"`
+	IterationBlock       BundleFieldWithContent `json:"iteration_block"`
+	CommitMsg            BundleFieldWithContent `json:"commit_msg"`
+	ResumeThreadBlocks   []BundleThreadBlock    `json:"resume_thread_blocks"`
+	ResumeThreadsReplace []BundleThreadReplace  `json:"resume_threads_to_replace"`
+	ResumeThreadsToClose []BundleThreadClose    `json:"resume_threads_to_close"`
+	CarriedChanges       BundleCarriedChanges   `json:"carried_changes"`
+	CaptureSession       BundleCaptureSession   `json:"capture_session"`
+	SynthTimestamp       string                 `json:"synth_timestamp"`
+	Iteration            int                    `json:"iteration"`
 }
 
 // fingerprintString returns the hex-encoded SHA-256 of s.
@@ -101,322 +111,133 @@ func fingerprintJSON(v any) (string, error) {
 	return fmt.Sprintf("%x", h), nil
 }
 
-// NewSynthesizeWrapTool creates the vv_synthesize_wrap tool.
+// SkeletonHandle is the {iter, skeleton_path, skeleton_sha256} reference
+// passed by callers of vv_synthesize_wrap_bundle and
+// vv_apply_wrap_bundle_by_handle.
+type SkeletonHandle struct {
+	Iter           int    `json:"iter"`
+	SkeletonPath   string `json:"skeleton_path"`
+	SkeletonSHA256 string `json:"skeleton_sha256"`
+}
+
+// loadSkeletonByHandle reads the skeleton file referenced by h, verifies its
+// sha256 matches the handle (compare-and-set), and unmarshals into a
+// WrapSkeleton. Returns an MCP-style error if the on-disk bytes have
+// changed since the handle was issued.
+func loadSkeletonByHandle(h SkeletonHandle) (WrapSkeleton, error) {
+	if h.Iter <= 0 {
+		return WrapSkeleton{}, fmt.Errorf("skeleton_handle.iter must be > 0")
+	}
+	if h.SkeletonPath == "" {
+		return WrapSkeleton{}, fmt.Errorf("skeleton_handle.skeleton_path is required")
+	}
+	data, err := wrapbundlecache.Read(h.SkeletonPath)
+	if err != nil {
+		return WrapSkeleton{}, fmt.Errorf("read skeleton: %w", err)
+	}
+	got := sha256.Sum256(data)
+	gotHex := hex.EncodeToString(got[:])
+	if h.SkeletonSHA256 != "" && gotHex != h.SkeletonSHA256 {
+		return WrapSkeleton{}, fmt.Errorf("skeleton cache file modified after handle issued (sha mismatch)")
+	}
+	var sk WrapSkeleton
+	if err := json.Unmarshal(data, &sk); err != nil {
+		return WrapSkeleton{}, fmt.Errorf("parse skeleton JSON: %w", err)
+	}
+	return sk, nil
+}
+
+// proseInputArgs is the shared input shape for prose fields used by both
+// vv_synthesize_wrap_bundle and vv_apply_wrap_bundle_by_handle.
+type proseInputArgs struct {
+	IterationNarrative  string            `json:"iteration_narrative"`
+	IterationTitle      string            `json:"iteration_title"`
+	ProseBody           string            `json:"prose_body"`
+	CommitSubject       string            `json:"commit_subject"`
+	Date                string            `json:"date"`
+	ThreadBodies        map[string]string `json:"thread_bodies"`
+	CarriedBodies       map[string]string `json:"carried_bodies"`
+	CaptureSummary      string            `json:"capture_summary"`
+	CaptureTag          string            `json:"capture_tag"`
+	CaptureDecisions    []string          `json:"capture_decisions"`
+	CaptureFilesChanged []string          `json:"capture_files_changed"`
+	CaptureOpenThreads  []string          `json:"capture_open_threads"`
+}
+
+// toProseFields translates the JSON input shape into the typed ProseFields
+// consumed by FillBundle.
+func (p proseInputArgs) toProseFields() ProseFields {
+	return ProseFields(p)
+}
+
+// NewSynthesizeWrapTool creates the vv_synthesize_wrap_bundle tool.
 //
-// The tool assembles all wrap sub-artifacts into a JSON bundle — iteration
-// block, commit message, thread edits, carried-forward changes, and a
-// capture_session payload — each tagged with a synthesize-time SHA-256
-// fingerprint. It does NOT write any file; the AI inspects and optionally
-// edits the bundle before passing it to vv_apply_wrap_bundle.
-func NewSynthesizeWrapTool(cfg config.Config) Tool {
+// Loads a previously-prepared wrap skeleton from the host-local cache
+// (referenced by skeleton_handle = {iter, skeleton_path, skeleton_sha256})
+// and fills in the executor-supplied prose to produce a full WrapBundle.
+//
+// The bundle is NOT cached — each escalation tier's prose is ephemeral and
+// regenerated from the same skeleton. The skeleton's sha256 is verified
+// against the handle (compare-and-set) so a tampered cache file is detected.
+func NewSynthesizeWrapTool(_ config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
-			Name: "vv_synthesize_wrap",
-			Description: "Assemble all wrap sub-artifacts (iteration_block, commit_msg, " +
-				"resume_thread_blocks, carried_changes, capture_session) into a single " +
-				"JSON bundle, each field tagged with a synthesize-time SHA-256 fingerprint. " +
-				"Does NOT write any file — pass the returned bundle to vv_apply_wrap_bundle " +
-				"to dispatch all writes atomically. " +
-				"iteration_narrative and title are required; subject is required for the " +
-				"commit message. If files_changed or test_count_delta are omitted, the " +
-				"files section is derived from git and test counts default to zero.",
+			Name: "vv_synthesize_wrap_bundle",
+			Description: "Reconstruct a full WrapBundle from a previously-prepared " +
+				"skeleton handle plus executor-supplied prose. The skeleton handle is " +
+				"the {iter, skeleton_path, skeleton_sha256} object returned by " +
+				"vv_prepare_wrap_skeleton; on-disk bytes are sha256-verified against " +
+				"the handle to detect cache tampering. The returned bundle is in-memory " +
+				"and ephemeral — each escalation tier regenerates prose from the same " +
+				"skeleton. Pass the bundle (unchanged) to vv_apply_wrap_bundle_by_handle " +
+				"to dispatch all writes.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
-					"project": {
-						"type": "string",
-						"description": "Project name. If omitted, detected from working directory."
-					},
-					"project_path": {
-						"type": "string",
-						"description": "Absolute path to the project root (for git-derived sections). If omitted, derived via meta.ProjectRoot()."
-					},
-					"iteration": {
-						"type": "integer",
-						"description": "Iteration number. If omitted, defaults to 0 (apply tool may auto-increment)."
-					},
-					"iteration_narrative": {
-						"type": "string",
-						"description": "Required. Verbatim narrative prose for iterations.md."
-					},
-					"title": {
-						"type": "string",
-						"description": "Required. Short title for the iteration heading."
-					},
-					"subject": {
-						"type": "string",
-						"description": "Required. Single-line commit subject (first line of commit message)."
-					},
-					"prose_body": {
-						"type": "string",
-						"description": "2-3 paragraph commit narrative. Defaults to iteration_narrative if omitted."
-					},
-					"date": {
-						"type": "string",
-						"description": "Date in YYYY-MM-DD format. Defaults to today."
-					},
-					"files_changed": {
-						"type": "array",
-						"items": {"type": "string"},
-						"description": "Files changed. If omitted, derived from git status/diff in project root."
-					},
-					"test_count_delta": {
+					"skeleton_handle": {
 						"type": "object",
-						"description": "Test counts for the commit message.",
+						"description": "The {iter, skeleton_path, skeleton_sha256} object returned by vv_prepare_wrap_skeleton.",
 						"properties": {
-							"unit_tests": {"type": "integer"},
-							"integration_subtests": {"type": "integer"},
-							"lint_findings": {"type": "integer"}
-						}
+							"iter":            {"type": "integer"},
+							"skeleton_path":   {"type": "string"},
+							"skeleton_sha256": {"type": "string"}
+						},
+						"required": ["iter", "skeleton_path"]
 					},
-					"decisions": {
-						"type": "array",
-						"items": {"type": "string"},
-						"description": "Key decisions for capture_session."
-					},
-					"threads_to_open": {
-						"type": "array",
-						"description": "New threads to insert. Each item: {position: {mode, anchor_slug?}, slug, body}.",
-						"items": {
-							"type": "object",
-							"properties": {
-								"position": {"type": "object"},
-								"slug": {"type": "string"},
-								"body": {"type": "string"}
-							},
-							"required": ["position", "slug", "body"]
-						}
-					},
-					"threads_to_close": {
-						"type": "array",
-						"items": {"type": "string"},
-						"description": "Slugs of threads to remove."
-					},
-					"carried_to_add": {
-						"type": "array",
-						"description": "Carried-forward bullets to add. Each: {slug, title, body?}.",
-						"items": {
-							"type": "object",
-							"properties": {
-								"slug": {"type": "string"},
-								"title": {"type": "string"},
-								"body": {"type": "string"}
-							},
-							"required": ["slug", "title"]
-						}
-					},
-					"carried_to_remove": {
-						"type": "array",
-						"items": {"type": "string"},
-						"description": "Slugs of carried-forward bullets to remove."
-					}
+					"iteration_narrative":   {"type": "string"},
+					"iteration_title":       {"type": "string"},
+					"prose_body":            {"type": "string"},
+					"commit_subject":        {"type": "string"},
+					"date":                  {"type": "string"},
+					"thread_bodies":         {"type": "object", "description": "Map of slug -> body for opened + replaced threads."},
+					"carried_bodies":        {"type": "object", "description": "Map of slug -> body for added carried items."},
+					"capture_summary":       {"type": "string"},
+					"capture_tag":           {"type": "string"},
+					"capture_decisions":     {"type": "array", "items": {"type": "string"}},
+					"capture_files_changed": {"type": "array", "items": {"type": "string"}},
+					"capture_open_threads":  {"type": "array", "items": {"type": "string"}}
 				},
-				"required": ["iteration_narrative", "title", "subject"]
+				"required": ["skeleton_handle"]
 			}`),
 		},
 		Handler: func(params json.RawMessage) (string, error) {
 			var args struct {
-				Project            string   `json:"project"`
-				ProjectPath        string   `json:"project_path"`
-				Iteration          int      `json:"iteration"`
-				IterationNarrative string   `json:"iteration_narrative"`
-				Title              string   `json:"title"`
-				Subject            string   `json:"subject"`
-				ProseBody          string   `json:"prose_body"`
-				Date               string   `json:"date"`
-				FilesChanged       []string `json:"files_changed"`
-				TestCountDelta     *struct {
-					UnitTests           int `json:"unit_tests"`
-					IntegrationSubtests int `json:"integration_subtests"`
-					LintFindings        int `json:"lint_findings"`
-				} `json:"test_count_delta"`
-				Decisions       []string `json:"decisions"`
-				ThreadsToOpen   []struct {
-					Position map[string]string `json:"position"`
-					Slug     string            `json:"slug"`
-					Body     string            `json:"body"`
-				} `json:"threads_to_open"`
-				ThreadsToClose  []string `json:"threads_to_close"`
-				CarriedToAdd    []struct {
-					Slug  string `json:"slug"`
-					Title string `json:"title"`
-					Body  string `json:"body"`
-				} `json:"carried_to_add"`
-				CarriedToRemove []string `json:"carried_to_remove"`
+				SkeletonHandle SkeletonHandle `json:"skeleton_handle"`
+				proseInputArgs
 			}
 			if len(params) > 0 {
 				if err := json.Unmarshal(params, &args); err != nil {
 					return "", fmt.Errorf("invalid arguments: %w", err)
 				}
 			}
-
-			// Validate required fields.
-			if args.IterationNarrative == "" {
-				return "", fmt.Errorf("iteration_narrative is required")
+			skeleton, err := loadSkeletonByHandle(args.SkeletonHandle)
+			if err != nil {
+				return "", err
 			}
-			if args.Title == "" {
-				return "", fmt.Errorf("title is required")
+			if strings.Contains(args.CommitSubject, "\n") {
+				return "", fmt.Errorf("commit_subject must be a single line (no newlines)")
 			}
-			if args.Subject == "" {
-				return "", fmt.Errorf("subject is required")
-			}
-			if strings.Contains(args.Subject, "\n") {
-				return "", fmt.Errorf("subject must be a single line (no newlines)")
-			}
-
-			// Default date.
-			date := args.Date
-			if date == "" {
-				date = time.Now().Format("2006-01-02")
-			}
-
-			// Default prose_body to iteration_narrative if not supplied.
-			proseBody := args.ProseBody
-			if proseBody == "" {
-				proseBody = args.IterationNarrative
-			}
-
-			// --- Build iteration_block ---
-			iterBlock := BuildIterationBlock(args.Iteration, args.Title, args.IterationNarrative, date, cfg.VaultPath)
-
-			// --- Build commit_msg ---
-			// Resolve project root for git-derived sections.
-			projectRoot, rootErr := resolveProjectRoot(args.ProjectPath, cfg.VaultPath)
-			var filesSection string
-			if len(args.FilesChanged) > 0 {
-				// Build from supplied list.
-				var sb strings.Builder
-				for _, f := range args.FilesChanged {
-					sb.WriteString("- ")
-					sb.WriteString(f)
-					sb.WriteString("\n")
-				}
-				filesSection = sb.String()
-			} else if rootErr == nil {
-				// Derive from git in project root.
-				var err error
-				filesSection, err = buildFilesChangedSection(projectRoot)
-				if err != nil {
-					// Non-fatal: fall back to placeholder.
-					filesSection = "(could not derive files changed: " + err.Error() + ")\n"
-				}
-			} else {
-				filesSection = "(project root not resolved — pass project_path for git-derived section)\n"
-			}
-
-			unitTests, integrationSubtests, lintFindings := 0, 0, 0
-			if args.TestCountDelta != nil {
-				unitTests = args.TestCountDelta.UnitTests
-				integrationSubtests = args.TestCountDelta.IntegrationSubtests
-				lintFindings = args.TestCountDelta.LintFindings
-			}
-
-			commitMsgContent := renderCommitMsg(
-				args.Subject,
-				proseBody,
-				filesSection,
-				unitTests,
-				integrationSubtests,
-				lintFindings,
-				args.Iteration,
-			)
-
-			// --- Build resume_thread_blocks ---
-			threadBlocks := make([]BundleThreadBlock, 0, len(args.ThreadsToOpen))
-			for _, t := range args.ThreadsToOpen {
-				fp := fingerprintString(t.Slug + "\x00" + t.Body)
-				threadBlocks = append(threadBlocks, BundleThreadBlock{
-					Position:    t.Position,
-					Slug:        t.Slug,
-					Body:        t.Body,
-					SynthSHA256: fp,
-				})
-			}
-
-			// --- Build resume_threads_to_close ---
-			threadClose := make([]BundleThreadClose, 0, len(args.ThreadsToClose))
-			for _, slug := range args.ThreadsToClose {
-				threadClose = append(threadClose, BundleThreadClose{
-					Slug:        slug,
-					SynthSHA256: fingerprintString(slug),
-				})
-			}
-
-			// --- Build carried_changes ---
-			carriedAdd := make([]BundleCarriedAdd, 0, len(args.CarriedToAdd))
-			for _, ca := range args.CarriedToAdd {
-				fp := fingerprintString(ca.Slug + "\x00" + ca.Title + "\x00" + ca.Body)
-				carriedAdd = append(carriedAdd, BundleCarriedAdd{
-					Slug:        ca.Slug,
-					Title:       ca.Title,
-					Body:        ca.Body,
-					SynthSHA256: fp,
-				})
-			}
-			carriedRemove := make([]BundleCarriedRemove, 0, len(args.CarriedToRemove))
-			for _, slug := range args.CarriedToRemove {
-				carriedRemove = append(carriedRemove, BundleCarriedRemove{
-					Slug:        slug,
-					SynthSHA256: fingerprintString(slug),
-				})
-			}
-
-			// --- Build capture_session ---
-			// open_threads derived from threads_to_open slugs + threads_to_close slugs.
-			openThreads := make([]string, 0)
-			for _, t := range args.ThreadsToOpen {
-				openThreads = append(openThreads, t.Slug)
-			}
-			for _, slug := range args.ThreadsToClose {
-				openThreads = append(openThreads, "close:"+slug)
-			}
-
-			filesForCapture := args.FilesChanged
-			if len(filesForCapture) == 0 {
-				// Derive from the filesSection we already have (parse bullet lines).
-				for _, line := range strings.Split(filesSection, "\n") {
-					if strings.HasPrefix(line, "- ") {
-						filesForCapture = append(filesForCapture, strings.TrimPrefix(line, "- "))
-					}
-				}
-			}
-
-			captureContent := BundleCaptureContent{
-				Summary:      args.Title + ". " + firstNWords(args.IterationNarrative, 30),
-				Tag:          "implementation",
-				Decisions:    args.Decisions,
-				FilesChanged: filesForCapture,
-				OpenThreads:  openThreads,
-			}
-			captureFP, fpErr := fingerprintJSON(captureContent)
-			if fpErr != nil {
-				captureFP = "sha256-error:" + fpErr.Error()
-			}
-
-			// --- Assemble the bundle ---
-			bundle := WrapBundle{
-				IterationBlock: BundleFieldWithContent{
-					Content:     iterBlock,
-					SynthSHA256: fingerprintString(iterBlock),
-				},
-				CommitMsg: BundleFieldWithContent{
-					Content:     commitMsgContent,
-					SynthSHA256: fingerprintString(commitMsgContent),
-				},
-				ResumeThreadBlocks:   threadBlocks,
-				ResumeThreadsToClose: threadClose,
-				CarriedChanges: BundleCarriedChanges{
-					Add:    carriedAdd,
-					Remove: carriedRemove,
-				},
-				CaptureSession: BundleCaptureSession{
-					Content:     captureContent,
-					SynthSHA256: captureFP,
-				},
-				SynthTimestamp: time.Now().UTC().Format(time.RFC3339),
-				Iteration:      args.Iteration,
-			}
-
+			bundle := FillBundle(skeleton, args.toProseFields())
 			out, err := json.MarshalIndent(bundle, "", "  ")
 			if err != nil {
 				return "", fmt.Errorf("marshal bundle: %w", err)
@@ -441,3 +262,4 @@ func provenanceForMetrics() (host, user, cwd string) {
 	p := meta.Stamp()
 	return p.Host, p.User, p.CWD
 }
+
