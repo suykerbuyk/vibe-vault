@@ -215,6 +215,68 @@ func TestWriteDefault_MissingVaultPathKey(t *testing.T) {
 	}
 }
 
+// TestWriteDefault_PreservesProviderKeys locks the H3 acceptance criterion:
+// re-running `vv init` against an existing config must not clobber an
+// operator's stored [providers.<P>].api_key values. WriteDefault on an
+// existing config delegates to updateVaultPath, which is key-blind by
+// design — but the regression risk is permanent, so we lock the contract
+// with a test.
+func TestWriteDefault_PreservesProviderKeys(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	configDir := filepath.Join(dir, "vibe-vault")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	existing := filepath.Join(configDir, "config.toml")
+	pre := `vault_path = "/some/where"
+
+[providers.anthropic]
+api_key = "EXISTING_ANTHROPIC_KEY"
+
+[providers.openai]
+api_key = "EXISTING_OPENAI_KEY"
+
+[providers.google]
+api_key = "EXISTING_GOOGLE_KEY"
+`
+	if err := os.WriteFile(existing, []byte(pre), 0o600); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	// Vault path differs so action will be "updated" — exercises the
+	// updateVaultPath edit code path, not the unchanged short-circuit.
+	if _, _, err := WriteDefault("/new/vault/path"); err != nil {
+		t.Fatalf("WriteDefault: %v", err)
+	}
+
+	data, err := os.ReadFile(existing)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(data)
+
+	for _, want := range []string{
+		`api_key = "EXISTING_ANTHROPIC_KEY"`,
+		`api_key = "EXISTING_OPENAI_KEY"`,
+		`api_key = "EXISTING_GOOGLE_KEY"`,
+		`[providers.anthropic]`,
+		`[providers.openai]`,
+		`[providers.google]`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("config missing %q after WriteDefault re-run", want)
+		}
+	}
+
+	// Vault path should still have been updated.
+	if !strings.Contains(content, "/new/vault/path") {
+		t.Error("vault_path was not updated")
+	}
+}
+
 func TestCompressHome(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
