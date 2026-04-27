@@ -21,6 +21,15 @@ the quality gate.
    Note: `vv_get_agent_definition` is v2-portability scaffolding and is
    NOT required for v1 dispatch.
 2. Verify pre-commit clean: `make pre-commit`.
+3. Verify an API key is configured for the tier-resolved provider.
+   `vv_wrap_dispatch` extracts the provider from the `[wrap.tiers]`
+   entry (e.g. `"anthropic:claude-sonnet-4-6"` → provider=`anthropic`)
+   and resolves the key via the layered resolver: config-first, then
+   env-fallback, then actionable error. Set the key via
+   `vv config set-key anthropic <key>` (preferred — stored at mode 0600
+   in `~/.config/vibe-vault/config.toml`) or `export ANTHROPIC_API_KEY=...`
+   in the shell that launches Claude Code. The same resolver covers
+   hook enrichment and session synthesis when those features are enabled.
 
 ## Procedure
 
