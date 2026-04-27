@@ -21,6 +21,29 @@ const (
 	pluginName = "vibe-vault"
 )
 
+// mcpEnvPassthroughKeys lists environment variables propagated from the
+// operator's shell into the MCP server subprocess via .mcp.json's env block.
+// Claude Code expands ${VAR} references against the parent process env at
+// spawn time, so the subprocess sees the operator's live key. Without this,
+// vv_wrap_dispatch (and other LLM-backed handlers) cannot reach the provider.
+var mcpEnvPassthroughKeys = []string{"ANTHROPIC_API_KEY"}
+
+// mcpServerEntry returns the canonical .mcp.json entry for the vibe-vault
+// MCP server. Single source of truth used by both Generate (marketplace
+// source) and InstallToCache (Claude Code plugin cache) so the two configs
+// can never drift.
+func mcpServerEntry() map[string]any {
+	env := make(map[string]any, len(mcpEnvPassthroughKeys))
+	for _, key := range mcpEnvPassthroughKeys {
+		env[key] = "${" + key + "}"
+	}
+	return map[string]any{
+		"command": "vv",
+		"args":    []any{"mcp"},
+		"env":     env,
+	}
+}
+
 // MarketplaceDir returns the marketplace root directory.
 // This is the directory registered in extraKnownMarketplaces.
 func MarketplaceDir() string {
