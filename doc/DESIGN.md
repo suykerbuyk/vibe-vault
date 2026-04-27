@@ -1729,3 +1729,152 @@ Key architectural and design decisions in vibe-vault, with rationale.
     `internal/help/commands.go` (`CmdConfig` + `CmdConfigSetKey`),
     `internal/plugin/plugin.go` (`mcpEnvPassthroughKeys`),
     `internal/plugin/plugin_test.go`, `internal/plugin/inject_test.go`.
+
+90. **Marker-bounded state-derived regions in resume.md; `ApplyBundle`
+    Step 9 (`resume_state_blocks`) re-renders them last from filesystem
+    ground truth; `ApplyMarkerBlocks` self-heals when markers are
+    absent.** Iters 165–166 surfaced a dispatch-path-specific drift
+    class: `## Project History (recent)` missed the iter-165 row, and
+    `### Active tasks (1)` still named the retired
+    `dispatch-api-key-resolution` task even though its file had moved
+    to `tasks/done/`. Root cause: the inline-orchestrator wrap path
+    maintains those sub-regions via `vv_update_resume`
+    (`internal/mcp/tools_context_write.go`), which the wrap-executor's
+    `forbidden_tools` blocks for the dispatched-executor path.
+    Different content classes, different authoring mechanisms, no
+    common authority — until Step 9.
+
+    **Two content classes, one new authority.** resume.md content
+    splits cleanly along an authoring axis. **Narrative** content —
+    Project Summary, iteration prose, decision rationale, Open
+    Threads prose, carried-forward bullets — stays LLM-authored
+    through the existing `applyThreadInsert` / `applyCarriedAdd` /
+    `vv_update_resume` mechanisms. **State-derived** content — the
+    Active-tasks list, Current-State headline counts, Project-History
+    tail rows — is generated from filesystem ground truth and now
+    flows through the new `applyResumeStateBlocks` apply step into
+    marker-bounded regions. Both wrap paths converge on `ApplyBundle`
+    (DESIGN #84 Architecture A1), so Step 9 fires uniformly for
+    inline AND dispatch.
+
+    **Three marker regions.** `<!-- vv:active-tasks:start --> ...
+    <!-- vv:active-tasks:end -->` inside `## Open Threads` carries
+    the `### Active tasks (N)` H3 rendered from `tasks/*.md` minus
+    `done/` and `cancelled/` (sorted priority desc, then slug asc).
+    `<!-- vv:current-state:start --> ... :end -->` inside `## Current
+    State` carries invariant bullets — see headline-count lockdown
+    below. `<!-- vv:project-history-tail:start --> ... :end -->`
+    inside `## Project History (recent)` carries the last N=10 rows
+    of the iteration table, scanned from `iterations.md` headings.
+    The marker shape pattern-matches the iter-116 `<!-- vv:data-
+    workflow:start -->` precedent already in the live vault file;
+    the rendering machinery is fresh under `internal/wraprender/`
+    (the data-workflow block is hand-edited and has no Go renderer).
+
+    **No LLM enforcement needed.** v1 of this design considered a
+    triple-defense layer enforcing marker invariants in synthesizer
+    prompts, in QC, and in apply. The wrap-executor agent is
+    structurally forbidden from authoring resume.md content via
+    `internal/agentregistry/agents/wrap-executor.md` `forbidden_tools`
+    — `vv_update_resume`, `Edit`, `Write`,
+    `vv_apply_wrap_bundle_by_handle`. Prompt and QC enforcement would
+    have solved a non-existent threat. The fix is a single
+    apply-pipeline mutation, not a new policing layer.
+
+    **Step 9 ordering vs `vv_update_resume`.** The inline-path
+    orchestrator may call `vv_update_resume(section="Current State",
+    ...)` during a wrap. That handler rewrites the full body of the
+    H2 section via `mdutil.ReplaceSectionBody`, so any orchestrator-
+    authored `content` arg that omits the marker pair clobbers it.
+    Resolution: **Step 9 runs LAST in `ApplyBundle`, after
+    `capture_session`, AND `ApplyMarkerBlocks` is self-healing.** If
+    the marker pair survives the orchestrator's writes, Step 9
+    replaces its contents in place; if the pair was clobbered or
+    never existed, Step 9 inserts the pair at a sensible default
+    location relative to existing H2/H3 anchors and renders fresh
+    contents. Either way the post-wrap state converges to filesystem
+    truth. The dispatch path has no clobbering risk — only Step 9
+    writes the affected regions.
+
+    **Step 9 metric line is special-cased out of drift counters.**
+    Every other apply step records a synth-vs-apply SHA pair to
+    `wrap-metrics.jsonl`; the synthesizer never carries marker
+    content (the bundle has no resume-state-blocks field), so
+    synth_sha and apply_sha are equal by construction. Step 9
+    records the metric line with `synth_sha == apply_sha ==
+    fingerprint(rendered_content)` and `synth_bytes == apply_bytes`,
+    and `recordMetricRaw` is gated to NOT increment
+    `driftSummary.DriftedFields` for `Step == "resume_state_blocks"`.
+    Locked by `TestApplyBundle_ResumeStateBlocksMetricLineSpecialCase`.
+
+    **Headline-count meaning is locked — operator-chosen scope
+    reduction.** The renderer emits exactly three invariant bullets
+    in the `current-state` region: `**Iterations:** <N> complete`,
+    `**MCP:** <N> tools + 1 prompt`, `**Embedded:** <N> templates`.
+    The plan's Phase 1 contract included a fourth `**Tests:** ...`
+    bullet sourced from RUN-counted `go test ./...`; Option C
+    (commit `74a02c7`) deliberately dropped it before merge. Two
+    reasons: (1) the renderer would have to shell out to `go test`
+    on every wrap to get a deterministic RUN-count, an unacceptable
+    Step-9 cost; (2) RUN-counted vs test-function-counted are
+    different numbers and prior resume.md prose has used both — the
+    machine-rendered bullet would have locked one meaning silently
+    (R3 in the plan). Test count and other prose remain
+    operator-authored adjacent to the marker block. Future re-add
+    of a `Tests:` bullet requires a separate plan with an explicit
+    headline-meaning decision; do not slip it back in incrementally.
+
+    **Iterations / MCP / Embedded sources** are stable and cheap.
+    Iteration count from heading scan of `iterations.md`. MCP tool
+    count from `(*mcp.Server).ToolNames()` (introduced iter 161,
+    DESIGN #88's per-iter measurement gate). Embedded template
+    count from `fs.WalkDir` over `templates.AgentctxFS()`
+    (`templates/embed.go`) — deliberately not the scaffold-side
+    `internal/scaffold/scaffold.go` embed FS, which is a separate
+    artifact serving a different purpose.
+
+    **`ApplyMarkerBlocks` self-healing demotes the retrofit utility
+    to deferred follow-up.** With Step 9 inserting markers on first
+    apply, the optional `vv check resume-markers [--fix]` utility
+    becomes pre-population polish only; consumer projects (rezbldr,
+    vibe-palace, others) acquire the markers automatically on their
+    next wrap. Per plan recommendation #4, the utility is deferred
+    until multi-project rollout demands markers visible before the
+    next wrap on each project. Not load-bearing; not implemented.
+
+    **v10 invariants-only contract honored.** The renderer's
+    `current-state` output is a strict subset of the v10
+    invariant-bullet whitelist (`Iterations`, `MCP`, `Embedded` are
+    all in `invariantFirstWords`). HTML comment lines pass the
+    multi-line comment carve-out in
+    `internal/context/invariants.go`. The contract is locked by
+    `TestRenderCurrentState_OutputPassesV10Validator`, which calls
+    `context.ValidateCurrentStateBody` on the renderer's output and
+    asserts ok=true — a future renderer change that violates the
+    contract fails CI before reaching production.
+
+    **Carried-bullet structural non-collision.** `applyCarriedAdd`
+    (Step 5) and `applyResumeStateBlocks` (Step 9) both nominally
+    mutate `## Open Threads`, but `mdutil/carried.go`
+    `locateCarriedBullets` parses by `### ` prefix and only operates
+    inside the exact `### Carried forward` H3. HTML comments in
+    other H3 subsections (notably `### Active tasks`) are ignored
+    by the parser. Collision risk is structurally zero, locked as a
+    regression test by
+    `TestApplyBundle_ResumeStateBlocksAfterCarriedAdd_BothIntact`.
+
+    **Fail-stop on Step 9.** Matches every prior step (DESIGN #63).
+    A malformed `iterations.md` or a transient FS error after Step 8
+    succeeded leaves the operator with a committed iteration
+    narrative and stale resume.md state — recoverable by hand on a
+    subsequent wrap. Warn-and-continue was considered and rejected
+    for v1; revisit only if the failure pattern actually surfaces.
+
+    Source: `internal/wraprender/markers.go`,
+    `internal/wraprender/markers_test.go`,
+    `internal/mcp/wrapapply.go` (Step 9 ordering + drift-summary
+    special case), `internal/mcp/tools_apply_wrap_bundle.go`
+    (`applyResumeStateBlocks` helper),
+    `internal/mcp/tools_apply_wrap_bundle_test.go` (six new Step-9
+    tests). Phase 1 commit `937f016`, Phase 2 commit `d2f6474`,
+    Option-C correction (drops the Tests bullet) commit `74a02c7`.

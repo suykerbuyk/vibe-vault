@@ -249,13 +249,15 @@ vv_synthesize_wrap_bundle(project, project_path)
 vv_apply_wrap_bundle_by_handle(project, project_path, bundle)
         │
         ▼  in-process sequential dispatch:
-        ├── 1. vv_append_iteration    (iteration_block)
-        ├── 2. vv_thread_insert       (resume_thread_blocks, each)
-        ├── 3. vv_thread_remove       (resume_threads_to_close, each)
-        ├── 4. vv_carried_add         (carried_changes.add, each)
-        ├── 5. vv_carried_remove      (carried_changes.remove, each)
-        ├── 6. vv_set_commit_msg      (commit_msg)
-        └── 7. vv_capture_session     (capture_session)
+        ├── 1. vv_append_iteration       (iteration_block)
+        ├── 2. vv_thread_insert          (resume_thread_blocks, each)
+        ├── 3. vv_thread_replace         (resume_threads_to_replace, each; H2-v3)
+        ├── 4. vv_thread_remove          (resume_threads_to_close, each)
+        ├── 5. vv_carried_add            (carried_changes.add, each)
+        ├── 6. vv_carried_remove         (carried_changes.remove, each)
+        ├── 7. vv_set_commit_msg         (commit_msg)
+        ├── 8. vv_capture_session        (capture_session)
+        └── 9. resume_state_blocks       (DESIGN #90; state-derived sub-regions)
                 │
                 ▼  for each field:
         wrapmetrics.AppendBundleLines()
@@ -266,6 +268,31 @@ On first error: returns applied_writes + error_at_step.
 Completed writes are not rolled back (each is semantically correct
 in isolation).
 ```
+
+**Step 9 — `resume_state_blocks`** (DESIGN #90). After
+`capture_session` succeeds, `applyResumeStateBlocks` re-renders three
+marker-bounded regions in `Projects/<p>/agentctx/resume.md` from
+filesystem ground truth: the `### Active tasks (N)` H3 inside
+`## Open Threads` (sourced from `tasks/*.md` minus `done/` /
+`cancelled/`), the invariant-bullet block inside `## Current State`
+(Iterations from `iterations.md` heading scan, MCP tool count from
+`(*mcp.Server).ToolNames()`, embedded template count from
+`templates.AgentctxFS()` walk; the Tests count is deliberately NOT
+emitted — operator-chosen scope reduction documented in DESIGN #90),
+and the last-N=10 rows of the iteration table inside
+`## Project History (recent)`. The renderer
+(`internal/wraprender/markers.go`) is self-healing: it locates
+`<!-- vv:<region>:start --> ... <!-- vv:<region>:end -->` pairs and
+replaces their contents in place, OR inserts the pair at a sensible
+default location if absent. Step 9 is the last resume.md mutation in
+any wrap cycle, so prior `vv_update_resume` clobbers from the inline
+orchestrator path are healed automatically. Step 9's metric line
+records `synth_sha == apply_sha == fingerprint(rendered_content)` and
+is special-cased out of `driftSummary` (the bundle never carries
+marker content, so synth-vs-apply drift accounting is meaningless).
+Both inline and dispatch paths converge on `ApplyBundle`, so Step 9
+fires uniformly for both — closing the iter-165–166 dispatch-path-
+specific drift class.
 
 The per-tool surgical APIs (`vv_thread_insert`, `vv_set_commit_msg`, etc.)
 remain available for hand-edits but are not called from the canonical flow.
@@ -417,10 +444,11 @@ Source of truth: Tier 1 (Go embeds). See DESIGN.md decisions #41 and #46.
 | `mcp` | `tools_carried.go` | `vv_carried_add`, `vv_carried_remove`, `vv_carried_promote_to_task` — manage `Carried forward` bullet list in resume.md via `mdutil.CarriedBullet` helpers; promote creates a task file and removes the bullet atomically |
 | `mcp` | `tools_render_commit_msg.go` | `vv_render_commit_msg` — reads `git status` + `git diff --cached --stat`, renders a conventional commit message from convention file and AI-supplied subject+body; `RenderCommitMsg()` exported as package-level function for reuse in `vv_synthesize_wrap_bundle` |
 | `mcp` | `tools_synthesize_wrap.go` | `vv_synthesize_wrap_bundle` — handle-based; reads cached skeleton via `wrapbundlecache`, calls `wrapbundle.FillBundle()` with executor-supplied prose, returns the filled `WrapBundle`. Compare-and-set via `skeleton_sha256`. Replaces the pre-epic inline `vv_synthesize_wrap` (DESIGN #86, Decision 23 fold). |
-| `mcp` | `tools_apply_wrap_bundle.go` | `vv_apply_wrap_bundle_by_handle` — handle-based in-process orchestrator: dispatches all `WrapBundle` writes via `wrapapply.ApplyBundle()` (no MCP round-trips); applies the H2-v3 ordering `iter → thread_insert → thread_replace → thread_remove → carried_add → carried_remove → set_commit_msg → capture`; logs synth-vs-apply SHA drift to `wrapmetrics`; fail-stop on first error, no rollback. |
+| `mcp` | `tools_apply_wrap_bundle.go` | `vv_apply_wrap_bundle_by_handle` — handle-based in-process orchestrator: dispatches all `WrapBundle` writes via `wrapapply.ApplyBundle()` (no MCP round-trips); applies the H2-v3 ordering `iter → thread_insert → thread_replace → thread_remove → carried_add → carried_remove → set_commit_msg → capture → resume_state_blocks` (Step 9, DESIGN #90); logs synth-vs-apply SHA drift to `wrapmetrics` (Step 9 special-cased to skip the drift counter); fail-stop on first error, no rollback. The new `applyResumeStateBlocks` helper re-renders the three marker-bounded resume.md sub-regions (active-tasks, current-state, project-history-tail) from filesystem ground truth. |
 | `mcp` | `tools_prepare_skeleton.go` | `vv_prepare_wrap_skeleton` — collects orchestrator-supplied facts, calls `wrapbundle.BuildSkeleton()`, persists to `~/.cache/vibe-vault/wrap-bundles/iter-<N>-skeleton.json` via `wrapbundlecache`, log-rotates to keep three most recent; returns `SkeletonHandle{iter, path, sha256}` (DESIGN #86). |
 | `mcp` | `wrapbundle.go` | `WrapSkeleton` + `WrapBundle` types; `BuildSkeleton()` (orchestrator-facts only) and `FillBundle(skeleton, prose)` (executor prose merge) pure helpers. Source of the skeleton sha256 stamp consumed by all four handle-aware tools. |
-| `mcp` | `wrapapply.go` | Extracted `ApplyBundle(ctx, ...)` helper carrying the H2-v3 mutation-class dispatch order including the new `thread_replace` step. Called by both `vv_apply_wrap_bundle_by_handle` and the dispatch handler's quality-gate path. |
+| `mcp` | `wrapapply.go` | Extracted `ApplyBundle(ctx, ...)` helper carrying the H2-v3 mutation-class dispatch order including the `thread_replace` step plus DESIGN #90's Step 9 `resume_state_blocks` (last). Called by both `vv_apply_wrap_bundle_by_handle` and the dispatch handler's quality-gate path. The package comment documents Step 9 ordering vs `vv_update_resume`: Step 9 must remain LAST so any prior orchestrator clobber of a marker pair is healed by `wraprender.ApplyMarkerBlocks`'s self-healing insertion. |
+| `wraprender` | `markers.go` | Renderer for resume.md state-derived sub-regions (DESIGN #90). Public API: `RenderActiveTasks`, `RenderCurrentState`, `RenderProjectHistoryTail`, `ApplyMarkerBlocks`. The latter is **self-healing** — it replaces marker-pair contents in place when the pair is present, OR inserts the pair at a sensible default location relative to existing H2/H3 anchors when absent. Drives `applyResumeStateBlocks` in `internal/mcp/tools_apply_wrap_bundle.go`. |
 | `mcp` | `tools_quality_check.go` | `vv_wrap_quality_check` — runs the four QC triggers (multi-match ambiguity, mutation-count mismatch, semantic-presence failure, commit-subject invalid) against proposed outputs; reads vault state for the dry-run check but never mutates it (H3-v2 invariant; DESIGN #87). Compare-and-set via `skeleton_sha256`. |
 | `mcp` | `tools_wrap_dispatch.go` | `vv_wrap_dispatch` — server-side dispatch entry point (Architecture A1). Resolves `tier` → `provider:model` from `[wrap.tiers]`, looks up agent definition via `agentregistry`, calls `llm.ResolveAPIKey(tierProvider, cfg.Providers)` to obtain the key (DESIGN #89; same resolver as `NewProvider`), instantiates `AgenticProvider`, runs `internal/wrapdispatch.Dispatch()` and returns `{outputs?, escalate_reason?, dispatch_metrics}`; emits stderr progress lines and writes one `DispatchLine` per call (DESIGN #84). |
 | `mcp` | `tools_agents.go` | `vv_get_agent_definition(name)` — alternative read path for the embedded agent registry (v2 portability scaffolding; v1 `vv_wrap_dispatch` reads via direct Go call). Returns sha256-stamped agent definition record. |
