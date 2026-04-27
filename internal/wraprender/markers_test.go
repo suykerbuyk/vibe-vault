@@ -126,15 +126,12 @@ func TestRenderActiveTasks_TitleEscaping(t *testing.T) {
 
 func TestRenderCurrentState_AllFields(t *testing.T) {
 	got := wraprender.RenderCurrentState(wraprender.CurrentState{
-		Iterations:   166,
-		Tests:        1938,
-		TestPackages: 50,
-		MCPTools:     43,
-		Templates:    19,
+		Iterations: 166,
+		MCPTools:   43,
+		Templates:  19,
 	})
 	want := strings.Join([]string{
 		"- **Iterations:** 166 complete",
-		"- **Tests:** 1938 RUN-counted across 50 packages",
 		"- **MCP:** 43 tools + 1 prompt",
 		"- **Embedded:** 19 templates",
 		"",
@@ -148,11 +145,9 @@ func TestRenderCurrentState_OutputPassesV10Validator(t *testing.T) {
 	// Self-check: rendered output is a valid `Current State` body
 	// under the v10 invariants contract.
 	body := wraprender.RenderCurrentState(wraprender.CurrentState{
-		Iterations:   166,
-		Tests:        1938,
-		TestPackages: 50,
-		MCPTools:     43,
-		Templates:    19,
+		Iterations: 166,
+		MCPTools:   43,
+		Templates:  19,
 	})
 	bad, ok := context.ValidateCurrentStateBody(body)
 	if !ok {
@@ -163,8 +158,8 @@ func TestRenderCurrentState_OutputPassesV10Validator(t *testing.T) {
 	// large iteration count) — the format must hold across the
 	// realistic numeric range.
 	for _, st := range []wraprender.CurrentState{
-		{Iterations: 0, Tests: 0, TestPackages: 0, MCPTools: 0, Templates: 0},
-		{Iterations: 9999, Tests: 99999, TestPackages: 250, MCPTools: 99, Templates: 99},
+		{Iterations: 0, MCPTools: 0, Templates: 0},
+		{Iterations: 9999, MCPTools: 99, Templates: 99},
 	} {
 		body := wraprender.RenderCurrentState(st)
 		if bad, ok := context.ValidateCurrentStateBody(body); !ok {
@@ -222,7 +217,6 @@ Stuff.
 ## Current State
 
 - **Iterations:** 1 complete
-- **Tests:** 5 RUN-counted across 1 packages
 - **MCP:** 1 tools + 1 prompt
 - **Embedded:** 1 templates
 
@@ -256,7 +250,6 @@ func TestApplyMarkerBlocks_ReplacesExisting(t *testing.T) {
 
 <!-- vv:current-state:start -->
 - **Iterations:** 0 complete
-- **Tests:** 0 RUN-counted across 0 packages
 - **MCP:** 0 tools + 1 prompt
 - **Embedded:** 0 templates
 <!-- vv:current-state:end -->
@@ -277,7 +270,7 @@ _No active tasks._
 `
 	out, err := wraprender.ApplyMarkerBlocks(content, map[string]string{
 		wraprender.RegionCurrentState: wraprender.RenderCurrentState(wraprender.CurrentState{
-			Iterations: 5, Tests: 10, TestPackages: 2, MCPTools: 3, Templates: 7,
+			Iterations: 5, MCPTools: 3, Templates: 7,
 		}),
 		wraprender.RegionProjectHistoryTail: wraprender.RenderProjectHistoryTail([]wraprender.HistoryRow{
 			{Iteration: 5, Date: "2026-04-27", Summary: "fresh row"},
@@ -328,7 +321,7 @@ func TestApplyMarkerBlocks_InsertsWhenAbsent(t *testing.T) {
 			name:   "current-state under Current State",
 			region: wraprender.RegionCurrentState,
 			body: wraprender.RenderCurrentState(wraprender.CurrentState{
-				Iterations: 1, Tests: 1, TestPackages: 1, MCPTools: 1, Templates: 1,
+				Iterations: 1, MCPTools: 1, Templates: 1,
 			}),
 			anchor: "## Current State",
 		},
@@ -430,7 +423,7 @@ func TestApplyMarkerBlocks_PreservesOutsideRegions(t *testing.T) {
 			Slug: "x", Title: "X", Status: "S", Priority: "high",
 		}}),
 		wraprender.RegionCurrentState: wraprender.RenderCurrentState(wraprender.CurrentState{
-			Iterations: 9, Tests: 9, TestPackages: 9, MCPTools: 9, Templates: 9,
+			Iterations: 9, MCPTools: 9, Templates: 9,
 		}),
 		wraprender.RegionProjectHistoryTail: wraprender.RenderProjectHistoryTail([]wraprender.HistoryRow{
 			{Iteration: 9, Date: "2026-04-27", Summary: "z"},
@@ -462,7 +455,7 @@ func TestApplyMarkerBlocks_Idempotent(t *testing.T) {
 			Slug: "x", Title: "X", Status: "S", Priority: "high",
 		}}),
 		wraprender.RegionCurrentState: wraprender.RenderCurrentState(wraprender.CurrentState{
-			Iterations: 9, Tests: 9, TestPackages: 9, MCPTools: 9, Templates: 9,
+			Iterations: 9, MCPTools: 9, Templates: 9,
 		}),
 		wraprender.RegionProjectHistoryTail: wraprender.RenderProjectHistoryTail([]wraprender.HistoryRow{
 			{Iteration: 9, Date: "2026-04-27", Summary: "z"},

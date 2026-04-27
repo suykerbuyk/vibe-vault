@@ -53,19 +53,20 @@ type TaskFrontMatter struct {
 	Priority string
 }
 
-// CurrentState carries the four headline counts the renderer emits inside
-// the `current-state` marker block. Field semantics match the lock in the
+// CurrentState carries the headline counts the renderer emits inside the
+// `current-state` marker block. Field semantics match the lock in the
 // plan's "Headline-count sources (locked)" section.
+//
+// Test-count tracking deliberately lives outside this struct: per the
+// Phase 2 review (Option C), the rendered marker block emits Iterations /
+// MCP / Templates only, and operator-authored prose adjacent to the
+// marker captures any test-count narrative. This avoids running
+// `go test` on every wrap and avoids the headline-meaning shift between
+// RUN-counted (subtest-inclusive) and function-counted enumeration.
 type CurrentState struct {
 	// Iterations is the count of `### Iteration N` headings in
 	// `iterations.md`.
 	Iterations int
-	// Tests is the RUN-counted total
-	// (`go test -run='^$' -v 2>&1 | grep -c '^=== RUN'`).
-	Tests int
-	// TestPackages is the number of test packages, surfaced in the
-	// "Tests" bullet trailing as "across <M> packages".
-	TestPackages int
 	// MCPTools is the length of `(*mcp.Server).ToolNames()`.
 	MCPTools int
 	// Templates is the count of files (excluding directories) under
@@ -170,7 +171,7 @@ func RenderActiveTasks(tasks []TaskFrontMatter) string {
 	return b.String()
 }
 
-// RenderCurrentState renders the four-bullet invariant block consumed by
+// RenderCurrentState renders the three-bullet invariant block consumed by
 // the `current-state` marker. Output passes
 // `internal/context.ValidateCurrentStateBody` (v10 contract) — locked by
 // `TestRenderCurrentState_OutputPassesV10Validator`.
@@ -178,14 +179,11 @@ func RenderActiveTasks(tasks []TaskFrontMatter) string {
 // Locked output shape:
 //
 //   - **Iterations:** <N> complete
-//   - **Tests:** <N> RUN-counted across <M> packages
 //   - **MCP:** <N> tools + 1 prompt
 //   - **Embedded:** <N> templates
 func RenderCurrentState(state CurrentState) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "- **Iterations:** %d complete\n", state.Iterations)
-	fmt.Fprintf(&b, "- **Tests:** %d RUN-counted across %d packages\n",
-		state.Tests, state.TestPackages)
 	fmt.Fprintf(&b, "- **MCP:** %d tools + 1 prompt\n", state.MCPTools)
 	fmt.Fprintf(&b, "- **Embedded:** %d templates\n", state.Templates)
 	return b.String()

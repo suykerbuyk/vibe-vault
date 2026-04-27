@@ -567,7 +567,6 @@ const resumeWithMarkersMd = `# Resume
 
 <!-- vv:current-state:start -->
 - **Iterations:** 0 complete
-- **Tests:** 0 RUN-counted across 0 packages
 - **MCP:** 0 tools + 1 prompt
 - **Embedded:** 0 templates
 <!-- vv:current-state:end -->

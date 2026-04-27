@@ -4,8 +4,6 @@
 package mcp
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -15,7 +13,6 @@ import (
 	"io/fs"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -420,13 +417,13 @@ func applyCaptureSesssion(cfg config.Config, _ string, cc BundleCaptureContent) 
 // result. Returns the rendered file content (so the caller can fingerprint
 // it for the metric line) plus any error.
 //
-// projectRoot, when non-empty and pointing at a Go project (with go.mod),
-// is the working directory used for the RUN-counted test enumeration. When
-// the project root is empty or has no go.mod, test counts default to zero —
-// the renderer still emits the bullet shape, just with N=0/M=0. This keeps
-// non-Go consumer projects (rezbldr, vibe-palace, etc.) compatible with
-// Step 9.
+// The current-state block now emits Iterations / MCP / Templates only;
+// test-count tracking lives in operator-authored prose adjacent to the
+// marker (Phase 2 review, Option C). projectRoot is retained on the
+// signature for future state-block fields that need a working directory
+// but is not consulted by computeCurrentState today.
 func applyResumeStateBlocks(cfg config.Config, project, projectRoot string) (string, error) {
+	_ = projectRoot // reserved for future state-block fields; see doc comment.
 	resumeContent, absPath, err := readResume(cfg, project)
 	if err != nil {
 		return "", err
@@ -437,7 +434,7 @@ func applyResumeStateBlocks(cfg config.Config, project, projectRoot string) (str
 		return "", fmt.Errorf("collect active tasks: %w", err)
 	}
 
-	state, err := computeCurrentState(cfg, project, projectRoot)
+	state, err := computeCurrentState(cfg, project)
 	if err != nil {
 		return "", fmt.Errorf("compute current state: %w", err)
 	}
@@ -496,13 +493,15 @@ func collectActiveTasks(cfg config.Config, project string) ([]wraprender.TaskFro
 	return out, nil
 }
 
-// computeCurrentState gathers the four headline counts the renderer needs.
+// computeCurrentState gathers the headline counts the renderer needs.
 // Iteration count comes from a heading scan of iterations.md; MCP-tool
 // count from a throw-away Server populated via RegisterAllTools; embedded
-// template count from templates.AgentctxFS(); and tests / test-package
-// counts from RUN-counted `go test` enumeration in projectRoot. When
-// projectRoot is empty or has no go.mod, tests/packages default to zero.
-func computeCurrentState(cfg config.Config, project, projectRoot string) (wraprender.CurrentState, error) {
+// template count from templates.AgentctxFS().
+//
+// Test-count tracking is intentionally absent from the rendered marker
+// block (Phase 2 review, Option C). Operator-authored prose adjacent to
+// the marker captures any test-count narrative.
+func computeCurrentState(cfg config.Config, project string) (wraprender.CurrentState, error) {
 	state := wraprender.CurrentState{}
 
 	iterPath := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx", "iterations.md")
@@ -524,10 +523,6 @@ func computeCurrentState(cfg config.Config, project, projectRoot string) (wrapre
 		return state, fmt.Errorf("count templates: %w", err)
 	}
 	state.Templates = templateCount
-
-	testCount, packageCount := countRunTests(projectRoot)
-	state.Tests = testCount
-	state.TestPackages = packageCount
 
 	return state, nil
 }
@@ -558,65 +553,6 @@ func countAgentctxTemplates() (int, error) {
 		return nil
 	})
 	return count, err
-}
-
-// countRunTests enumerates Go test functions in projectRoot. Uses
-// `go test -count=1 -list '.*' ./...` which prints one Test… function name
-// per line per package without executing test bodies (~1s on this repo at
-// cache-warm; slower on cold builds).
-//
-// **Plan deviation (R3 follow-up):** the plan locked the headline to
-// "RUN-counted" via `go test -run='^$' -v ./...`, but `-run='^$'` skips
-// enumeration entirely (zero `=== RUN` lines emit), so that formula
-// returns zero. `-list '.*'` returns test-function count (no subtests),
-// which is consistent and fast. The headline meaning shifts from
-// "RUN-counted" to "test-function-counted"; flagged in Phase 2 reporting
-// as a follow-up for the operator to confirm or replace with full
-// `-v ./...` if subtests must be counted.
-//
-// Returns (0, 0) silently when projectRoot is empty, has no go.mod, or
-// `go test` errors out — Step 9 is best-effort about counts and must not
-// fail the wrap because of a transient toolchain issue. Test-package
-// count is the number of distinct package paths whose `-list` output
-// contained at least one test name.
-func countRunTests(projectRoot string) (tests, packages int) {
-	if projectRoot == "" {
-		return 0, 0
-	}
-	if _, err := os.Stat(filepath.Join(projectRoot, "go.mod")); err != nil {
-		return 0, 0
-	}
-	cmd := exec.Command("go", "test", "-count=1", "-list", ".*", "./...")
-	cmd.Dir = projectRoot
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	// Best-effort: ignore exit error; partial output still parses.
-	_ = cmd.Run()
-
-	pkgSet := make(map[string]struct{})
-	var currentPkgHasTests bool
-	scanner := bufio.NewScanner(&buf)
-	scanner.Buffer(make([]byte, 0, 1<<20), 1<<24)
-	for scanner.Scan() {
-		line := scanner.Text()
-		switch {
-		case strings.HasPrefix(line, "Test"):
-			// `-list` emits one identifier per line; only Test* counts.
-			tests++
-			currentPkgHasTests = true
-		case strings.HasPrefix(line, "ok  \t") || strings.HasPrefix(line, "ok\t"),
-			strings.HasPrefix(line, "FAIL\t") || strings.HasPrefix(line, "FAIL "):
-			// Trailing per-package status line. Promote the package to
-			// pkgSet iff at least one Test* identifier was listed for it.
-			fields := strings.Fields(line)
-			if len(fields) >= 2 && currentPkgHasTests {
-				pkgSet[fields[1]] = struct{}{}
-			}
-			currentPkgHasTests = false
-		}
-	}
-	return tests, len(pkgSet)
 }
 
 // collectHistoryRows scans Projects/<p>/agentctx/iterations.md and returns
