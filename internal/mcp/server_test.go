@@ -717,6 +717,34 @@ func TestDebugLogsResponses(t *testing.T) {
 	}
 }
 
+func TestToolNamesSorted(t *testing.T) {
+	logger := log.New(io.Discard, "", 0)
+	srv := NewServer(ServerInfo{Name: "test", Version: "0.1.0"}, logger)
+
+	// Register tools intentionally out of order.
+	for _, name := range []string{"zebra", "alpha", "mango"} {
+		srv.RegisterTool(Tool{
+			Definition: ToolDef{
+				Name:        name,
+				Description: "",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
+			},
+			Handler: func(params json.RawMessage) (string, error) { return "", nil },
+		})
+	}
+
+	got := srv.ToolNames()
+	want := []string{"alpha", "mango", "zebra"}
+	if len(got) != len(want) {
+		t.Fatalf("ToolNames length: got %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("ToolNames[%d]: got %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestDebugOffNoExtraLogs(t *testing.T) {
 	var logBuf strings.Builder
 	logger := log.New(&logBuf, "", 0)
