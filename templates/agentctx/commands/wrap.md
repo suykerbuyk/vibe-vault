@@ -89,6 +89,17 @@ never reach the vault.
 Call `vv_apply_wrap_bundle_by_handle(skeleton_handle, outputs)`. Then run
 the git operations:
 
+> **resume.md state-blocks (DESIGN #90).** The three marker-bounded
+> regions in `resume.md` — `<!-- vv:active-tasks:start -->`,
+> `<!-- vv:current-state:start -->`, `<!-- vv:project-history-tail:start -->`
+> — auto-update on every wrap from filesystem ground truth via
+> `ApplyBundle` Step 9. Iterations / MCP tool count / embedded template
+> count are machine-rendered into the `current-state` block; test count
+> and other Current-State prose remain operator-authored adjacent to
+> the marker block. The renderer is self-healing — on first wrap of a
+> retrofit project that lacks the marker pairs, Step 9 inserts them at
+> sensible default locations and renders fresh contents.
+
 - `git add` the project files listed in `skeleton.files_changed` (use
   explicit paths; never `git add -A` or `git add .`).
 - `git -C <vault> add -A && git -C <vault> commit -m "<short summary>" &&

@@ -1222,51 +1222,11 @@ func captureZedThreads(threads []zed.Thread, dbPath, projectFilter string, force
 }
 
 // registerMCPTools registers all production tools and prompts on the server.
+// Delegates to mcp.RegisterAllTools — the inventory lives in the mcp package
+// so applyResumeStateBlocks (Step 9 of ApplyBundle) can count tools via the
+// same source of truth.
 func registerMCPTools(srv *mcp.Server, cfg config.Config) {
-	srv.RegisterTool(mcp.NewGetProjectContextTool(cfg))
-	srv.RegisterTool(mcp.NewListProjectsTool(cfg))
-	srv.RegisterTool(mcp.NewSearchSessionsTool(cfg))
-	srv.RegisterTool(mcp.NewGetKnowledgeTool(cfg))
-	srv.RegisterTool(mcp.NewGetSessionDetailTool(cfg))
-	srv.RegisterTool(mcp.NewGetFrictionTrendsTool(cfg))
-	srv.RegisterTool(mcp.NewGetEffectivenessTool(cfg))
-	srv.RegisterTool(mcp.NewCaptureSessionTool(cfg))
-	srv.RegisterTool(mcp.NewGetWorkflowTool(cfg))
-	srv.RegisterTool(mcp.NewGetResumeTool(cfg))
-	srv.RegisterTool(mcp.NewListTasksTool(cfg))
-	srv.RegisterTool(mcp.NewGetTaskTool(cfg))
-	srv.RegisterTool(mcp.NewUpdateResumeTool(cfg))
-	srv.RegisterTool(mcp.NewAppendIterationTool(cfg))
-	srv.RegisterTool(mcp.NewManageTaskTool(cfg))
-	srv.RegisterTool(mcp.NewRefreshIndexTool(cfg))
-	srv.RegisterTool(mcp.NewBootstrapContextTool(cfg))
-	srv.RegisterTool(mcp.NewListLearningsTool(cfg))
-	srv.RegisterTool(mcp.NewGetLearningTool(cfg))
-	srv.RegisterTool(mcp.NewGetIterationsTool(cfg))
-	srv.RegisterTool(mcp.NewGetProjectRootTool(cfg))
-	srv.RegisterTool(mcp.NewSetCommitMsgTool(cfg))
-	srv.RegisterTool(mcp.NewThreadInsertTool(cfg))
-	srv.RegisterTool(mcp.NewThreadReplaceTool(cfg))
-	srv.RegisterTool(mcp.NewThreadRemoveTool(cfg))
-	srv.RegisterTool(mcp.NewCarriedAddTool(cfg))
-	srv.RegisterTool(mcp.NewCarriedRemoveTool(cfg))
-	srv.RegisterTool(mcp.NewCarriedPromoteToTaskTool(cfg))
-	srv.RegisterTool(mcp.NewRenderCommitMsgTool(cfg))
-	srv.RegisterTool(mcp.NewPrepareWrapSkeletonTool())
-	srv.RegisterTool(mcp.NewSynthesizeWrapTool(cfg))
-	srv.RegisterTool(mcp.NewApplyWrapBundleByHandleTool(cfg))
-	srv.RegisterTool(mcp.NewWrapQualityCheckTool(cfg))
-	srv.RegisterTool(mcp.NewWrapDispatchTool(cfg))
-	srv.RegisterTool(mcp.NewVaultReadTool(cfg))
-	srv.RegisterTool(mcp.NewVaultListTool(cfg))
-	srv.RegisterTool(mcp.NewVaultExistsTool(cfg))
-	srv.RegisterTool(mcp.NewVaultSha256Tool(cfg))
-	srv.RegisterTool(mcp.NewVaultWriteTool(cfg))
-	srv.RegisterTool(mcp.NewVaultEditTool(cfg))
-	srv.RegisterTool(mcp.NewVaultDeleteTool(cfg))
-	srv.RegisterTool(mcp.NewVaultMoveTool(cfg))
-	srv.RegisterTool(mcp.NewGetAgentDefinitionTool())
-	srv.RegisterPrompt(mcp.NewSessionGuidelinesPrompt())
+	mcp.RegisterAllTools(srv, cfg)
 }
 
 const mcpInstructions = `Call vv_bootstrap_context at session start for full project context. Use vv_capture_session at the end of each work unit.`

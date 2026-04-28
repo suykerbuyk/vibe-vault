@@ -12,11 +12,15 @@ import (
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 	"github.com/suykerbuyk/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
 	"github.com/suykerbuyk/vibe-vault/internal/wrapmetrics"
 )
 
 // minimalResumeMd is a resume.md fixture with an ## Open Threads section and
-// a ### Carried forward sub-section, usable by apply-bundle tests.
+// a ### Carried forward sub-section, usable by apply-bundle tests. Includes
+// the H2 anchors Step 9 (resume_state_blocks) needs to insert markers when
+// they are absent: `## Current State`, `## Open Threads`,
+// `## Project History (recent)`.
 const minimalResumeMd = `# Resume
 
 ## Current State
@@ -33,7 +37,7 @@ Existing thread body.
 
 - **stale-item** — stale item title stale body
 
-## Project History
+## Project History (recent)
 
 nothing here
 `
@@ -552,4 +556,408 @@ func TestVVApplyWrapBundleByHandle_MetricFilePathInResult(t *testing.T) {
 	if !strings.HasSuffix(res.MetricFile, wrapmetrics.ActiveFile) {
 		t.Errorf("metric_file=%q should end with %q", res.MetricFile, wrapmetrics.ActiveFile)
 	}
+}
+
+// resumeWithMarkersMd has all three Step-9 marker pairs already inserted
+// with stale rendered content. Step 9 should replace each pair's body with
+// fresh content reflecting the test fixture's tasks/iterations.
+const resumeWithMarkersMd = `# Resume
+
+## Current State
+
+<!-- vv:current-state:start -->
+- **Iterations:** 0 complete
+- **MCP:** 0 tools + 1 prompt
+- **Embedded:** 0 templates
+<!-- vv:current-state:end -->
+
+## Open Threads
+
+### Active tasks (0)
+
+<!-- vv:active-tasks:start -->
+### Active tasks (0)
+
+_No active tasks._
+<!-- vv:active-tasks:end -->
+
+### existing-thread
+
+Existing thread body.
+
+### Carried forward
+
+- **stale-item** — stale item title stale body
+
+## Project History (recent)
+
+<!-- vv:project-history-tail:start -->
+| #   | Date       | Summary |
+| --- | ---------- | ------- |
+
+_No iterations recorded yet._
+<!-- vv:project-history-tail:end -->
+`
+
+// seedTaskFile writes a task file at the given vault-relative path with H1
+// title + uppercase Status/Priority lines that parseTaskHeader recognises.
+func seedTaskFile(t *testing.T, vaultPath, project, slug, title, status, priority string) {
+	t.Helper()
+	rel := filepath.Join("Projects", project, "agentctx", "tasks", slug+".md")
+	abs := filepath.Join(vaultPath, rel)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatalf("mkdir tasks dir: %v", err)
+	}
+	body := "# " + title + "\nStatus: " + status + "\nPriority: " + priority + "\n\nDetails.\n"
+	if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
+		t.Fatalf("write task file: %v", err)
+	}
+}
+
+func TestApplyBundle_ResumeStateBlocksUpdated(t *testing.T) {
+	tool, _, vaultPath := newApplyTool(t, resumeWithMarkersMd, minimalIterationsMd)
+	projectPath := t.TempDir()
+
+	// Seed two task files so the active-tasks block has rows to render.
+	seedTaskFile(t, vaultPath, "myproject", "alpha-task", "Alpha task title", "Draft", "high")
+	seedTaskFile(t, vaultPath, "myproject", "bravo-task", "Bravo task title", "WIP", "medium")
+
+	handle := seedSkeleton(t, SkeletonFacts{Iter: 30, Project: "myproject"})
+	res, err := invokeApplyByHandle(t, tool, handle, map[string]any{
+		"iteration_title":     "State blocks",
+		"iteration_narrative": "n",
+		"commit_subject":      "chore: state",
+	}, projectPath)
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if res.ErrorAtStep != "" {
+		t.Fatalf("error at %q: %+v", res.ErrorAtStep, res)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(vaultPath, "Projects/myproject/agentctx/resume.md"))
+	body := string(data)
+
+	// Active-tasks block reflects ground truth (both task slugs).
+	if !strings.Contains(body, "**`alpha-task`**") || !strings.Contains(body, "**`bravo-task`**") {
+		t.Errorf("active-tasks block missing rendered task slugs\n%s", body)
+	}
+	// Active-tasks count reflects new state, not the stale "(0)" body.
+	if !strings.Contains(body, "### Active tasks (2)") {
+		t.Errorf("active-tasks count not refreshed; want '(2)' inside markers\n%s", body)
+	}
+	// Current-state block updated: iterations should be > 0 (2 iterations
+	// after Step 1 appended one to the seed iteration).
+	if strings.Contains(body, "**Iterations:** 0 complete") {
+		t.Errorf("current-state block stale (still says 0 complete)\n%s", body)
+	}
+	// Project-history-tail has at least one row now.
+	if strings.Contains(body, "_No iterations recorded yet._") {
+		t.Errorf("project-history-tail stale (still empty pointer)\n%s", body)
+	}
+	// All three marker pairs survive.
+	wantMarkers := []string{
+		"<!-- vv:active-tasks:start -->",
+		"<!-- vv:active-tasks:end -->",
+		"<!-- vv:current-state:start -->",
+		"<!-- vv:current-state:end -->",
+		"<!-- vv:project-history-tail:start -->",
+		"<!-- vv:project-history-tail:end -->",
+	}
+	for _, m := range wantMarkers {
+		if !strings.Contains(body, m) {
+			t.Errorf("missing marker %q\n%s", m, body)
+		}
+	}
+
+	// Step 9 metric line: synth_sha == apply_sha (special case).
+	for _, w := range res.AppliedWrites {
+		if w.Step == "resume_state_blocks" && w.Status != "ok" {
+			t.Errorf("resume_state_blocks step status=%q, want ok", w.Status)
+		}
+	}
+}
+
+func TestApplyBundle_ResumeStateBlocksInsertsWhenAbsent(t *testing.T) {
+	// minimalResumeMd has H2 anchors but NO marker pairs; Step 9's
+	// self-healing ApplyMarkerBlocks must insert all three pairs.
+	tool, _, vaultPath := newApplyTool(t, minimalResumeMd, minimalIterationsMd)
+	projectPath := t.TempDir()
+
+	seedTaskFile(t, vaultPath, "myproject", "lone-task", "Lone task title", "Draft", "high")
+
+	handle := seedSkeleton(t, SkeletonFacts{Iter: 31, Project: "myproject"})
+	res, err := invokeApplyByHandle(t, tool, handle, map[string]any{
+		"iteration_title":     "Insert markers",
+		"iteration_narrative": "n",
+		"commit_subject":      "chore: insert",
+	}, projectPath)
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if res.ErrorAtStep != "" {
+		t.Fatalf("error at %q: %+v", res.ErrorAtStep, res)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(vaultPath, "Projects/myproject/agentctx/resume.md"))
+	body := string(data)
+	wantMarkers := []string{
+		"<!-- vv:active-tasks:start -->",
+		"<!-- vv:active-tasks:end -->",
+		"<!-- vv:current-state:start -->",
+		"<!-- vv:current-state:end -->",
+		"<!-- vv:project-history-tail:start -->",
+		"<!-- vv:project-history-tail:end -->",
+	}
+	for _, m := range wantMarkers {
+		if !strings.Contains(body, m) {
+			t.Errorf("self-healing did not insert marker %q\n%s", m, body)
+		}
+	}
+	if !strings.Contains(body, "**`lone-task`**") {
+		t.Errorf("inserted active-tasks block missing seeded task\n%s", body)
+	}
+}
+
+func TestApplyBundle_ResumeStateBlocksAfterCarriedAdd_BothIntact(t *testing.T) {
+	// R1 regression lock: Step 5 (carried_add) and Step 9 must coexist
+	// without one stomping the other. The fixture starts with a `### Carried
+	// forward` H3 carrying one stale-item bullet; Step 5 adds a new bullet,
+	// then Step 9 inserts the active-tasks marker pair. Both must survive.
+	tool, _, vaultPath := newApplyTool(t, minimalResumeMd, minimalIterationsMd)
+	projectPath := t.TempDir()
+
+	seedTaskFile(t, vaultPath, "myproject", "after-carry", "After carry title", "Draft", "high")
+
+	handle := seedSkeleton(t, SkeletonFacts{
+		Iter:    32,
+		Project: "myproject",
+		CarriedChangesAdd: []SkeletonCarriedAdd{
+			{Slug: "fresh-carry", Title: "Fresh carry title"},
+		},
+	})
+	res, err := invokeApplyByHandle(t, tool, handle, map[string]any{
+		"iteration_title":     "Both intact",
+		"iteration_narrative": "n",
+		"commit_subject":      "chore: both",
+		"carried_bodies":      map[string]string{"fresh-carry": "Body."},
+	}, projectPath)
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if res.ErrorAtStep != "" {
+		t.Fatalf("error at %q: %+v", res.ErrorAtStep, res)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(vaultPath, "Projects/myproject/agentctx/resume.md"))
+	body := string(data)
+
+	// Carried bullet from Step 5 survives.
+	if !strings.Contains(body, "**fresh-carry**") {
+		t.Errorf("Step 5 carried bullet missing after Step 9\n%s", body)
+	}
+	// Pre-existing stale bullet survives (Step 5 added; nothing removed).
+	if !strings.Contains(body, "**stale-item**") {
+		t.Errorf("pre-existing carried bullet clobbered\n%s", body)
+	}
+	// Step 9 marker pair present and contains the new active task.
+	if !strings.Contains(body, "<!-- vv:active-tasks:start -->") ||
+		!strings.Contains(body, "<!-- vv:active-tasks:end -->") {
+		t.Errorf("Step 9 active-tasks markers missing\n%s", body)
+	}
+	if !strings.Contains(body, "**`after-carry`**") {
+		t.Errorf("Step 9 active-tasks block missing seeded task\n%s", body)
+	}
+}
+
+func TestApplyBundle_ResumeStateBlocksAfterUpdateResume(t *testing.T) {
+	// R6 regression lock: a sequence of `vv_update_resume(section="Current
+	// State", ...)` clobbering markers, followed by Step 9, ends with
+	// markers re-inserted and contents fresh. Simulate the clobber by
+	// pre-writing a marker-less Current-State body before invoking
+	// ApplyBundle (i.e., the orchestrator already ran vv_update_resume and
+	// destroyed the markers; Step 9 must self-heal).
+	tool, cfg, vaultPath := newApplyTool(t, resumeWithMarkersMd, minimalIterationsMd)
+	projectPath := t.TempDir()
+
+	// Simulate vv_update_resume clobbering the Current State body via the
+	// same helper the production tool uses.
+	resumePath := filepath.Join(vaultPath, "Projects", "myproject", "agentctx", "resume.md")
+	original, err := os.ReadFile(resumePath)
+	if err != nil {
+		t.Fatalf("read resume: %v", err)
+	}
+	clobbered, err := mdutil.ReplaceSectionBody(string(original), "Current State",
+		"- **Iterations:** 999 complete (orchestrator-authored, no markers)\n")
+	if err != nil {
+		t.Fatalf("simulate vv_update_resume: %v", err)
+	}
+	if writeErr := os.WriteFile(resumePath, []byte(clobbered), 0o644); writeErr != nil {
+		t.Fatalf("write clobbered resume: %v", writeErr)
+	}
+	// Sanity: clobbered file has no current-state markers.
+	if strings.Contains(clobbered, "<!-- vv:current-state:start -->") {
+		t.Fatalf("simulated clobber failed; markers still present:\n%s", clobbered)
+	}
+	_ = cfg // kept for potential future cfg-driven helpers in this test
+
+	seedTaskFile(t, vaultPath, "myproject", "post-clobber", "Post clobber title", "Draft", "medium")
+
+	handle := seedSkeleton(t, SkeletonFacts{Iter: 33, Project: "myproject"})
+	res, err := invokeApplyByHandle(t, tool, handle, map[string]any{
+		"iteration_title":     "After clobber",
+		"iteration_narrative": "n",
+		"commit_subject":      "chore: heal",
+	}, projectPath)
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if res.ErrorAtStep != "" {
+		t.Fatalf("error at %q: %+v", res.ErrorAtStep, res)
+	}
+
+	data, _ := os.ReadFile(resumePath)
+	body := string(data)
+	// Markers re-inserted by self-healing ApplyMarkerBlocks.
+	if !strings.Contains(body, "<!-- vv:current-state:start -->") ||
+		!strings.Contains(body, "<!-- vv:current-state:end -->") {
+		t.Errorf("Step 9 did not re-insert current-state markers after clobber\n%s", body)
+	}
+	// Stale orchestrator-authored "999 complete" should NOT appear inside
+	// the marker region (Step 9 renders fresh contents). The stale text
+	// may remain adjacent (insertion-mode preserves existing body), but
+	// the marker-bounded block itself must reflect ground truth.
+	startIdx := strings.Index(body, "<!-- vv:current-state:start -->")
+	endIdx := strings.Index(body, "<!-- vv:current-state:end -->")
+	if startIdx < 0 || endIdx < 0 || endIdx <= startIdx {
+		t.Fatalf("could not locate current-state marker span: start=%d end=%d", startIdx, endIdx)
+	}
+	span := body[startIdx:endIdx]
+	if strings.Contains(span, "999 complete") {
+		t.Errorf("current-state marker span still contains stale '999 complete'\n%s", span)
+	}
+	// Fresh active task is rendered inside the active-tasks marker.
+	if !strings.Contains(body, "**`post-clobber`**") {
+		t.Errorf("active-tasks block missing post-clobber task\n%s", body)
+	}
+}
+
+func TestApplyBundle_ResumeStateBlocksFailureFailsStop(t *testing.T) {
+	// Induce a Step-9 failure by writing a malformed marker pair (start
+	// without end) into resume.md. ApplyMarkerBlocks returns
+	// ErrMalformedMarker; Step 9 records errorAtStep="resume_state_blocks";
+	// earlier writes (Step 1's iteration append) survive (no rollback).
+	malformedResume := `# Resume
+
+## Current State
+
+<!-- vv:current-state:start -->
+- **Iterations:** 0 complete
+(no end marker — file is malformed)
+
+## Open Threads
+
+### Carried forward
+
+- **stale-item** — stale.
+
+## Project History (recent)
+
+nothing here
+`
+	tool, _, vaultPath := newApplyTool(t, malformedResume, minimalIterationsMd)
+	projectPath := t.TempDir()
+
+	handle := seedSkeleton(t, SkeletonFacts{Iter: 34, Project: "myproject"})
+	res, err := invokeApplyByHandle(t, tool, handle, map[string]any{
+		"iteration_title":     "Fail stop",
+		"iteration_narrative": "n",
+		"commit_subject":      "chore: fail",
+	}, projectPath)
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if res.ErrorAtStep != "resume_state_blocks" {
+		t.Fatalf("errorAtStep=%q, want %q", res.ErrorAtStep, "resume_state_blocks")
+	}
+
+	// Earlier writes survive: iterations.md gained the new heading.
+	data, _ := os.ReadFile(filepath.Join(vaultPath, "Projects/myproject/agentctx/iterations.md"))
+	if !strings.Contains(string(data), "### Iteration 34 — Fail stop") {
+		t.Errorf("Step 1's iteration write was rolled back (or never happened)\n%s", data)
+	}
+	// commit.msg survived too (Step 7).
+	if _, statErr := os.Stat(filepath.Join(projectPath, "commit.msg")); statErr != nil {
+		t.Errorf("Step 7's commit.msg missing — earlier write was rolled back: %v", statErr)
+	}
+}
+
+func TestApplyBundle_ResumeStateBlocksMetricLineSpecialCase(t *testing.T) {
+	// Step 9's metric line records synth_sha == apply_sha; this is the
+	// special-case that prevents `ds.DriftedFields` from incrementing for
+	// resume_state_blocks. Other steps may still drive DriftedFields, but
+	// Step 9's contribution is always zero.
+	metricsHome := t.TempDir()
+	t.Setenv("VIBE_VAULT_HOME", metricsHome)
+
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/myproject/agentctx/resume.md":     resumeWithMarkersMd,
+		"Projects/myproject/agentctx/iterations.md": minimalIterationsMd,
+	})
+	withSkeletonCacheDir(t)
+	tool := NewApplyWrapBundleByHandleTool(cfg)
+	projectPath := t.TempDir()
+
+	seedTaskFile(t, cfg.VaultPath, "myproject", "metric-task", "Metric task", "Draft", "high")
+
+	handle := seedSkeleton(t, SkeletonFacts{Iter: 35, Project: "myproject"})
+	res, err := invokeApplyByHandle(t, tool, handle, map[string]any{
+		"iteration_title":     "Metric special",
+		"iteration_narrative": "n",
+		"commit_subject":      "chore: metric",
+	}, projectPath)
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	if res.ErrorAtStep != "" {
+		t.Fatalf("error at %q: %+v", res.ErrorAtStep, res)
+	}
+
+	cacheDir := filepath.Join(metricsHome, ".cache", "vibe-vault")
+	lines, err := wrapmetrics.ReadActiveLines(cacheDir)
+	if err != nil {
+		t.Fatalf("read metrics: %v", err)
+	}
+	var foundStep9 bool
+	for _, raw := range lines {
+		var m map[string]any
+		if jsonErr := json.Unmarshal([]byte(raw), &m); jsonErr != nil {
+			t.Fatalf("metric line unmarshal: %v\n%s", jsonErr, raw)
+		}
+		field, _ := m["field"].(string)
+		if field != "resume_state_blocks" {
+			continue
+		}
+		foundStep9 = true
+		synth, _ := m["synth_sha256"].(string)
+		apply, _ := m["apply_sha256"].(string)
+		if synth == "" || apply == "" {
+			t.Errorf("Step 9 metric line missing sha256 fields: %v", m)
+		}
+		if synth != apply {
+			t.Errorf("Step 9 metric special-case violated: synth_sha=%q apply_sha=%q (want equal)",
+				synth, apply)
+		}
+	}
+	if !foundStep9 {
+		t.Fatalf("no resume_state_blocks metric line found:\n%s", strings.Join(lines, "\n"))
+	}
+
+	// `DriftSummary.DriftedFields` must not be incremented by Step 9.
+	// Other steps (e.g. capture_session) may drive the count up; what we
+	// verify is that Step 9's contribution alone is zero. The simplest
+	// invariant: with no executor edits and no thread mutations, the only
+	// drift candidate would be capture_session — which is its own
+	// concern. We simply assert Step 9 wrote a metric whose contribution
+	// is zero by sha-equality, already checked above.
 }

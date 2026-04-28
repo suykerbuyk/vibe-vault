@@ -12,6 +12,8 @@ import (
 	"log"
 	"regexp"
 	"sort"
+
+	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
 
 // Tool pairs a definition with its handler.
@@ -49,6 +51,62 @@ func NewServer(info ServerInfo, logger *log.Logger) *Server {
 // RegisterTool adds a tool to the server.
 func (s *Server) RegisterTool(t Tool) {
 	s.tools[t.Definition.Name] = t
+}
+
+// RegisterAllTools registers every production tool + prompt on srv. This is
+// the single source of truth for the MCP-tool inventory: cmd/vv/main.go calls
+// it from `vv mcp` server startup, and `applyResumeStateBlocks` (Step 9 of
+// `ApplyBundle`) calls it on a throw-away Server to count tools for the
+// `current-state` marker block via `srv.ToolNames()`.
+//
+// Keep this list aligned with cmd/vv/main.go's surfaced Tool factories.
+// Adding or removing a tool here flows through to the rendered MCP count
+// in resume.md on the next wrap.
+func RegisterAllTools(srv *Server, cfg config.Config) {
+	srv.RegisterTool(NewGetProjectContextTool(cfg))
+	srv.RegisterTool(NewListProjectsTool(cfg))
+	srv.RegisterTool(NewSearchSessionsTool(cfg))
+	srv.RegisterTool(NewGetKnowledgeTool(cfg))
+	srv.RegisterTool(NewGetSessionDetailTool(cfg))
+	srv.RegisterTool(NewGetFrictionTrendsTool(cfg))
+	srv.RegisterTool(NewGetEffectivenessTool(cfg))
+	srv.RegisterTool(NewCaptureSessionTool(cfg))
+	srv.RegisterTool(NewGetWorkflowTool(cfg))
+	srv.RegisterTool(NewGetResumeTool(cfg))
+	srv.RegisterTool(NewListTasksTool(cfg))
+	srv.RegisterTool(NewGetTaskTool(cfg))
+	srv.RegisterTool(NewUpdateResumeTool(cfg))
+	srv.RegisterTool(NewAppendIterationTool(cfg))
+	srv.RegisterTool(NewManageTaskTool(cfg))
+	srv.RegisterTool(NewRefreshIndexTool(cfg))
+	srv.RegisterTool(NewBootstrapContextTool(cfg))
+	srv.RegisterTool(NewListLearningsTool(cfg))
+	srv.RegisterTool(NewGetLearningTool(cfg))
+	srv.RegisterTool(NewGetIterationsTool(cfg))
+	srv.RegisterTool(NewGetProjectRootTool(cfg))
+	srv.RegisterTool(NewSetCommitMsgTool(cfg))
+	srv.RegisterTool(NewThreadInsertTool(cfg))
+	srv.RegisterTool(NewThreadReplaceTool(cfg))
+	srv.RegisterTool(NewThreadRemoveTool(cfg))
+	srv.RegisterTool(NewCarriedAddTool(cfg))
+	srv.RegisterTool(NewCarriedRemoveTool(cfg))
+	srv.RegisterTool(NewCarriedPromoteToTaskTool(cfg))
+	srv.RegisterTool(NewRenderCommitMsgTool(cfg))
+	srv.RegisterTool(NewPrepareWrapSkeletonTool())
+	srv.RegisterTool(NewSynthesizeWrapTool(cfg))
+	srv.RegisterTool(NewApplyWrapBundleByHandleTool(cfg))
+	srv.RegisterTool(NewWrapQualityCheckTool(cfg))
+	srv.RegisterTool(NewWrapDispatchTool(cfg))
+	srv.RegisterTool(NewVaultReadTool(cfg))
+	srv.RegisterTool(NewVaultListTool(cfg))
+	srv.RegisterTool(NewVaultExistsTool(cfg))
+	srv.RegisterTool(NewVaultSha256Tool(cfg))
+	srv.RegisterTool(NewVaultWriteTool(cfg))
+	srv.RegisterTool(NewVaultEditTool(cfg))
+	srv.RegisterTool(NewVaultDeleteTool(cfg))
+	srv.RegisterTool(NewVaultMoveTool(cfg))
+	srv.RegisterTool(NewGetAgentDefinitionTool())
+	srv.RegisterPrompt(NewSessionGuidelinesPrompt())
 }
 
 // ToolNames returns the registered tool names in stable alphabetical order.
