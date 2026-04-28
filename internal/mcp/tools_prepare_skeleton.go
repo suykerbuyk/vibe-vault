@@ -129,8 +129,8 @@ func NewPrepareWrapSkeletonTool() Tool {
 			if args.Iter <= 0 {
 				return "", fmt.Errorf("iter is required and must be > 0")
 			}
-			if args.Project == "" {
-				return "", fmt.Errorf("project is required")
+			if err := validateProjectName(args.Project); err != nil {
+				return "", err
 			}
 
 			facts := SkeletonFacts{
@@ -152,13 +152,14 @@ func NewPrepareWrapSkeletonTool() Tool {
 			if err != nil {
 				return "", fmt.Errorf("marshal skeleton: %w", err)
 			}
-			path, sha, err := wrapbundlecache.Write(args.Iter, data)
+			path, sha, err := wrapbundlecache.Write(args.Project, args.Iter, data)
 			if err != nil {
 				return "", fmt.Errorf("write skeleton cache: %w", err)
 			}
-			// Best-effort rotation: keep the 3 most recent skeletons (Decision 12).
-			// Rotation errors are non-fatal — the write already succeeded.
-			_, _ = wrapbundlecache.RotateKeepN(3)
+			// Best-effort rotation: keep DefaultRotationN most recent
+			// skeletons per project (Decision 12). Rotation errors are
+			// non-fatal — the write already succeeded.
+			_, _ = wrapbundlecache.RotateKeepN(args.Project, wrapbundlecache.DefaultRotationN)
 
 			out := struct {
 				Iter            int    `json:"iter"`
