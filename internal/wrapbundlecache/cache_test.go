@@ -351,6 +351,147 @@ func TestCache_LegacyMigration_Idempotent(t *testing.T) {
 	}
 }
 
+// TestCache_InspectAll_ReturnsPerProjectStats covers the four shapes:
+// empty cache, single-project, multi-project, and _legacy/-present. The
+// _legacy row is asserted to carry LegacyIterSentinel for both iter
+// columns (the renderer in wrapmetrics replaces them with a parenthetical
+// "(relocated; safe to remove)" string).
+func TestCache_InspectAll_ReturnsPerProjectStats(t *testing.T) {
+	t.Run("empty_cache", func(t *testing.T) {
+		withTempCacheDir(t)
+		got, err := InspectAll()
+		if err != nil {
+			t.Fatalf("InspectAll: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("expected empty map, got %v", got)
+		}
+	})
+
+	t.Run("single_project", func(t *testing.T) {
+		withTempCacheDir(t)
+		payload := []byte(`{"x":1}`)
+		for _, iter := range []int{10, 11, 12} {
+			if _, _, err := Write("alpha", iter, payload); err != nil {
+				t.Fatalf("Write alpha/%d: %v", iter, err)
+			}
+		}
+		got, err := InspectAll()
+		if err != nil {
+			t.Fatalf("InspectAll: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("want 1 entry, got %d: %v", len(got), got)
+		}
+		row, ok := got["alpha"]
+		if !ok {
+			t.Fatalf("alpha row missing: %v", got)
+		}
+		if row.Skeletons != 3 {
+			t.Errorf("Skeletons=%d, want 3", row.Skeletons)
+		}
+		wantBytes := int64(len(payload) * 3)
+		if row.TotalBytes != wantBytes {
+			t.Errorf("TotalBytes=%d, want %d", row.TotalBytes, wantBytes)
+		}
+		if row.OldestIter != 10 {
+			t.Errorf("OldestIter=%d, want 10", row.OldestIter)
+		}
+		if row.NewestIter != 12 {
+			t.Errorf("NewestIter=%d, want 12", row.NewestIter)
+		}
+		if row.Project != "alpha" {
+			t.Errorf("Project=%q, want %q", row.Project, "alpha")
+		}
+	})
+
+	t.Run("multi_project", func(t *testing.T) {
+		withTempCacheDir(t)
+		// alpha: 100..102 (range distinct from beta).
+		for _, iter := range []int{100, 101, 102} {
+			if _, _, err := Write("alpha", iter, []byte("aa")); err != nil {
+				t.Fatalf("Write alpha/%d: %v", iter, err)
+			}
+		}
+		// beta: 5..6.
+		for _, iter := range []int{5, 6} {
+			if _, _, err := Write("beta", iter, []byte("bbbb")); err != nil {
+				t.Fatalf("Write beta/%d: %v", iter, err)
+			}
+		}
+		got, err := InspectAll()
+		if err != nil {
+			t.Fatalf("InspectAll: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("want 2 entries, got %d: %v", len(got), got)
+		}
+		alpha := got["alpha"]
+		if alpha.Skeletons != 3 || alpha.OldestIter != 100 || alpha.NewestIter != 102 {
+			t.Errorf("alpha=%+v, want {Skeletons:3, OldestIter:100, NewestIter:102}", alpha)
+		}
+		if alpha.TotalBytes != 6 {
+			t.Errorf("alpha.TotalBytes=%d, want 6", alpha.TotalBytes)
+		}
+		beta := got["beta"]
+		if beta.Skeletons != 2 || beta.OldestIter != 5 || beta.NewestIter != 6 {
+			t.Errorf("beta=%+v, want {Skeletons:2, OldestIter:5, NewestIter:6}", beta)
+		}
+		if beta.TotalBytes != 8 {
+			t.Errorf("beta.TotalBytes=%d, want 8", beta.TotalBytes)
+		}
+	})
+
+	t.Run("legacy_present", func(t *testing.T) {
+		dir := withTempCacheDir(t)
+		// Seed _legacy/ directly (skip the migration trigger; we just
+		// want a resident _legacy directory with a couple of skeletons).
+		legacyDir := filepath.Join(dir, "_legacy")
+		if err := os.MkdirAll(legacyDir, 0o700); err != nil {
+			t.Fatalf("mkdir _legacy: %v", err)
+		}
+		legacyA := filepath.Join(legacyDir, "iter-1-skeleton.json")
+		legacyB := filepath.Join(legacyDir, "iter-2-skeleton.json")
+		if err := os.WriteFile(legacyA, []byte("aaa"), 0o600); err != nil {
+			t.Fatalf("seed legacy a: %v", err)
+		}
+		if err := os.WriteFile(legacyB, []byte("bbbbbb"), 0o600); err != nil {
+			t.Fatalf("seed legacy b: %v", err)
+		}
+		// Plus a real project with one skeleton.
+		if _, _, err := Write("alpha", 9, []byte("ccc")); err != nil {
+			t.Fatalf("Write alpha/9: %v", err)
+		}
+
+		got, err := InspectAll()
+		if err != nil {
+			t.Fatalf("InspectAll: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("want 2 entries, got %d: %v", len(got), got)
+		}
+		legacy, ok := got["_legacy"]
+		if !ok {
+			t.Fatalf("_legacy row missing: %v", got)
+		}
+		if legacy.Skeletons != 2 {
+			t.Errorf("legacy.Skeletons=%d, want 2", legacy.Skeletons)
+		}
+		if legacy.TotalBytes != 9 {
+			t.Errorf("legacy.TotalBytes=%d, want 9", legacy.TotalBytes)
+		}
+		if legacy.OldestIter != LegacyIterSentinel || legacy.NewestIter != LegacyIterSentinel {
+			t.Errorf("legacy iter sentinels=%d/%d, want %d/%d",
+				legacy.OldestIter, legacy.NewestIter,
+				LegacyIterSentinel, LegacyIterSentinel)
+		}
+		alpha := got["alpha"]
+		if alpha.Skeletons != 1 || alpha.OldestIter != 9 || alpha.NewestIter != 9 {
+			t.Errorf("alpha=%+v, want {Skeletons:1, OldestIter:9, NewestIter:9}", alpha)
+		}
+	})
+}
+
 // TestCache_RotateKeepN_IgnoresLegacyDir seeds a file in _legacy/ plus 5
 // fresh skeletons under a project; rotation must touch only the project
 // directory, leaving _legacy/ contents intact.
