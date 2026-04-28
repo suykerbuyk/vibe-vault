@@ -1878,3 +1878,170 @@ Key architectural and design decisions in vibe-vault, with rationale.
     `internal/mcp/tools_apply_wrap_bundle_test.go` (six new Step-9
     tests). Phase 1 commit `937f016`, Phase 2 commit `d2f6474`,
     Option-C correction (drops the Tests bullet) commit `74a02c7`.
+
+91. **Per-project wrap-skeleton cache subdirectory layout; legacy
+    self-heal to `_legacy/`; `DefaultRotationN` and rotation /
+    read-side diagnostics share one source of truth.** The wrap
+    skeleton cache (`~/.cache/vibe-vault/wrap-bundles/`) was a single
+    flat directory shared across every project, with rotation evicting
+    the lowest-iter files globally. Iter 167 surfaced two failures of
+    that policy: cando-rs (iter-10) and RezBldrVault (iter-39) both
+    fell off the dispatch path because vibe-vault's iter-164/165/166
+    skeletons stayed resident under the global "keep 3 highest"
+    policy. Both projects had to fall back to the surgical apply path
+    documented in `templates/agentctx/commands/wrap.md` until their
+    own iter counts caught up — which would never happen for projects
+    that wrap less frequently than vibe-vault.
+    
+    **Decision: per-project subdirectory.**
+    `<base>/<project>/iter-<N>-skeleton.json`. Rotation walks one
+    subdirectory and evicts only that project's files; cross-project
+    eviction is impossible by construction. Considered alternatives
+    were a project-prefix filename pattern (forces every consumer that
+    scans the dir to filter by prefix) and mtime-based rotation
+    (doesn't bound per-project disk usage; a chatty project still
+    starves a quiet one). Per-project subdir is the only option that
+    structurally eliminates cross-project eviction with one mechanical
+    API change — threading a `project string` argument through
+    `Write`, `RotateKeepN`, `SkeletonPath`, and `CacheDir`. Five
+    production call sites and five test sites needed the new arg; the
+    `Read`/`SkeletonHandle` shape stayed unchanged because the
+    handle's absolute `skeleton_path` self-encodes the per-project
+    subdirectory.
+    
+    **`DefaultRotationN = 3` exported single source of truth.** The
+    pre-fix code hardcoded `RotateKeepN(3)` at the call site in
+    `tools_prepare_skeleton.go` AND assumed N=3 implicitly in the
+    "keep 3 most recent" wording in DESIGN #86 / ARCHITECTURE.md /
+    documentation. v3 promotes the literal to
+    `wrapbundlecache.DefaultRotationN` so the call-site rotation, the
+    read-side diagnostic message ("rotation policy: keep N most
+    recent per project"), and any future operator-facing reference
+    all share one constant. Future tuning is a single edit. We
+    deliberately DID NOT expose N as a config knob in this iteration
+    — no operator has asked, the validation surface would expand for
+    zero observed demand, and a follow-up plan can plumb
+    `config.WrapConfig.SkeletonRetainCount` in five lines if demand
+    materializes.
+    
+    **Package-local `validateProject` twin avoids an import cycle.**
+    The cache layer trusts MCP-tool-validated `project` input but
+    runs a defensive re-check at the top of every public function that
+    takes `project`. The check pattern-matches
+    `internal/mcp/tools.go:163-172` `validateProjectName` (rejects
+    empty, `/`, `\`, `..`) but lives inline in
+    `internal/wrapbundlecache/cache.go` because `internal/mcp` already
+    imports `internal/wrapbundlecache` — a reverse import would close
+    a cycle and fail to compile. The package-level comment above the
+    duplicate documents the sync expectation: `if you change one,
+    update the other in the same patch`. Cost is ~8 lines of code;
+    benefit is robustness against future direct callers from
+    non-MCP packages (`test/integration_test.go` paths, hypothetical
+    CLI subcommands for cache inspection) that would otherwise be a
+    silent footgun.
+    
+    **Self-healing legacy migration to `_legacy/`.** On first
+    `CacheDir(project)` invocation per process, gated by
+    `sync.Once`, `migrateLegacyFiles(base)` relocates any
+    pre-existing `<base>/iter-*-skeleton.json` files to
+    `<base>/_legacy/iter-*-skeleton.json`. Operators upgrading from
+    the flat layout see their old skeletons preserved in a clearly
+    named sibling directory rather than disappearing. The migration
+    is multi-process safe: each `vv mcp` subprocess runs its own
+    `legacyMigrationOnce`, but per-rename `os.IsNotExist` is treated
+    as "another process beat us to this file" and tolerated; only
+    successful relocations count toward the stderr emit, so the
+    notice reflects work actually done by the calling process rather
+    than a misleading detection count. `_legacy/` is excluded from
+    per-project rotation by construction (RotateKeepN walks
+    `<base>/<project>/`, not `<base>/`); operators can manually
+    delete `_legacy/` once they've inspected it. The system does not
+    auto-prune.
+    
+    **One-way upgrade caveat.** A downgraded binary writes new
+    skeletons to the old flat location and reads via the old
+    `SkeletonPath(iter)`; the new-binary `_legacy/` directory is
+    invisible to the old code (skipped by `e.IsDir() continue` in
+    the legacy `RotateKeepN`). Result: downgrade works mechanically,
+    but old-binary writes mix with new-binary writes if the operator
+    yo-yos between binaries. Documented as "do not flap binaries;
+    the upgrade is one-way." Re-upgrading after a downgrade re-runs
+    the migration sweep on the next-process boot, relocating any
+    flat-layout files written during the downgrade window into
+    `_legacy/`.
+    
+    **Step 9 metric N/A.** DESIGN #90 introduced the
+    `resume_state_blocks` Step-9 special case in the synth-vs-apply
+    drift counter. That special case is for resume.md state-derived
+    regions; this epic touches the wrap-skeleton CACHE rather than
+    wrap-resume RENDER and inherits no drift-counter impact. The
+    cache layer doesn't write `wrap-metrics.jsonl` records.
+    
+    **`LegacyIterSentinel = -1` and `LegacyProjectName = "_legacy"`
+    constants for the InspectAll wire contract.** Phase 2 added
+    `wrapbundlecache.InspectAll() (map[string]ProjectStats, error)`
+    so `vv stats wrap` could render per-project rows. Real skeleton
+    files have `iter >= 1` (rejected at write time when `iter <= 0`),
+    but the `_legacy/` directory's row in the rendered table needs
+    SOMETHING in the iter columns. We chose `-1` as a sentinel that
+    the renderer detects to substitute `(relocated; safe to remove)`
+    in place of the iter-column values, paired with a `_legacy`
+    project-name string that the renderer keys on. Both are exported
+    from `wrapbundlecache` AND duplicated as locked-string literals
+    inside `internal/wrapmetrics/stats.go` with comments referencing
+    each other — keeping the import boundary clean (`wrapmetrics`
+    must not depend on `wrapbundlecache`; the integration happens
+    in `cmd/vv/main.go` which imports both). The sync-comment
+    documents the wire contract: change one literal, change all four
+    references in the same patch.
+    
+    **Rotation diagnostic emits stderr when deletions happen;
+    read-side diagnostic on `os.IsNotExist`.** When `RotateKeepN`
+    deletes any files, it writes one line to stderr naming the
+    project, the deleted files (basenames only, not full paths),
+    and the kept count: `wrapbundlecache: rotated project=vibe-vault
+    deleted=[iter-163-skeleton.json] kept=3`. When `Read` hits
+    `os.IsNotExist`, it wraps the error with an actionable hint
+    naming the absolute path AND the rotation policy
+    (`DefaultRotationN`) — the operator sees "skeleton cache miss
+    at <path> — was the skeleton evicted by RotateKeepN, or did the
+    orchestrator pass a stale handle? (rotation policy: keep N most
+    recent per project)". Both diagnostics use the same
+    `DefaultRotationN` constant rather than a re-typed literal, so
+    rotation tuning never produces a stale diagnostic message.
+    
+    **`vv stats wrap` cache section, unconditional rendering.**
+    Phase 2 extended `wrapmetrics.WrapStats` with a `Cache
+    map[string]CacheRow` field and `wrapmetrics.FormatWrapStats`
+    with a new "wrap skeleton cache" section after the drift
+    section. Per-project rows show `skeletons`, `bytes`,
+    `oldest_iter`, `newest_iter`. The `_legacy` row is special-cased
+    to a parenthetical: `_legacy   2 (relocated; safe to remove)`,
+    triggered by `OldestIter == wrapbundlecache.LegacyIterSentinel`
+    on a row whose project name is `wrapbundlecache.LegacyProjectName`
+    (locked-string literals — see constants above). The cache
+    section is unconditionally rendered regardless of jsonl
+    presence: previously `FormatWrapStats` early-returned a "no data
+    yet" sentinel when both jsonl files were empty, which would have
+    hidden the cache state at exactly the moment it's most useful
+    (operator just ran `vv stats wrap` because they don't know
+    what's in the cache). The early-return was removed; the function
+    now falls through and the cache section renders even when no
+    drift / dispatch metrics exist. The "no data yet" sentinel is
+    preserved for the metrics sections that have no rows.
+    
+    Source: `internal/wrapbundlecache/cache.go`,
+    `internal/wrapbundlecache/cache_test.go` (12 tests, +6 from the
+    pre-epic 6), `internal/mcp/tools_prepare_skeleton.go`
+    (project arg threading + tightened `validateProjectName` +
+    `DefaultRotationN` constant use),
+    `internal/mcp/tools_prepare_skeleton_test.go` (+1 invalid-slug
+    test), `internal/mcp/tools_synthesize_wrap_test.go`,
+    `internal/mcp/tools_wrap_dispatch_test.go`,
+    `test/integration_test.go`, `internal/wrapmetrics/stats.go`
+    (`Cache map[string]CacheRow` field, `CacheRow` type,
+    cache-section renderer with `_legacy`-row carve-out),
+    `cmd/vv/main.go` (`computeStatsWrap` invokes
+    `wrapbundlecache.InspectAll`), `cmd/vv/stats_wrap_test.go`
+    (4 tests, +1 from 3). Phase 1 commit `e29aaec`, Phase 2 commit
+    `f811392`.
