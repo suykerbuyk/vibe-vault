@@ -3678,7 +3678,7 @@ func TestIntegration_PrepareWrapSkeleton_PersistsToCache(t *testing.T) {
 	if jerr := json.Unmarshal([]byte(out), &resp); jerr != nil {
 		t.Fatalf("unmarshal: %v\n%s", jerr, out)
 	}
-	wantPath := filepath.Join(dir, "iter-42-skeleton.json")
+	wantPath := filepath.Join(dir, "vibe-vault", "iter-42-skeleton.json")
 	if resp.SkeletonPath != wantPath {
 		t.Errorf("path=%q, want %q", resp.SkeletonPath, wantPath)
 	}
@@ -3759,12 +3759,12 @@ func TestIntegration_BundleCacheRotation_KeepsMostRecentThree(t *testing.T) {
 
 	// iters {2,3,4} must exist; iter 1 must be gone.
 	for _, iter := range []int{2, 3, 4} {
-		path := filepath.Join(dir, fmt.Sprintf("iter-%d-skeleton.json", iter))
+		path := filepath.Join(dir, "vibe-vault", fmt.Sprintf("iter-%d-skeleton.json", iter))
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("iter %d should still exist: %v", iter, err)
 		}
 	}
-	gone := filepath.Join(dir, "iter-1-skeleton.json")
+	gone := filepath.Join(dir, "vibe-vault", "iter-1-skeleton.json")
 	if _, err := os.Stat(gone); err == nil {
 		t.Errorf("iter 1 should have been rotated out")
 	}

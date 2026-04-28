@@ -65,7 +65,7 @@ func TestVVPrepareWrapSkeleton_HappyPath(t *testing.T) {
 	if resp.Iter != 5 {
 		t.Errorf("iter=%d, want 5", resp.Iter)
 	}
-	wantPath := filepath.Join(dir, "iter-5-skeleton.json")
+	wantPath := filepath.Join(dir, "vibe-vault", "iter-5-skeleton.json")
 	if resp.SkeletonPath != wantPath {
 		t.Errorf("path=%q, want %q", resp.SkeletonPath, wantPath)
 	}
@@ -108,7 +108,7 @@ func TestVVPrepareWrapSkeleton_RejectsMissingRequired(t *testing.T) {
 	}{
 		{"missing iter", map[string]any{"project": "p"}, "iter is required"},
 		{"iter zero", map[string]any{"iter": 0, "project": "p"}, "iter is required"},
-		{"missing project", map[string]any{"iter": 1}, "project is required"},
+		{"missing project", map[string]any{"iter": 1}, "project name is required"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -144,12 +144,12 @@ func TestVVPrepareWrapSkeleton_RotatesAfterWrite(t *testing.T) {
 	}
 
 	for _, iter := range []int{2, 3, 4} {
-		path := filepath.Join(dir, "iter-"+itoa(iter)+"-skeleton.json")
+		path := filepath.Join(dir, "p", "iter-"+itoa(iter)+"-skeleton.json")
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("iter %d should still exist: %v", iter, err)
 		}
 	}
-	gone := filepath.Join(dir, "iter-1-skeleton.json")
+	gone := filepath.Join(dir, "p", "iter-1-skeleton.json")
 	if _, err := os.Stat(gone); err == nil {
 		t.Errorf("iter 1 should have been rotated out")
 	}
@@ -172,7 +172,7 @@ func TestVVPrepareWrapSkeleton_AcceptsThreadReplace(t *testing.T) {
 		t.Fatalf("Handler: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "iter-9-skeleton.json"))
+	data, err := os.ReadFile(filepath.Join(dir, "p", "iter-9-skeleton.json"))
 	if err != nil {
 		t.Fatalf("read skeleton: %v", err)
 	}
@@ -185,6 +185,26 @@ func TestVVPrepareWrapSkeleton_AcceptsThreadReplace(t *testing.T) {
 	}
 	if sk.ResumeThreadsReplace[0].Slug != "old-thread" || sk.ResumeThreadsReplace[1].Slug != "another-thread" {
 		t.Errorf("replace slugs=%v", sk.ResumeThreadsReplace)
+	}
+}
+
+// TestVVPrepareWrapSkeleton_RejectsInvalidProjectSlug verifies the tightened
+// project validator rejects path-traversal slugs at the prepare boundary.
+func TestVVPrepareWrapSkeleton_RejectsInvalidProjectSlug(t *testing.T) {
+	withSkeletonCacheDir(t)
+	tool := NewPrepareWrapSkeletonTool()
+
+	args := map[string]any{
+		"iter":    5,
+		"project": "../etc/passwd",
+	}
+	params, _ := json.Marshal(args)
+	_, err := tool.Handler(params)
+	if err == nil {
+		t.Fatalf("expected invalid-project-name error")
+	}
+	if !strings.Contains(err.Error(), "invalid project name") {
+		t.Errorf("error=%q, want contains %q", err.Error(), "invalid project name")
 	}
 }
 

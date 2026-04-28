@@ -14,7 +14,8 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/wrapbundlecache"
 )
 
-// seedSkeleton writes a skeleton to the cache and returns the handle.
+// seedSkeleton writes a skeleton to the cache and returns the handle. The
+// skeleton's Project field is the cache subdirectory it lands under.
 func seedSkeleton(t *testing.T, facts SkeletonFacts) SkeletonHandle {
 	t.Helper()
 	sk := BuildSkeleton(facts)
@@ -22,7 +23,7 @@ func seedSkeleton(t *testing.T, facts SkeletonFacts) SkeletonHandle {
 	if err != nil {
 		t.Fatalf("marshal skeleton: %v", err)
 	}
-	path, sha, err := wrapbundlecache.Write(facts.Iter, data)
+	path, sha, err := wrapbundlecache.Write(facts.Project, facts.Iter, data)
 	if err != nil {
 		t.Fatalf("Write skeleton: %v", err)
 	}
@@ -138,8 +139,10 @@ func TestVVSynthesizeWrapBundle_BundleNotCached(t *testing.T) {
 
 	handle := seedSkeleton(t, SkeletonFacts{Iter: 7, Project: "p"})
 
-	// Snapshot cache contents after the prepare call.
-	beforeEntries, err := os.ReadDir(dir)
+	// Snapshot cache contents after the prepare call. Per-project layout
+	// puts skeletons under <dir>/<project>/, so inspect that subdir.
+	projDir := filepath.Join(dir, "p")
+	beforeEntries, err := os.ReadDir(projDir)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}
@@ -156,7 +159,7 @@ func TestVVSynthesizeWrapBundle_BundleNotCached(t *testing.T) {
 		t.Fatalf("Handler: %v", herr)
 	}
 
-	afterEntries, err := os.ReadDir(dir)
+	afterEntries, err := os.ReadDir(projDir)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}
