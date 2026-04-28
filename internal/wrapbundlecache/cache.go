@@ -309,6 +309,127 @@ func splitPath(p string) []string {
 	}
 }
 
+// ProjectStats is the per-project cache view returned by InspectAll. The
+// `_legacy` synthetic project carries the relocated pre-migration files;
+// for that entry OldestIter and NewestIter are -1 (sentinel: the caller
+// should render a parenthetical instead of iter columns).
+type ProjectStats struct {
+	Project    string
+	Skeletons  int
+	TotalBytes int64
+	OldestIter int
+	NewestIter int
+}
+
+// LegacyIterSentinel is the OldestIter/NewestIter value reported for the
+// `_legacy` row by InspectAll. The renderer in cmd/vv recognises the
+// sentinel and substitutes the "(relocated; safe to remove)" parenthetical
+// instead of two zero columns. -1 was chosen because no real iter file is
+// ever numbered with a negative integer (writers refuse iter <= 0).
+const LegacyIterSentinel = -1
+
+// LegacyProjectName is the synthetic key used in the InspectAll map for
+// the relocated-skeletons subdirectory.
+const LegacyProjectName = "_legacy"
+
+// InspectAll walks <base>/ and returns one entry per per-project
+// subdirectory plus a special "_legacy" entry if present. Used by
+// `vv stats wrap`. Performance: one os.ReadDir per project subdirectory;
+// acceptable as a stats-invocation cost (R6).
+//
+// Files at the base level (non-directory entries) are skipped: those
+// would be pre-migration stragglers and are not InspectAll's concern.
+// If the base directory does not exist (no wrap has ever run on this
+// host) the function returns an empty map and a nil error.
+func InspectAll() (map[string]ProjectStats, error) {
+	out := map[string]ProjectStats{}
+	var base string
+	var err error
+	if cacheDirOverride != "" {
+		base = cacheDirOverride
+	} else {
+		ucd, ucdErr := os.UserCacheDir()
+		if ucdErr != nil {
+			return nil, fmt.Errorf("resolve user cache dir: %w", ucdErr)
+		}
+		base = filepath.Join(ucd, "vibe-vault", "wrap-bundles")
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return out, nil
+		}
+		return nil, fmt.Errorf("read cache base %q: %w", base, err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		subdir := filepath.Join(base, name)
+		stats, statsErr := inspectProjectDir(name, subdir)
+		if statsErr != nil {
+			return nil, statsErr
+		}
+		if stats.Skeletons == 0 && name != LegacyProjectName {
+			continue
+		}
+		out[name] = stats
+	}
+	return out, nil
+}
+
+// inspectProjectDir is the per-subdirectory worker for InspectAll. For
+// the `_legacy` directory it reports OldestIter/NewestIter as the
+// LegacyIterSentinel; for real projects it reports the parsed iter
+// range across all files matching skeletonFilePattern.
+func inspectProjectDir(project, dir string) (ProjectStats, error) {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return ProjectStats{}, fmt.Errorf("read project dir %q: %w", dir, err)
+	}
+	out := ProjectStats{Project: project}
+	if project == LegacyProjectName {
+		out.OldestIter = LegacyIterSentinel
+		out.NewestIter = LegacyIterSentinel
+	}
+	oldest := -1
+	newest := -1
+	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
+		m := skeletonFilePattern.FindStringSubmatch(f.Name())
+		if m == nil {
+			continue
+		}
+		info, infoErr := f.Info()
+		if infoErr != nil {
+			return ProjectStats{}, fmt.Errorf("stat %q: %w", f.Name(), infoErr)
+		}
+		out.Skeletons++
+		out.TotalBytes += info.Size()
+		if project == LegacyProjectName {
+			continue
+		}
+		num, parseErr := strconv.Atoi(m[1])
+		if parseErr != nil {
+			continue
+		}
+		if oldest == -1 || num < oldest {
+			oldest = num
+		}
+		if newest == -1 || num > newest {
+			newest = num
+		}
+	}
+	if project != LegacyProjectName && out.Skeletons > 0 {
+		out.OldestIter = oldest
+		out.NewestIter = newest
+	}
+	return out, nil
+}
+
 // RotateKeepN keeps the n most recent (highest iter number) skeleton files
 // in <CacheDir(project)>/ and deletes the rest. Returns the absolute paths
 // that were removed. n must be >= 1. Walks ONLY the project's subdirectory

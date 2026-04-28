@@ -18,16 +18,46 @@ import (
 
 // WrapStats holds the aggregate output of `vv stats wrap`.
 type WrapStats struct {
-	TotalDispatches      int                      // total DispatchLine records considered
-	IterationCount       int                      // unique iter values
-	MedianDurationByTier map[string]TierDurStats  // tier -> duration stats
-	EscalationRate       float64                  // 0..1, dispatches with outcome != "ok"
+	TotalDispatches      int                     // total DispatchLine records considered
+	IterationCount       int                     // unique iter values
+	MedianDurationByTier map[string]TierDurStats // tier -> duration stats
+	EscalationRate       float64                 // 0..1, dispatches with outcome != "ok"
 	EscalateCount        int
-	TopEscalateReasons   []ReasonCount            // sorted, longest first
-	DriftMedians         map[string]int           // field -> median drift_bytes
-	DispatchLineCount    int                      // raw count of jsonl lines read
-	DriftLineCount       int                      // raw count of drift jsonl lines read
+	TopEscalateReasons   []ReasonCount  // sorted, longest first
+	DriftMedians         map[string]int // field -> median drift_bytes
+	DispatchLineCount    int            // raw count of jsonl lines read
+	DriftLineCount       int            // raw count of drift jsonl lines read
+	// Cache holds per-project skeleton-cache rows keyed by project name.
+	// Populated by cmd/vv `computeStatsWrap` from
+	// `wrapbundlecache.InspectAll()` (the only integration point that
+	// imports both packages — wrapmetrics MUST NOT import wrapbundlecache).
+	// nil/empty -> the rendered section emits the
+	// "(no skeletons cached yet)" sentinel under its header.
+	Cache map[string]CacheRow
 }
+
+// CacheRow mirrors the renderable subset of wrapbundlecache.ProjectStats.
+// Defined locally here so wrapmetrics does not import wrapbundlecache (the
+// integration happens in cmd/vv/main.go which imports both).
+//
+// For the `_legacy` synthetic project, OldestIter and NewestIter are not
+// populated with parseable iter numbers; the renderer detects the
+// `_legacy` project name and substitutes the parenthetical
+// "(relocated; safe to remove)" string instead of two iter columns.
+type CacheRow struct {
+	Project    string
+	Skeletons  int
+	TotalBytes int64
+	OldestIter int
+	NewestIter int
+}
+
+// legacyCacheRowProject is the project name reserved for the synthetic
+// "_legacy" row (relocated pre-migration skeletons). The renderer treats
+// rows with this project name specially — see FormatWrapStats. The literal
+// is duplicated in wrapbundlecache.LegacyProjectName by design (avoiding
+// the import) and the two MUST agree.
+const legacyCacheRowProject = "_legacy"
 
 // TierDurStats holds duration aggregates for a single tier.
 type TierDurStats struct {
@@ -145,15 +175,21 @@ func sortReasonCounts(m map[string]int) []ReasonCount {
 // FormatWrapStats renders a WrapStats as the human-readable text shown by
 // `vv stats wrap`. The format is a stable contract for tests to assert
 // against (key headlines + exact sentinel strings on edge cases).
+//
+// Sections, in order:
+//  1. wrap dispatch stats (or "no data yet" / "no dispatch data yet")
+//  2. wrap drift trends (only when DriftLineCount > 0)
+//  3. wrap skeleton cache — UNCONDITIONALLY rendered (even when the two
+//     jsonl files are both empty). Empty cache renders the sentinel
+//     "(no skeletons cached yet)".
 func FormatWrapStats(s WrapStats) string {
 	var b strings.Builder
-	if s.DispatchLineCount == 0 && s.DriftLineCount == 0 {
+	switch {
+	case s.DispatchLineCount == 0 && s.DriftLineCount == 0:
 		fmt.Fprintln(&b, "wrap dispatch stats: no data yet")
-		return b.String()
-	}
-	if s.DispatchLineCount == 0 {
+	case s.DispatchLineCount == 0:
 		fmt.Fprintln(&b, "wrap dispatch stats: no dispatch data yet")
-	} else {
+	default:
 		fmt.Fprintf(&b, "wrap dispatch stats (%d dispatches across %d iterations):\n",
 			s.TotalDispatches, s.IterationCount)
 		fmt.Fprintln(&b, "  median duration per tier:")
@@ -195,7 +231,77 @@ func FormatWrapStats(s WrapStats) string {
 			fmt.Fprintf(&b, "    %-30s %d bytes\n", f+":", s.DriftMedians[f])
 		}
 	}
+
+	formatCacheSection(&b, s.Cache)
 	return b.String()
+}
+
+// formatCacheSection appends the "wrap skeleton cache" section to b. The
+// section is rendered unconditionally; the empty-cache case emits the
+// "(no skeletons cached yet)" sentinel under the header. Rows are
+// alphabetical by project name with the synthetic "_legacy" row pinned
+// last so it does not interleave with real projects.
+func formatCacheSection(b *strings.Builder, cache map[string]CacheRow) {
+	fmt.Fprintln(b, "")
+	fmt.Fprintln(b, "wrap skeleton cache (~/.cache/vibe-vault/wrap-bundles/):")
+	if len(cache) == 0 {
+		fmt.Fprintln(b, "  (no skeletons cached yet)")
+		return
+	}
+	keys := make([]string, 0, len(cache))
+	for k := range cache {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		// _legacy pinned last; alphabetical otherwise.
+		if keys[i] == legacyCacheRowProject {
+			return false
+		}
+		if keys[j] == legacyCacheRowProject {
+			return true
+		}
+		return keys[i] < keys[j]
+	})
+
+	// Adapt the project-name column to the longest project name (with a
+	// floor wide enough for typical names so the columns line up
+	// regardless of whether short names are present).
+	projWidth := len("project")
+	for _, k := range keys {
+		if l := len(k); l > projWidth {
+			projWidth = l
+		}
+	}
+	if projWidth < 20 {
+		projWidth = 20
+	}
+
+	const skelW = 9
+	const bytesW = 7
+	const oldW = 13
+	const newW = 13
+	fmt.Fprintf(b, "  %-*s %*s %*s %*s %*s\n",
+		projWidth, "project",
+		skelW, "skeletons",
+		bytesW, "bytes",
+		oldW, "oldest_iter",
+		newW, "newest_iter")
+	for _, k := range keys {
+		r := cache[k]
+		if k == legacyCacheRowProject {
+			fmt.Fprintf(b, "  %-*s %*d %*d (relocated; safe to remove)\n",
+				projWidth, k,
+				skelW, r.Skeletons,
+				bytesW, r.TotalBytes)
+			continue
+		}
+		fmt.Fprintf(b, "  %-*s %*d %*d %*d %*d\n",
+			projWidth, k,
+			skelW, r.Skeletons,
+			bytesW, r.TotalBytes,
+			oldW, r.OldestIter,
+			newW, r.NewestIter)
+	}
 }
 
 // ReadDriftLines is a small wrapper around the existing ReadActiveLines
