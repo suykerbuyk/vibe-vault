@@ -42,6 +42,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/templates"
 	"github.com/suykerbuyk/vibe-vault/internal/trends"
 	"github.com/suykerbuyk/vibe-vault/internal/vaultsync"
+	"github.com/suykerbuyk/vibe-vault/internal/wrapbundlecache"
 	"github.com/suykerbuyk/vibe-vault/internal/wrapmetrics"
 	"github.com/suykerbuyk/vibe-vault/internal/zed"
 )
@@ -511,6 +512,25 @@ func computeStatsWrap(limit int) (string, error) {
 		return "", fmt.Errorf("read wrap-metrics.jsonl: %w", err)
 	}
 	summary := wrapmetrics.ComputeWrapStats(dispatch, drift)
+	// Layer the per-project skeleton-cache view into the report. This is
+	// the only place that imports both wrapmetrics and wrapbundlecache:
+	// wrapmetrics MUST NOT import wrapbundlecache (the boundary keeps the
+	// metrics package provider-agnostic). InspectAll errors are non-fatal:
+	// the cache section will render its empty sentinel and the rest of
+	// the report still surfaces.
+	cacheStats, _ := wrapbundlecache.InspectAll()
+	if len(cacheStats) > 0 {
+		summary.Cache = make(map[string]wrapmetrics.CacheRow, len(cacheStats))
+		for k, ps := range cacheStats {
+			summary.Cache[k] = wrapmetrics.CacheRow{
+				Project:    ps.Project,
+				Skeletons:  ps.Skeletons,
+				TotalBytes: ps.TotalBytes,
+				OldestIter: ps.OldestIter,
+				NewestIter: ps.NewestIter,
+			}
+		}
+	}
 	return wrapmetrics.FormatWrapStats(summary), nil
 }
 

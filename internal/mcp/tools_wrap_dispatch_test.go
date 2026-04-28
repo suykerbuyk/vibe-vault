@@ -88,7 +88,7 @@ func preparedSkeleton(t *testing.T) SkeletonHandle {
 	if err != nil {
 		t.Fatalf("marshal skeleton: %v", err)
 	}
-	path, sha, err := wrapbundlecache.Write(skel.Iter, data)
+	path, sha, err := wrapbundlecache.Write(skel.Project, skel.Iter, data)
 	if err != nil {
 		t.Fatalf("write skeleton: %v", err)
 	}
