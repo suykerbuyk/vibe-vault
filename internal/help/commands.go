@@ -250,36 +250,6 @@ counts from note frontmatter).`,
 	SeeAlso: []string{"vv(1)", "vv-index(1)"},
 }
 
-var CmdStatsWrap = Command{
-	Name:       "stats wrap",
-	Synopsis:   "show /wrap dispatch + drift telemetry",
-	Brief:      "Show /wrap dispatch + drift telemetry",
-	Usage:      "vv stats wrap [--limit <N>]",
-	TableUsage: "vv stats wrap",
-	Flags: []Flag{
-		{Name: "--limit <N>", Desc: "Most-recent N dispatch records (default: all)"},
-	},
-	Description: `Aggregates the per-dispatch and per-drift jsonl logs written by
-the wrap-executor (Phase 4 of wrap-model-tiering) and renders a
-human-readable summary:
-
-  - median duration per tier (n=count)
-  - escalation rate (% of dispatches that escalated or errored)
-  - top escalation reasons
-  - median drift_bytes per bundle field
-
-Reads ~/.cache/vibe-vault/wrap-dispatch.jsonl (per-tier dispatch outcomes)
-and ~/.cache/vibe-vault/wrap-metrics.jsonl (per-field apply drift). Both
-files are host-local and append-only; no vault-side mirror.
-
-When neither file has data yet, prints "no data yet" and exits 0.`,
-	Examples: []string{
-		"vv stats wrap                    Show all dispatch + drift stats",
-		"vv stats wrap --limit 50         Most-recent 50 dispatch records",
-	},
-	SeeAlso: []string{"vv-stats(1)"},
-}
-
 var CmdFriction = Command{
 	Name:       "friction",
 	Synopsis:   "show friction analysis and correction patterns",

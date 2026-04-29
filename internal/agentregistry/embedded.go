@@ -4,46 +4,26 @@
 package agentregistry
 
 import (
-	"embed"
 	"fmt"
-	"io/fs"
-	"sort"
 	"strings"
 )
 
-//go:embed agents/*.md
-var embeddedAgents embed.FS
-
-// init parses every embedded agent definition and registers it. A parse
-// failure here is a build defect — the embedded files are authored in-tree
-// and ship with the binary — so we panic.
-func init() {
-	entries, err := fs.ReadDir(embeddedAgents, "agents")
-	if err != nil {
-		panic(fmt.Sprintf("agentregistry: read embedded agents dir: %v", err))
-	}
-	// Sort for deterministic registration order — duplicate-name detection
-	// in register() then yields a stable, debuggable failure.
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		path := "agents/" + e.Name()
-		data, readErr := fs.ReadFile(embeddedAgents, path)
-		if readErr != nil {
-			panic(fmt.Sprintf("agentregistry: read %s: %v", path, readErr))
-		}
-		def, parseErr := parseAgent(string(data))
-		if parseErr != nil {
-			panic(fmt.Sprintf("agentregistry: parse %s: %v", path, parseErr))
-		}
-		register(def)
-	}
-}
+// Direction-C Phase 4 retired the only embedded agent (wrap-executor.md)
+// when the wrap-bundle pipeline retired. The registry remains as
+// v2-portability scaffolding — vv_get_agent_definition surfaces an empty
+// catalogue for now and will repopulate when future agents are added.
+//
+// New agents go in agents/<name>.md with YAML frontmatter. Re-introduce
+// the //go:embed pattern below when the directory has at least one .md
+// file (Go's embed pattern requires at least one match):
+//
+//	//go:embed agents/*.md
+//	var embeddedAgents embed.FS
+//
+// Then call loadEmbeddedAgents from init() to parse and register them.
+//
+// parseAgent and parseFrontmatter remain exported (unexported in package
+// scope) for future re-introduction.
 
 // parseAgent splits an agent definition source into frontmatter and body and
 // returns a populated AgentDefinition. The Sha256 field is left blank — it is

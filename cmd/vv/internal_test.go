@@ -12,12 +12,32 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/agentregistry"
 )
 
+// Direction-C Phase 4 retired the only embedded agent (wrap-executor)
+// when the wrap-bundle pipeline retired. The generator code is kept as
+// v2-portability scaffolding but has nothing to emit until future agents
+// are registered. The tests below construct synthetic AgentDefinitions
+// in-place so the generator's idempotency / banner contracts remain
+// regression-locked without depending on any specific embedded file.
+
+func sampleGeneratorDefs() []*agentregistry.AgentDefinition {
+	return []*agentregistry.AgentDefinition{
+		{
+			Name:                  "example-agent",
+			Version:               "1.0",
+			Description:           "example for generator regression",
+			SystemPrompt:          "You are an example agent body.\n",
+			RequiredTools:         []string{"tool_a", "tool_b"},
+			ForbiddenTools:        []string{"Bash"},
+			EscalationTriggers:    []string{"trigger_one", "trigger_two"},
+			OutputFormat:          "terminal: example()",
+			RecommendedModelClass: "sonnet",
+		},
+	}
+}
+
 func TestGenerator_Idempotent(t *testing.T) {
 	dir := t.TempDir()
-	defs := agentregistry.List()
-	if len(defs) == 0 {
-		t.Fatal("agentregistry has no registered definitions; cannot test generator")
-	}
+	defs := sampleGeneratorDefs()
 
 	// First pass.
 	count1, err := generateAgentsTo(dir, defs)
@@ -58,7 +78,7 @@ func TestGenerator_Idempotent(t *testing.T) {
 
 func TestGenerator_ContainsBanner(t *testing.T) {
 	dir := t.TempDir()
-	defs := agentregistry.List()
+	defs := sampleGeneratorDefs()
 
 	if _, err := generateAgentsTo(dir, defs); err != nil {
 		t.Fatalf("generate: %v", err)
