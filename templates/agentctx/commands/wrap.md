@@ -16,15 +16,36 @@ slash-command-computed fields:
 
 | Shape | Match rule |
 |---|---|
-| `fresh-feature` | `commits_since_last_iter` non-empty AND `task_deltas.added` empty AND `vault_has_uncommitted_writes` false |
-| `planning` | `commits_since_last_iter` empty AND `task_deltas.added` non-empty AND `vault_has_uncommitted_writes` false |
-| `reconciliation` | `commits_since_last_iter` is a single merge commit AND `vault_has_uncommitted_writes` false |
-| `vault-only` | `commits_since_last_iter` empty AND `task_deltas` empty AND `vault_has_uncommitted_writes` true |
+| `fresh-feature` | `commits_since_last_iter` non-empty |
+| `planning` | `commits_since_last_iter` empty AND `task_deltas.added` non-empty |
+| `bookkeeping` | `commits_since_last_iter` empty AND `task_deltas.added` empty |
 | `writes-already-landed` | `vault_has_uncommitted_writes` true AND `iterations.md` already contains the entry for `iter_n+1` |
 
-Only `fresh-feature` and `planning` always need an LLM call.
-`reconciliation` needs minimal narrative, `vault-only` needs commit-msg
-only, and `writes-already-landed` skips the render entirely.
+The four `(commits-empty, task-added-empty)` Cartesian cells partition
+cleanly: any commits → `fresh-feature` (new task in the same iter is
+mentioned in narrative, no separate dispatch); empty + new task →
+`planning`; empty + no task → `bookkeeping`. `writes-already-landed`
+is the orthogonal short-circuit and wins on tie via the existing
+"prefer most restrictive" rule.
+
+The `vault_has_uncommitted_writes` field drops out of three of the
+four rules. After always-stamps, vault dirty/clean is purely about
+when in the wrap sequence the describe-iter-state call happens, not
+about the iter's shape.
+
+Only `fresh-feature` and `planning` always need a full LLM render
+call. `bookkeeping` (empty window + no new task) covers two cases
+that previously lived in separate shapes: post-merge reconciliation
+of a previously-wrapped feature branch, and pre-staged vault-only
+work. Both produce the same minimal narrative + mechanically-
+composed commit message (`chore(wrap): stamp iter N`).
+`writes-already-landed` short-circuits the render entirely.
+
+`bookkeeping` replaces the retired `vault-only` and `reconciliation`
+shapes (DESIGN #93). Rebase-merge and squash-merge of a previously-
+wrapped feature branch land naturally in `bookkeeping` because the
+merge produces no project work between anchor (the rebased/squashed
+wrap commit) and HEAD.
 
 ## Pre-flight
 
@@ -37,7 +58,7 @@ only, and `writes-already-landed` skips the render entirely.
    0600) or export the provider's `*_API_KEY` env var.
 3. **Merge-pattern timing.** When the project uses a feature-branch
    merge pattern, run `/wrap` on the feature branch BEFORE merging.
-   Wrapping after merge produces `reconciliation` instead of
+   Wrapping after merge produces `bookkeeping` instead of
    `fresh-feature`, losing the per-decision narrative.
 
 ## Procedure
@@ -46,8 +67,23 @@ only, and `writes-already-landed` skips the render entirely.
 
 Call `vv_describe_iter_state` for `iter_n`, `branch`,
 `vault_has_uncommitted_writes`, `last_iter_anchor_sha`. Then compute
-four slash-command fields, anchored by `last_iter_anchor_sha`
-(substitute `HEAD` if empty — the project has no prior iter):
+four slash-command fields, anchored by `last_iter_anchor_sha`:
+
+- `last_iter_anchor_sha` is `git log -n 1 --format=%H --
+  .vibe-vault/last-iter` — the SHA of the most recent commit that
+  wrote the iter stamp file. Empty when the project hasn't run a
+  post-DESIGN-#93 wrap yet; the orchestrator then substitutes the
+  output of:
+
+      git rev-list --max-parents=0 HEAD | tail -1
+
+  which is the project's oldest root commit. Deterministic, single
+  command, no operator judgment. The resulting `commits_since_
+  last_iter` window spans the project's entire history; shape
+  classification falls naturally into `fresh-feature` (or
+  `planning` if the only delta is a new task file). One-time
+  transition per project — the wrap that lands under this fallback
+  writes the stamp, and every subsequent wrap anchors mechanically.
 
 - `commits_since_last_iter` — `git log --format="%H %s"
   <anchor>..HEAD`. Parse into `[{sha, subject}]`.
@@ -68,7 +104,7 @@ four slash-command fields, anchored by `last_iter_anchor_sha`
 
 Apply the rules from "Work-unit shapes" above. Exactly one shape must
 match; if zero or more match, prefer the more restrictive (e.g.
-`writes-already-landed` over `vault-only`) and proceed.
+`writes-already-landed` over `bookkeeping`) and proceed.
 
 ### Stage 3 — Render call
 
@@ -101,7 +137,11 @@ vv_render_wrap_text(
 → {narrative_title, narrative_body, commit_subject, commit_prose_body}
 ```
 
-**`reconciliation`** — minimal narrative:
+**`bookkeeping`** — minimal narrative (`kind = iter_narrative`).
+Commit message is mechanically composed by the orchestrator: subject
+`chore(wrap): stamp iter N` (no LLM); body is one line:
+`Bookkeeping iter — no project-side work this cycle.` plus any
+operator-supplied context.
 
 ```
 vv_render_wrap_text(
@@ -111,18 +151,6 @@ vv_render_wrap_text(
                        open_threads: [], friction_trends: {}},
 )
 → {narrative_title, narrative_body}
-```
-
-**`vault-only`** — commit message only:
-
-```
-vv_render_wrap_text(
-    kind = "commit_msg", tier = "<tier>", project_name = "<project>",
-    iter_state = {...},
-    project_context = {resume_state: "", recent_iterations,
-                       open_threads: [], friction_trends: {}},
-)
-→ {commit_subject, commit_prose_body}
 ```
 
 **`writes-already-landed`** — skip render. Compose the commit message
@@ -158,16 +186,24 @@ session capture.
    `commit_subject` + blank line + `commit_prose_body` to
    `commit.msg` at project root. Single `content` field; markdown
    verbatim.
-5. **`vv_capture_session`** — record summary, tag, decisions,
+5. **`vv_stamp_iter`** — write the iter number to
+   `.vibe-vault/last-iter`. Required for every wrap shape. The
+   file is the canonical project-side anchor used by Stage 1 of
+   the next wrap; skipping it leaves the next wrap's anchor
+   pointing at this iter's predecessor and produces incorrect
+   `commits_since_last_iter` windows. Stage 5 git-add must include
+   `.vibe-vault/last-iter`.
+6. **`vv_capture_session`** — record summary, tag, decisions,
    files_changed, open_threads.
 
 ### Stage 5 — Git plumbing (project side)
 
-- `git add` the explicit paths in `iter_state.files_changed` plus the
-  agentctx files actually modified by Stage 4
+- `git add` the explicit paths in `iter_state.files_changed` plus
+  the agentctx files actually modified by Stage 4
   (`agentctx/iterations.md`, `agentctx/resume.md`, any
-  `agentctx/tasks/*.md` written during the iter). Never use `git add
-  -A` or `git add .`.
+  `agentctx/tasks/*.md` written during the iter), plus the project
+  iter stamp file `.vibe-vault/last-iter`. Never use `git add -A`
+  or `git add .`.
 - `git commit -F commit.msg` — uses the file written by
   `vv_set_commit_msg`.
 - `git push <remote> <branch>` per the project's workflow rules. On
