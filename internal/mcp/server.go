@@ -107,6 +107,7 @@ func RegisterAllTools(srv *Server, cfg config.Config) {
 	srv.RegisterTool(NewVaultMoveTool(cfg))
 	srv.RegisterTool(NewGetAgentDefinitionTool())
 	srv.RegisterTool(NewDescribeIterStateTool(cfg))
+	srv.RegisterTool(NewRenderWrapTextTool(cfg))
 	srv.RegisterPrompt(NewSessionGuidelinesPrompt())
 }
 

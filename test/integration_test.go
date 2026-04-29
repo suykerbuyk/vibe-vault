@@ -1489,6 +1489,7 @@ func TestIntegration(t *testing.T) {
 			"vv_get_agent_definition",
 			"vv_wrap_dispatch",
 			"vv_describe_iter_state",
+			"vv_render_wrap_text",
 		}
 		toolsResult := responses[1]["result"].(map[string]any)
 		tools := toolsResult["tools"].([]any)
