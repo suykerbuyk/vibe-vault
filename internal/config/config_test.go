@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -449,14 +450,14 @@ sonnet = "anthropic:claude-sonnet-4-6-pinned"
 	}
 }
 
-// TestOverlay_WrapDefaultModelAndLadder covers the simpler scalar/slice
-// fields in the Wrap overlay path.
-func TestOverlay_WrapDefaultModelAndLadder(t *testing.T) {
+// TestOverlay_WrapDefaultModel covers the scalar field in the Wrap
+// overlay path. Direction-C D5: escalation_ladder is retired so the
+// overlay path no longer touches it.
+func TestOverlay_WrapDefaultModel(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(cfgPath, []byte(`[wrap]
 default_model = "sonnet"
-escalation_ladder = ["sonnet", "opus"]
 `), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -467,31 +468,14 @@ escalation_ladder = ["sonnet", "opus"]
 	if result.Wrap.DefaultModel != "sonnet" {
 		t.Errorf("DefaultModel = %q, want sonnet", result.Wrap.DefaultModel)
 	}
-	if len(result.Wrap.EscalationLadder) != 2 || result.Wrap.EscalationLadder[0] != "sonnet" {
-		t.Errorf("EscalationLadder = %v, want [sonnet opus]", result.Wrap.EscalationLadder)
-	}
 }
 
 // TestValidate_HappyPath confirms a well-formed config passes validation.
 func TestValidate_HappyPath(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Wrap.DefaultModel = "sonnet"
-	cfg.Wrap.EscalationLadder = []string{"sonnet", "opus"}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
-	}
-}
-
-// TestValidate_EscalationLadder asserts a ladder entry not in Tiers errors.
-func TestValidate_EscalationLadder(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Wrap.EscalationLadder = []string{"nonexistent"}
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("expected validation error for undefined ladder tier")
-	}
-	if !strings.Contains(err.Error(), "nonexistent") {
-		t.Errorf("error %q should name the offending tier", err)
 	}
 }
 
@@ -541,18 +525,97 @@ func TestValidate_EmptyWrapSection(t *testing.T) {
 }
 
 // TestDefaultConfig_WrapSection covers the new defaults block.
+// Direction-C D5: EscalationLadder field removed from WrapConfig.
 func TestDefaultConfig_WrapSection(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.Wrap.DefaultModel != "opus" {
 		t.Errorf("DefaultModel = %q, want opus", cfg.Wrap.DefaultModel)
 	}
-	if len(cfg.Wrap.EscalationLadder) != 0 {
-		t.Errorf("EscalationLadder = %v, want empty", cfg.Wrap.EscalationLadder)
-	}
 	for _, tier := range []string{"haiku", "sonnet", "opus"} {
 		if _, ok := cfg.Wrap.Tiers[tier]; !ok {
 			t.Errorf("default Tiers missing %q", tier)
 		}
+	}
+}
+
+// TestLoad_EscalationLadderDeprecationLog asserts Load() emits a
+// deprecation warning when [wrap].escalation_ladder is present in the
+// config file. Direction-C D5 + Q6.
+func TestLoad_EscalationLadderDeprecationLog(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	tomlContent := `[wrap]
+default_model = "opus"
+escalation_ladder = ["sonnet", "opus"]
+
+[wrap.tiers]
+sonnet = "anthropic:claude-sonnet-4-6"
+opus = "anthropic:claude-opus-4-7"
+`
+	if err := os.WriteFile(cfgPath, []byte(tomlContent), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", dir)
+	if err := os.MkdirAll(filepath.Join(dir, ".config", "vibe-vault"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Rename(cfgPath, filepath.Join(dir, ".config", "vibe-vault", "config.toml")); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+
+	var captured strings.Builder
+	prev := deprecationWarner
+	deprecationWarner = func(format string, args ...any) {
+		fmt.Fprintf(&captured, format, args...)
+	}
+	t.Cleanup(func() { deprecationWarner = prev })
+
+	if _, err := Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	got := captured.String()
+	if !strings.Contains(got, "escalation_ladder is deprecated") {
+		t.Errorf("expected deprecation warning, got %q", got)
+	}
+	if !strings.Contains(got, "config.toml") {
+		t.Errorf("warning should mention config path; got %q", got)
+	}
+}
+
+// TestLoad_NoEscalationLadderNoLog asserts Load() does NOT emit the
+// deprecation warning for clean configs.
+func TestLoad_NoEscalationLadderNoLog(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, ".config", "vibe-vault")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	tomlContent := `[wrap]
+default_model = "opus"
+
+[wrap.tiers]
+opus = "anthropic:claude-opus-4-7"
+`
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(tomlContent), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", dir)
+
+	var captured strings.Builder
+	prev := deprecationWarner
+	deprecationWarner = func(format string, args ...any) {
+		fmt.Fprintf(&captured, format, args...)
+	}
+	t.Cleanup(func() { deprecationWarner = prev })
+
+	if _, err := Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := captured.String(); got != "" {
+		t.Errorf("expected no warning for clean config, got %q", got)
 	}
 }
 
