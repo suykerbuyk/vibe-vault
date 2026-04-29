@@ -247,8 +247,7 @@ func modelForTier(cfg config.Config, tier string) string {
 // single MCP tool, single LLM call, with a `kind:` discriminator
 // selecting one of three prompt templates (iter_narrative, commit_msg,
 // iter_narrative_and_commit_msg). Consumes only the `Provider`
-// interface (single-turn ChatCompletion); does NOT need
-// AgenticProvider.
+// interface (single-turn ChatCompletion).
 func NewRenderWrapTextTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{

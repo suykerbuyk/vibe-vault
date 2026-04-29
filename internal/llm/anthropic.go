@@ -13,8 +13,8 @@ import (
 )
 
 // Anthropic implements Provider for the Anthropic Messages API (single-turn
-// chat completion). Multi-turn tool-use is provided by AnthropicAgentic in
-// anthropic_agentic.go; both share *anthropicHTTPCore for HTTP plumbing.
+// chat completion). HTTP plumbing lives in *anthropicHTTPCore (anthropichttp.go)
+// for symmetry with future provider variants that may want to share it.
 type Anthropic struct {
 	*anthropicHTTPCore
 }
