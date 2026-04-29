@@ -110,6 +110,15 @@ func NewUpdateResumeTool(cfg config.Config) Tool {
 				return "", fmt.Errorf("write resume: %w", err)
 			}
 
+			// D4b auto-heal: re-render marker-bounded state-derived
+			// sub-regions of resume.md from filesystem ground truth.
+			// This preserves the Step-9 ApplyBundle semantics now that
+			// the bundle path is being retired in favour of the
+			// surgical canonical path.
+			if healErr := autoHealResumeStateBlocks(cfg, project); healErr != nil {
+				return "", fmt.Errorf("auto-heal: %w", healErr)
+			}
+
 			return fmt.Sprintf("Updated section %q in resume.md for project %q", args.Section, project), nil
 		},
 	}
@@ -311,6 +320,15 @@ func NewAppendIterationTool(cfg config.Config) Tool {
 
 			if err := mdutil.AtomicWriteFile(absPath, []byte(content), 0o644); err != nil {
 				return "", fmt.Errorf("write iterations: %w", err)
+			}
+
+			// D4b auto-heal: re-render marker-bounded state-derived
+			// sub-regions of resume.md from filesystem ground truth.
+			// Iteration counts and project history both pull from
+			// iterations.md, so the marker block converges with the
+			// freshly-appended iteration on every call.
+			if healErr := autoHealResumeStateBlocks(cfg, project); healErr != nil {
+				return "", fmt.Errorf("auto-heal: %w", healErr)
 			}
 
 			return fmt.Sprintf("Appended iteration %d to iterations.md for project %q", iterNum, project), nil
