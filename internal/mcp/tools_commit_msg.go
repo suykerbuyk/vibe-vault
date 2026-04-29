@@ -6,7 +6,6 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
@@ -79,14 +78,14 @@ func NewSetCommitMsgTool(cfg config.Config) Tool {
 			data := []byte(args.Content)
 
 			// Step 1: atomic write to vault.
-			writeErr := atomicWriteCommitMsg(absVaultDest, data)
+			writeErr := atomicWriteFile(absVaultDest, data)
 			if writeErr != nil {
 				return "", fmt.Errorf("write vault commit.msg: %w", writeErr)
 			}
 
 			// Step 2: atomic copy to project root.
 			projDest := projectCommitMsgPath(args.ProjectPath)
-			copyErr := atomicWriteCommitMsg(projDest, data)
+			copyErr := atomicWriteFile(projDest, data)
 			if copyErr != nil {
 				return "", fmt.Errorf(
 					"vault commit.msg written to %q but project-root copy failed for %q: %w "+
@@ -141,47 +140,3 @@ func joinPath(elem ...string) string {
 	return result
 }
 
-// atomicWriteCommitMsg writes data to path atomically via a temp file.
-// Creates parent directories as needed.
-func atomicWriteCommitMsg(path string, data []byte) error {
-	if err := os.MkdirAll(dirOf(path), 0o755); err != nil {
-		return fmt.Errorf("create parent directories: %w", err)
-	}
-	tmp, err := os.CreateTemp(dirOf(path), ".vv-commit-msg-*")
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	removeTemp := true
-	defer func() {
-		if removeTemp {
-			os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp file: %w", err)
-	}
-	if err := os.Chmod(tmpPath, 0o644); err != nil {
-		return fmt.Errorf("chmod temp file: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("rename into place: %w", err)
-	}
-	removeTemp = false
-	return nil
-}
-
-// dirOf returns the directory component of path.
-func dirOf(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' || path[i] == '\\' {
-			return path[:i]
-		}
-	}
-	return "."
-}

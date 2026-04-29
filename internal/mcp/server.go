@@ -85,6 +85,7 @@ func RegisterAllTools(srv *Server, cfg config.Config) {
 	srv.RegisterTool(NewGetIterationsTool(cfg))
 	srv.RegisterTool(NewGetProjectRootTool(cfg))
 	srv.RegisterTool(NewSetCommitMsgTool(cfg))
+	srv.RegisterTool(NewStampIterTool(cfg))
 	srv.RegisterTool(NewThreadInsertTool(cfg))
 	srv.RegisterTool(NewThreadReplaceTool(cfg))
 	srv.RegisterTool(NewThreadRemoveTool(cfg))
