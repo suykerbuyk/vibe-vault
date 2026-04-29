@@ -289,8 +289,6 @@ func setProviderKeyInPlace(content []byte, provider, key string) string {
 // directory + chmod 0600 + rename, ensuring the file never exists in a
 // partial state. The parent directory is created if missing and chmod'd to
 // 0700 (idempotent, defensive — single-user secret-bearing config).
-//
-// Pattern-matches internal/wrapbundlecache/cache.go:Write().
 func atomicWriteConfig(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {

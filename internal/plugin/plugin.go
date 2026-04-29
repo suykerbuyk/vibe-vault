@@ -25,7 +25,7 @@ const (
 // operator's shell into the MCP server subprocess via .mcp.json's env block.
 // Claude Code expands ${VAR} references against the parent process env at
 // spawn time, so the subprocess sees the operator's live key. Without this,
-// vv_wrap_dispatch (and other LLM-backed handlers) cannot reach the provider.
+// vv_render_wrap_text (and other LLM-backed handlers) cannot reach the provider.
 //
 // Three providers listed preemptively: ResolveAPIKey's env-fallback tier
 // needs the var to actually reach the MCP-server subprocess. With all three

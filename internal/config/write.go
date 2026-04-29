@@ -91,7 +91,7 @@ timeout_seconds = 15
 
 # [providers.anthropic]
 # api_key = "sk-ant-..."
-# # Required by vv_wrap_dispatch (the wrap executor cheap-tier path)
+# # Required by vv_render_wrap_text (the unified wrap renderer)
 # # and by hook enrichment / session synthesis when [enrichment].provider
 # # = "anthropic". Bills against this key, NOT against your Claude Code
 # # subscription. Set via: vv config set-key anthropic <key>
@@ -197,7 +197,7 @@ func ProjectConfigTemplate() string {
 
 # [providers.anthropic]
 # api_key = "sk-ant-..."
-# # Required by vv_wrap_dispatch (the wrap executor cheap-tier path)
+# # Required by vv_render_wrap_text (the unified wrap renderer)
 # # and by hook enrichment / session synthesis when [enrichment].provider
 # # = "anthropic". Bills against this key, NOT against your Claude Code
 # # subscription. Set via: vv config set-key anthropic <key>

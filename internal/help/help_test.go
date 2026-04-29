@@ -409,11 +409,11 @@ var expectedTerminal = map[string]string{
 		"Subcommands:\n" +
 		"  set-key   Store a per-provider API key (anthropic, openai, google)\n" +
 		"\n" +
-		"The dispatch path (vv_wrap_dispatch) and hook enrichment / synthesis\n" +
-		"both resolve provider keys via a layered lookup: the value in\n" +
-		"config.toml wins, falling back to the provider's environment variable\n" +
-		"(ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY) for operators\n" +
-		"who already have shell-env-based setup.\n",
+		"The wrap render path (vv_render_wrap_text) and hook enrichment /\n" +
+		"synthesis both resolve provider keys via a layered lookup: the value\n" +
+		"in config.toml wins, falling back to the provider's environment\n" +
+		"variable (ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY) for\n" +
+		"operators who already have shell-env-based setup.\n",
 
 	"templates": "vv templates \u2014 inspect, compare, and reset vault templates\n" +
 		"\n" +
