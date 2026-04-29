@@ -319,43 +319,45 @@ body
 	}
 }
 
-// TestEmbedded_WrapExecutorPresent guards the build-time embed contract: the
-// wrap-executor agent MUST be parseable from agents/wrap-executor.md.
-func TestEmbedded_WrapExecutorPresent(t *testing.T) {
-	def, err := Lookup("wrap-executor")
+// TestParseAgent_RoundTrip exercises parseAgent end-to-end on an
+// in-memory definition with the canonical frontmatter shape. Direction-C
+// Phase 4 retired the only embedded agent (wrap-executor); the parser
+// itself is preserved as v2-portability scaffolding for re-introduction
+// when future agents land. This test guards parser+frontmatter behavior
+// without depending on any specific embedded file.
+func TestParseAgent_RoundTrip(t *testing.T) {
+	src := `---
+name: example-agent
+version: "1.0"
+description: example for parser regression
+required_tools: [tool_a, tool_b]
+forbidden_tools: [Bash]
+escalation_triggers:
+  - trigger_one
+  - trigger_two
+output_format: |
+  terminal: example()
+recommended_model_class: sonnet
+---
+You are an example agent body.
+`
+	def, err := parseAgent(src)
 	if err != nil {
-		t.Fatalf("wrap-executor not registered: %v", err)
+		t.Fatalf("parseAgent: %v", err)
+	}
+	if def.Name != "example-agent" {
+		t.Errorf("name: got %q want %q", def.Name, "example-agent")
 	}
 	if def.RecommendedModelClass != "sonnet" {
-		t.Errorf("expected sonnet, got %q", def.RecommendedModelClass)
+		t.Errorf("model class: got %q", def.RecommendedModelClass)
 	}
-	if len(def.EscalationTriggers) != 6 {
-		t.Errorf("expected 6 escalation triggers, got %d", len(def.EscalationTriggers))
+	if len(def.RequiredTools) != 2 {
+		t.Errorf("required_tools: got %d entries", len(def.RequiredTools))
 	}
-	wantTriggers := map[string]bool{
-		"multi_match_ambiguity":     true,
-		"mcp_tool_error_after_retry": true,
-		"mutation_count_mismatch":   true,
-		"semantic_presence_failure": true,
-		"self_reported_confusion":   true,
-		"missing_terminal_signal":   true,
+	if len(def.EscalationTriggers) != 2 {
+		t.Errorf("escalation_triggers: got %d entries", len(def.EscalationTriggers))
 	}
-	for _, tr := range def.EscalationTriggers {
-		if !wantTriggers[tr] {
-			t.Errorf("unexpected escalation trigger %q", tr)
-		}
-	}
-	// Required tools whitelist.
-	wantReq := map[string]bool{
-		"vv_synthesize_wrap_bundle": true,
-		"wrap_executor_finish":      true,
-	}
-	for _, rt := range def.RequiredTools {
-		if !wantReq[rt] {
-			t.Errorf("unexpected required tool %q", rt)
-		}
-	}
-	if !strings.Contains(def.SystemPrompt, "wrap_executor_finish") {
-		t.Error("system prompt should mention the terminal tool")
+	if !strings.Contains(def.SystemPrompt, "example agent body") {
+		t.Errorf("body not parsed: %q", def.SystemPrompt)
 	}
 }
