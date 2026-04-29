@@ -2422,3 +2422,91 @@ Key architectural and design decisions in vibe-vault, with rationale.
     should reuse the stamp-file pattern under `.vibe-vault/`
     rather than reviving any commit-body-grep mechanism; one
     file per anchor purpose.
+
+94. **Path-conditional CI bypass for administrative commits via
+    leading `detect-admin-commit` job + `grep -vxFf` allowlist;
+    `Test`/`Lint` short-circuit on `is_admin_only`; allowlist
+    starts at `.vibe-vault/last-iter` only.** Decision #93's
+    mechanical iter anchor produces a wrap commit per cycle whose
+    sole project-side change is a single integer written to
+    `.vibe-vault/last-iter`. Routing every such commit through a
+    full PR with ~9 minutes of Test + Lint adds friction without
+    correctness benefit; the diff carries no Go, no docs, no
+    config that affects build output.
+
+    **Decision.** `.github/workflows/ci.yml` introduces a leading
+    `detect-admin-commit` job that checks whether the diff is
+    contained within an allowlist of administrative paths. When
+    so, the `Test` and `Lint` jobs short-circuit to success in
+    <10 seconds, satisfying the branch protection's named status
+    checks without running the substantive build. The allowlist
+    starts at `.vibe-vault/last-iter` only.
+
+    **Why.** Wrap commits under DESIGN #93 produce single-file
+    changes to the iter stamp file that the CI cannot meaningfully
+    validate (no Go code touched, no documentation, no
+    configuration that affects build output). Routing every wrap
+    through a full PR cycle adds ~9 minutes of CI wall-clock plus
+    PR-management overhead per iter, with no correctness benefit.
+    The path-conditional bypass keeps protection in place for
+    substantive changes while removing the friction for
+    administrative ones.
+
+    **Why CI-level, not branch-protection-level.** GitHub's legacy
+    branch protection (currently in use on this repo) doesn't
+    support path-conditional status check exemptions. Repository
+    Rulesets do, but migrating the protection config is a larger
+    separate change with its own audit surface. Path-conditional
+    logic in the workflow file is universally available,
+    version-controlled, and reverts cleanly with a single commit.
+
+    **Allowlist policy.** Each addition to the `ALLOWLIST` array
+    in `detect-admin-commit` requires:
+
+    1. A second concrete use case — never speculative additions.
+    2. A DESIGN-decision-style justification recorded in this
+       section (or a successor decision) noting why the path is
+       administrative AND why CI cannot meaningfully validate it.
+
+    **Alternatives rejected.** Repository Rulesets path-conditioning
+    (Option B) — split config audit surface, plan availability
+    uncertainty. GitHub App bypass actor (Option C) — wrong
+    abstraction (privileges vs administrative content). Make-side
+    conditional checks (Option D) — couples build-tool semantics
+    to administrative-commit detection.
+
+    **Risk surface.** A malicious actor with write access could
+    rename a file to `.vibe-vault/last-iter` to slip past CI.
+    Mitigation: this is a friction-reduction, not a security
+    boundary; write access already implies trust. If the threat
+    model widens, add commit-content validation (file content
+    must be a single integer + newline ≤8 bytes).
+
+    **Operational note: coverage artifact gated.** The `Test`
+    job's `Upload coverage artifact` step is gated on
+    `is_admin_only != 'true'` along with the rest of the
+    substantive steps. Admin-only commits do not produce a
+    `coverage.out` artifact. No current consumer breaks (the
+    artifact is uploaded for retention, not consumed by
+    downstream jobs), but future workflows that expect a recent
+    coverage artifact for every commit must filter to substantive
+    commits.
+
+    **Always-exit-0 mandate.** The `detect-admin-commit` job's
+    bash script is hard-coded to never exit non-zero. Any failure
+    in path detection, diff resolution, or temp-file creation
+    falls through to `admin=false` (the safe default — route to
+    full CI) and the script exits 0. Without this invariant, a
+    single bash bug would skip the dependent `Test` and `Lint`
+    jobs, which GitHub treats as required-checks-not-passing,
+    blocking every merge to main repo-wide. With
+    `enforce_admins: true`, even repo admins would be blocked.
+    Defensive coding here is mandatory, not optional.
+
+    Source: `.github/workflows/ci.yml` (Phase 1 commit `933e609`,
+    Phase 2 commit `6199cfd`). Phase 4 (this entry): docs only.
+    Re-open conditions: any allowlist growth beyond
+    `.vibe-vault/last-iter` requires a follow-up decision entry
+    per the allowlist policy above; migration to Repository
+    Rulesets path-conditioning would supersede the workflow-level
+    bypass entirely.
