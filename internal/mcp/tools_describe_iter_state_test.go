@@ -196,18 +196,16 @@ func TestDescribeIterState_PriorIterAnchorFound(t *testing.T) {
 
 	t.Chdir(projDir)
 
-	// Seed today's index so NextIteration returns 42.
-	today := time.Now().Format("2006-01-02")
-	idx, err := index.Load(cfg.StateDir())
-	if err != nil {
-		t.Fatalf("load index: %v", err)
+	// Seed iterations.md so iter_n derives to 42.
+	iterPath := filepath.Join(cfg.VaultPath, "Projects", "myproj", "agentctx", "iterations.md")
+	if err := os.MkdirAll(filepath.Dir(iterPath), 0o755); err != nil {
+		t.Fatalf("mkdir iterations.md parent: %v", err)
 	}
-	idx.Add(index.SessionEntry{
-		SessionID: "s1", Project: "myproj", Date: today, Iteration: 41,
-		CreatedAt: time.Now(),
-	})
-	if saveErr := idx.Save(); saveErr != nil {
-		t.Fatalf("save index: %v", saveErr)
+	iterContent := "# Iterations\n\n## Iteration Narratives\n\n" +
+		"### Iteration 40 — earlier work (2026-04-26)\n\nbody\n\n" +
+		"### Iteration 41 — ship something (2026-04-27)\n\nbody\n"
+	if err := os.WriteFile(iterPath, []byte(iterContent), 0o644); err != nil {
+		t.Fatalf("write iterations.md: %v", err)
 	}
 
 	tool := NewDescribeIterStateTool(cfg)
@@ -375,5 +373,50 @@ func TestDescribeIterStateTool_OutputJSONShape(t *testing.T) {
 	// last_iter_anchor_sha is omitempty when no anchor; here we expect omit.
 	if _, ok := raw["last_iter_anchor_sha"]; ok {
 		t.Errorf("last_iter_anchor_sha should be omitted when empty; got %v", raw["last_iter_anchor_sha"])
+	}
+}
+
+func TestNextIterFromIterationsMD(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string // empty means do not write the file
+		want     int
+	}{
+		{name: "missing file", content: "", want: 1},
+		{name: "no headers", content: "# Iterations\n\nno entries yet\n", want: 1},
+		{name: "single header", content: "### Iteration 1 — first (2026-01-01)\n", want: 2},
+		{name: "many headers", content: "### Iteration 40 — a\n### Iteration 41 — b\n### Iteration 168 — z\n", want: 169},
+		{name: "out of order", content: "### Iteration 168 — z\n### Iteration 40 — a\n", want: 169},
+		{name: "h2 ignored", content: "## Iteration 999 — wrong level\n### Iteration 7 — right\n", want: 8},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			vaultRoot := t.TempDir()
+			projAgentctx := filepath.Join(vaultRoot, "Projects", "myproj", "agentctx")
+			if err := os.MkdirAll(projAgentctx, 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			if tc.content != "" {
+				if err := os.WriteFile(filepath.Join(projAgentctx, "iterations.md"), []byte(tc.content), 0o644); err != nil {
+					t.Fatalf("write iterations.md: %v", err)
+				}
+			}
+			got, err := nextIterFromIterationsMD(vaultRoot, "myproj")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNextIterFromIterationsMD_EmptyArgs(t *testing.T) {
+	if got, err := nextIterFromIterationsMD("", "myproj"); err != nil || got != 1 {
+		t.Errorf("empty vault path: got (%d, %v), want (1, nil)", got, err)
+	}
+	if got, err := nextIterFromIterationsMD(t.TempDir(), ""); err != nil || got != 1 {
+		t.Errorf("empty project: got (%d, %v), want (1, nil)", got, err)
 	}
 }
