@@ -76,34 +76,19 @@ func makeStateBlocksVault(t *testing.T) config.Config {
 	return cfg
 }
 
-// TestRenderResumeStateBlocks_ByteIdenticalWithApplyBundle asserts the
-// new shared entry point and the legacy ApplyBundle Step 9 produce the
-// same on-disk resume.md content. This locks the contract that D4b
-// auto-heal hooks preserve Step-9 semantics exactly.
-func TestRenderResumeStateBlocks_ByteIdenticalWithApplyBundle(t *testing.T) {
-	cfgA := makeStateBlocksVault(t)
-	gotA, err := RenderResumeStateBlocks(cfgA, "myproject")
+// TestRenderResumeStateBlocks_OnDiskMatchesReturnValue asserts the
+// shared entry point's return value matches the file it wrote on disk.
+// Direction-C Phase 4 retired the legacy ApplyBundle Step 9 entry; the
+// shared RenderResumeStateBlocks is now the only path.
+func TestRenderResumeStateBlocks_OnDiskMatchesReturnValue(t *testing.T) {
+	cfg := makeStateBlocksVault(t)
+	got, err := RenderResumeStateBlocks(cfg, "myproject")
 	if err != nil {
 		t.Fatalf("RenderResumeStateBlocks: %v", err)
 	}
 
-	// Build a second identical vault and run the legacy entry point.
-	// applyResumeStateBlocks now delegates to RenderResumeStateBlocks
-	// but we exercise the legacy signature explicitly to lock the
-	// contract for callers that still call through the old name.
-	cfgB := makeStateBlocksVault(t)
-	gotB, err := applyResumeStateBlocks(cfgB, "myproject", "")
-	if err != nil {
-		t.Fatalf("applyResumeStateBlocks: %v", err)
-	}
-
-	if gotA != gotB {
-		t.Errorf("RenderResumeStateBlocks vs applyResumeStateBlocks output diverged\nA:\n%s\n---\nB:\n%s\n",
-			gotA, gotB)
-	}
-	// Sanity: file on disk matches return value.
-	dataA, _ := os.ReadFile(filepath.Join(cfgA.VaultPath, "Projects/myproject/agentctx/resume.md"))
-	if string(dataA) != gotA {
+	data, _ := os.ReadFile(filepath.Join(cfg.VaultPath, "Projects/myproject/agentctx/resume.md"))
+	if string(data) != got {
 		t.Errorf("on-disk content != returned content")
 	}
 }

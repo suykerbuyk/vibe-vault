@@ -55,9 +55,9 @@ func (s *Server) RegisterTool(t Tool) {
 
 // RegisterAllTools registers every production tool + prompt on srv. This is
 // the single source of truth for the MCP-tool inventory: cmd/vv/main.go calls
-// it from `vv mcp` server startup, and `applyResumeStateBlocks` (Step 9 of
-// `ApplyBundle`) calls it on a throw-away Server to count tools for the
-// `current-state` marker block via `srv.ToolNames()`.
+// it from `vv mcp` server startup, and the resume.md state-region renderer
+// calls it on a throw-away Server to count tools for the `current-state`
+// marker block via `srv.ToolNames()`.
 //
 // Keep this list aligned with cmd/vv/main.go's surfaced Tool factories.
 // Adding or removing a tool here flows through to the rendered MCP count
@@ -91,12 +91,6 @@ func RegisterAllTools(srv *Server, cfg config.Config) {
 	srv.RegisterTool(NewCarriedAddTool(cfg))
 	srv.RegisterTool(NewCarriedRemoveTool(cfg))
 	srv.RegisterTool(NewCarriedPromoteToTaskTool(cfg))
-	srv.RegisterTool(NewRenderCommitMsgTool(cfg))
-	srv.RegisterTool(NewPrepareWrapSkeletonTool())
-	srv.RegisterTool(NewSynthesizeWrapTool(cfg))
-	srv.RegisterTool(NewApplyWrapBundleByHandleTool(cfg))
-	srv.RegisterTool(NewWrapQualityCheckTool(cfg))
-	srv.RegisterTool(NewWrapDispatchTool(cfg))
 	srv.RegisterTool(NewVaultReadTool(cfg))
 	srv.RegisterTool(NewVaultListTool(cfg))
 	srv.RegisterTool(NewVaultExistsTool(cfg))
