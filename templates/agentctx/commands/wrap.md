@@ -1,158 +1,218 @@
 # /wrap
 
-Wrap the current iteration into the vault using the wrap-executor subagent.
+Wrap the current iteration into the vault using the surgical-render
+path. The slash command is the orchestrator: it inspects iter state,
+classifies the work-unit shape, calls a single render tool when prose
+is needed, and applies mutations mechanically. Source-control history
+and the vault filesystem are the canonical record; the LLM's job is to
+write short, accurate prose when prose is needed — nothing more.
 
-This procedure dispatches a cheaper-tier model (sonnet by default) at the
-executor seat so the orchestrator session does not pay full Opus cost for
-every wrap. The orchestrator owns the natural-language ladder: it walks
-`[wrap].escalation_ladder` and stops at the first tier whose outputs pass
-the quality gate.
+This is **the** wrap path. There is no fallback.
+
+## Work-unit shapes
+
+Pattern-match on `vv_describe_iter_state` output plus four
+slash-command-computed fields:
+
+| Shape | Match rule |
+|---|---|
+| `fresh-feature` | `commits_since_last_iter` non-empty AND `task_deltas.added` empty AND `vault_has_uncommitted_writes` false |
+| `planning` | `commits_since_last_iter` empty AND `task_deltas.added` non-empty AND `vault_has_uncommitted_writes` false |
+| `reconciliation` | `commits_since_last_iter` is a single merge commit AND `vault_has_uncommitted_writes` false |
+| `vault-only` | `commits_since_last_iter` empty AND `task_deltas` empty AND `vault_has_uncommitted_writes` true |
+| `writes-already-landed` | `vault_has_uncommitted_writes` true AND `iterations.md` already contains the entry for `iter_n+1` |
+
+Only `fresh-feature` and `planning` always need an LLM call.
+`reconciliation` needs minimal narrative, `vault-only` needs commit-msg
+only, and `writes-already-landed` skips the render entirely.
 
 ## Pre-flight
 
-1. Run `vv mcp check --tools` and assert these tools are present (fail
-   loudly if any are missing):
-   - `vv_prepare_wrap_skeleton`
-   - `vv_synthesize_wrap_bundle`
-   - `vv_apply_wrap_bundle_by_handle`
-   - `vv_wrap_quality_check`
-   - `vv_wrap_dispatch`
-
-   Note: `vv_get_agent_definition` is v2-portability scaffolding and is
-   NOT required for v1 dispatch.
-2. Verify pre-commit clean: `make pre-commit`.
-3. Verify an API key is configured for the tier-resolved provider.
-   `vv_wrap_dispatch` extracts the provider from the `[wrap.tiers]`
-   entry (e.g. `"anthropic:claude-sonnet-4-6"` → provider=`anthropic`)
-   and resolves the key via the layered resolver: config-first, then
-   env-fallback, then actionable error. Set the key via
-   `vv config set-key anthropic <key>` (preferred — stored at mode 0600
-   in `~/.config/vibe-vault/config.toml`) or `export ANTHROPIC_API_KEY=...`
-   in the shell that launches Claude Code. The same resolver covers
-   hook enrichment and session synthesis when those features are enabled.
+1. `make pre-commit` clean before wrapping. Wrapping over a dirty
+   pre-commit produces a misleading iter record.
+2. An API key is configured for the tier's provider. Tiers map
+   `provider:model` strings via `[wrap.tiers]` in
+   `~/.config/vibe-vault/config.toml`. Set the key via
+   `vv config set-key <provider> <key>` (preferred — stored at mode
+   0600) or export the provider's `*_API_KEY` env var.
+3. **Merge-pattern timing.** When the project uses a feature-branch
+   merge pattern, run `/wrap` on the feature branch BEFORE merging.
+   Wrapping after merge produces `reconciliation` instead of
+   `fresh-feature`, losing the per-decision narrative.
 
 ## Procedure
 
-### Stage 0 — Skeleton preparation
+### Stage 1 — State collection
 
-Compute orchestrator facts (NOT prose). The skeleton carries structural
-inputs only; the executor produces the prose:
+Call `vv_describe_iter_state` for `iter_n`, `branch`,
+`vault_has_uncommitted_writes`, `last_iter_anchor_sha`. Then compute
+four slash-command fields, anchored by `last_iter_anchor_sha`
+(substitute `HEAD` if empty — the project has no prior iter):
 
-- `iter` (next iteration number, int)
-- `project` (project name)
-- `files_changed` (from `git diff --name-only`)
-- `test_count_delta` (compare test counts vs prior wrap, single int sum)
-- `decisions` (key technical decisions)
-- `threads_to_open` (slugs + anchor positions; bodies filled by executor)
-- `threads_to_replace` (slugs; bodies filled by executor)
-- `threads_to_close` (slugs)
-- `carried_to_add` (slugs + titles; bodies filled by executor)
-- `carried_to_remove` (slugs)
-- `task_retirements`
+- `commits_since_last_iter` — `git log --format="%H %s"
+  <anchor>..HEAD`. Parse into `[{sha, subject}]`.
+- `files_changed` — `git diff --name-only <anchor>..HEAD`.
+- `task_deltas` — walk `agentctx/tasks/` against `git show
+  <anchor>:agentctx/tasks/`:
+  - `added` — slugs present at HEAD but absent at the anchor
+  - `retired` — slugs whose `status:` at HEAD is `shipped`/`retired`
+    and was not at the anchor
+  - `cancelled` — slugs whose `status:` at HEAD is `cancelled` and
+    was not at the anchor
+- `test_counts` — read `doc/TESTING.md` headline
+  (`<unit> unit / <integration> integration / <lint> lint`) when
+  present; otherwise enumerate via the project's test runner. Use `0`
+  for any counter that does not apply.
 
-Call `vv_prepare_wrap_skeleton(...)` with these facts. Capture the returned
-`SkeletonHandle{iter, skeleton_path, skeleton_sha256}` — every Stage 1/2
-tool requires this handle for compare-and-set safety.
+### Stage 2 — Shape classification
 
-### Stage 1 — Dispatch loop
+Apply the rules from "Work-unit shapes" above. Exactly one shape must
+match; if zero or more match, prefer the more restrictive (e.g.
+`writes-already-landed` over `vault-only`) and proceed.
 
-Read `[wrap].default_model` from `~/.config/vibe-vault/config.toml`. Walk
-`[wrap].escalation_ladder` starting at `default_model`:
+### Stage 3 — Render call
+
+Skip when shape is `writes-already-landed`. Otherwise parallel-fetch
+the project-context bundle:
+
+- `vv_get_resume` — current resume.md content
+- `vv_get_iterations` — last few iter narratives (voice calibration +
+  back-references)
+- `vv_get_friction_trends` — friction-trend summary
+
+Parse `open_threads` as a slug list from the resume.md
+"Carried-forward threads" section.
+
+Then dispatch by shape:
+
+**`fresh-feature` / `planning`** — full render:
 
 ```
-prior_attempts = []
-for tier in escalation_ladder:
-    result = vv_wrap_dispatch(
-        skeleton_handle = handle,
-        tier            = tier,
-        agent_name      = "wrap-executor",
-        prior_attempts  = prior_attempts,
-    )
-    if result.escalate_reason:
-        prior_attempts.append({tier, escalate_reason: result.escalate_reason})
-        continue
-    qc = vv_wrap_quality_check(skeleton_handle = handle, outputs = result.outputs)
-    if qc.passed:
-        outputs = result.outputs
-        break
-    prior_attempts.append({tier, escalate_reason: "qc_failed: " + qc.failures})
-
-if outputs is None:
-    report "all tiers exhausted across the ladder"; exit
+vv_render_wrap_text(
+    kind         = "iter_narrative_and_commit_msg",
+    tier         = "<tier>",                    // default sonnet; opus on re-run
+    project_name = "<project>",
+    iter_state   = {iter_n, branch, last_iter_anchor_sha,
+                    commits_since_last_iter, files_changed,
+                    task_deltas, test_counts},
+    project_context = {resume_state, recent_iterations,
+                       open_threads, friction_trends},
+)
+→ {narrative_title, narrative_body, commit_subject, commit_prose_body}
 ```
 
-The quality gate runs BEFORE the apply call so a failed tier's outputs
-never reach the vault.
+**`reconciliation`** — minimal narrative:
 
-### Stage 2 — Apply
+```
+vv_render_wrap_text(
+    kind = "iter_narrative", tier = "<tier>", project_name = "<project>",
+    iter_state = {...},
+    project_context = {resume_state: "", recent_iterations,
+                       open_threads: [], friction_trends: {}},
+)
+→ {narrative_title, narrative_body}
+```
 
-Call `vv_apply_wrap_bundle_by_handle(skeleton_handle, outputs)`. Then run
-the git operations:
+**`vault-only`** — commit message only:
 
-> **resume.md state-blocks (DESIGN #90).** The three marker-bounded
-> regions in `resume.md` — `<!-- vv:active-tasks:start -->`,
-> `<!-- vv:current-state:start -->`, `<!-- vv:project-history-tail:start -->`
-> — auto-update on every wrap from filesystem ground truth via
-> `ApplyBundle` Step 9. Iterations / MCP tool count / embedded template
-> count are machine-rendered into the `current-state` block; test count
-> and other Current-State prose remain operator-authored adjacent to
-> the marker block. The renderer is self-healing — on first wrap of a
-> retrofit project that lacks the marker pairs, Step 9 inserts them at
-> sensible default locations and renders fresh contents.
+```
+vv_render_wrap_text(
+    kind = "commit_msg", tier = "<tier>", project_name = "<project>",
+    iter_state = {...},
+    project_context = {resume_state: "", recent_iterations,
+                       open_threads: [], friction_trends: {}},
+)
+→ {commit_subject, commit_prose_body}
+```
 
-- `git add` the project files listed in `skeleton.files_changed` (use
-  explicit paths; never `git add -A` or `git add .`).
-- `git -C <vault> add -A && git -C <vault> commit -m "<short summary>" &&
-  git -C <vault> push <remote> main` for each remote returned by
-  `git -C <vault> remote`.
+**`writes-already-landed`** — skip render. Compose the commit message
+inline (one-line conventional-commit subject + 1–3 paragraph body)
+and pass it directly to `vv_set_commit_msg` in Stage 4.
+
+If output is poor, re-run with a higher tier (e.g. `tier = "opus"`).
+There is no auto-escalation — the operator controls tier choice.
+
+### Stage 4 — Mechanical apply
+
+Order matters: iter row, then thread/carried, then commit msg, then
+session capture.
+
+1. **`vv_append_iteration`** — append the new row to `iterations.md`.
+   Skip on `writes-already-landed`. The auto-heal hook re-renders the
+   resume.md state-derived regions (`vv:active-tasks`,
+   `vv:current-state`, `vv:project-history-tail`) from filesystem
+   ground truth post-write — no separate marker-block step required.
+2. **`vv_update_resume`** — mutate resume.md narrative sections only
+   when the wrap carries non-state changes. Auto-heal hook also fires.
+3. **Thread/carried mutations** as needed:
+   - `vv_thread_insert(slug, body, anchor?)` — open new thread
+   - `vv_thread_replace(slug, body)` — update existing thread
+     (hard-errors on slug ambiguity; refine slug if needed)
+   - `vv_thread_remove(slug)` — close a thread (same hard-error
+     semantics)
+   - `vv_carried_add(slug, title, body)` — add carried-forward bullet
+   - `vv_carried_remove(slug)` — drop a carried-forward bullet
+   - `vv_carried_promote_to_task(slug, task_path)` — promote a carried
+     bullet into a full task file
+4. **`vv_set_commit_msg`** — write the rendered (or composed)
+   `commit_subject` + blank line + `commit_prose_body` to
+   `commit.msg` at project root. Single `content` field; markdown
+   verbatim.
+5. **`vv_capture_session`** — record summary, tag, decisions,
+   files_changed, open_threads.
+
+### Stage 5 — Git plumbing (project side)
+
+- `git add` the explicit paths in `iter_state.files_changed` plus the
+  agentctx files actually modified by Stage 4
+  (`agentctx/iterations.md`, `agentctx/resume.md`, any
+  `agentctx/tasks/*.md` written during the iter). Never use `git add
+  -A` or `git add .`.
+- `git commit -F commit.msg` — uses the file written by
+  `vv_set_commit_msg`.
+- `git push <remote> <branch>` per the project's workflow rules. On
+  feature-branch merge patterns, push to the feature branch and let
+  the operator handle the merge.
+
+### Stage 6 — Vault sync
+
+`vv vault push` commits and pushes vault writes. On feature-branch
+merge patterns, run vault push **after** the project-side push but
+**before** the upstream merge — the vault iter row references the
+project commit, so the project commit must exist on a pushed branch
+by the time the vault record is published.
 
 ## Flags
 
-- `/wrap` — uses `[wrap].default_model` as the starting tier.
-- `/wrap --model sonnet|opus|haiku|<custom>` — pin the starting tier.
-  Operator-defined tiers in `[wrap.tiers]` are accepted; v1 supports only
-  `anthropic:` providers.
-- `/wrap --inline` — alias for `--model opus`, run inline (no dispatch).
-  Use this when you specifically need the orchestrator session to handle
-  the wrap (e.g. for debugging the dispatch path itself).
-- `/wrap --no-cache` — re-prepare the skeleton ONCE at the top of the
-  procedure, then cache the locks for the rest of the wrap.
+- `/wrap` — uses `[wrap].default_model` as the tier when present;
+  otherwise `sonnet`.
+- `/wrap --tier <name>` — pin the tier (operator-defined tiers in
+  `[wrap.tiers]` accepted).
+- `/wrap --dry-run` — run Stages 1–3 and print the rendered prose plus
+  proposed mutations without applying.
 
-## Schema reminders (avoid harness friction)
+## Schema reminders
 
-Tool input schemas use Go type semantics, not free-form prose:
+- `vv_render_wrap_text`: `kind` is one of
+  `iter_narrative | commit_msg | iter_narrative_and_commit_msg`. Only
+  the fields relevant to the requested kind are populated in the
+  response.
+- `vv_set_commit_msg`: single `content` field. Pass
+  `<commit_subject>\n\n<commit_prose_body>` verbatim.
+- `vv_thread_replace` / `vv_thread_remove`: hard-error on slug
+  ambiguity. Refine the slug with more of the title text until
+  exactly one section matches.
 
-- `vv_prepare_wrap_skeleton`: `iter` is int, `test_count_delta` is int
-  (a single sum, NOT an object with per-package counts).
-- `vv_apply_wrap_bundle_by_handle`: `outputs` is an object. The harness
-  XML-param protocol may serialize an object as a string; if you see
-  `cannot unmarshal string into Go value of type`, fall back to the
-  surgical apply path: `vv_append_iteration` + `vv_thread_insert` +
-  `vv_thread_replace` + `vv_thread_remove` + `vv_carried_add` +
-  `vv_carried_remove` + `vv_set_commit_msg` + `vv_capture_session`.
-- `vv_wrap_dispatch`: `tier` is a string read against `[wrap.tiers]`. If
-  the operator hasn't defined the tier you pass, the dispatch errors
-  with a pointer at the config section.
+## Commit message rules
 
-## Why this layout
+- Conventional-commit prefix (`feat:`, `fix:`, `refactor:`, `chore:`,
+  `docs:`, `test:`, `build:`, `ci:`) inferred from the work shape.
+- Include design-decision numbers in parens when present
+  (e.g. `feat(wrap): ... (DESIGN #92)`).
+- No trailing period on the subject line.
+- No `Co-Authored-By` lines, no AI attribution, no "Generated with X"
+  trailers — neither in commit messages nor in source files.
 
-Phase 4 of wrap-model-tiering (iter 162) routes wrap-executor work
-through `vv_wrap_dispatch` to reduce orchestrator-side token output.
-Iter 161 baseline was ~17 minutes / 60K tokens for an inline-Opus wrap
-(bucket (c), full Phases 1-4). The dispatch path lets a sonnet executor
-handle ~80% of wraps and only escalates to opus when sonnet's quality
-gate fails. Per-dispatch telemetry lands in
-`~/.cache/vibe-vault/wrap-dispatch.jsonl`; aggregate it with
-`vv stats wrap` to track tier durations, escalation rates, and top
-escalation reasons.
-
-The orchestrator owns the ladder rather than the server because the
-ladder is a natural-language judgement (when to escalate, which prior
-attempts to surface in the next prompt) — keeping that logic close to
-the user-facing chat session reads cleaner than a server-side state
-machine.
-
-Do not add "Co-Authored-By" lines to commit messages or source files.
-
-Do not ask for confirmation — just do the updates, stage the files, show
-what changed, and note that the user should review before committing.
+Do not ask for confirmation — just do the updates, stage the files,
+show what changed, and note that the user should review before
+committing.
