@@ -41,11 +41,6 @@ var gitCmdRunner = func(ctx context.Context, dir string, args ...string) (string
 	return string(out), nil
 }
 
-// iterAnchorRe matches the iteration footer that wrap commits include in
-// their commit body. The slash command includes "## Iteration N" in commit
-// messages.
-var iterAnchorRe = regexp.MustCompile(`(?m)^## Iteration (\d+)\s*$`)
-
 // iterNarrativeRe matches the H3 narrative header used in iterations.md
 // (e.g., "### Iteration 168 — title (date)"). The capture group is the
 // project-wide iteration number.
@@ -80,8 +75,9 @@ func describeIterState(cfg config.Config, project string) (describeIterStateResu
 	}
 	res.VaultHasUncommittedWrites = dirty
 
-	// last_iter_anchor_sha: search project git log for the prior iter footer.
-	sha, serr := lastIterAnchorSha(cwd, res.IterN-1)
+	// last_iter_anchor_sha: SHA of the most recent commit that touched
+	// the project's iter stamp file.
+	sha, serr := lastIterAnchorSha(cwd)
 	if serr != nil {
 		return res, fmt.Errorf("last iter anchor sha: %w", serr)
 	}
@@ -139,60 +135,30 @@ func vaultHasUncommittedWrites(vaultPath string) (bool, error) {
 	return strings.TrimSpace(out) != "", nil
 }
 
-// lastIterAnchorSha searches the project's git log for a commit whose body
-// contains the canonical "## Iteration N" footer. Returns the full SHA of
-// the matching commit; empty string when no match is found (e.g. iter 0
-// or fresh project) — null in JSON via omitempty.
+// lastIterAnchorSha returns the SHA of the most recent commit that
+// touched the project's iter stamp file (.vibe-vault/last-iter).
+// Empty string when the file is not yet tracked — the canonical
+// "no prior wrap" signal handled by the wrap.md fallback.
 //
-// targetIter <= 0 short-circuits to "" (no anchor for iter 0/1's previous).
-func lastIterAnchorSha(cwd string, targetIter int) (string, error) {
-	if targetIter <= 0 {
-		return "", nil
-	}
+// This replaces the deprecated commit-body footer search (DESIGN
+// #93). The stamp file is written every wrap by vv_stamp_iter, so
+// `git log -n 1 -- .vibe-vault/last-iter` is the canonical anchor.
+func lastIterAnchorSha(cwd string) (string, error) {
 	if cwd == "" {
 		return "", nil
 	}
 	if _, err := os.Stat(filepath.Join(cwd, ".git")); err != nil {
 		return "", nil
 	}
-	// Search the last 200 commits for the footer. 200 is generous —
-	// real projects rarely have more than ~30 wraps between fetches.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	out, err := gitCmdRunner(ctx, cwd, "log", "-n", "200", "--format=%H%x00%B%x1e")
+	out, err := gitCmdRunner(ctx, cwd,
+		"log", "-n", "1", "--format=%H", "--",
+		".vibe-vault/last-iter")
 	if err != nil {
-		// git log can fail on a brand-new repo with no commits; treat as
-		// no-anchor rather than error so vv_describe_iter_state remains
-		// robust on first-iter projects.
 		return "", nil
 	}
-	// Records are separated by RS (0x1e); each record is "SHA\0BODY".
-	for _, rec := range strings.Split(out, "\x1e") {
-		rec = strings.TrimLeft(rec, "\n")
-		if rec == "" {
-			continue
-		}
-		nul := strings.IndexByte(rec, '\x00')
-		if nul < 0 {
-			continue
-		}
-		sha := rec[:nul]
-		body := rec[nul+1:]
-		// Match against canonical "## Iteration N" line. The capture group
-		// holds the iteration number; compare numerically rather than
-		// stringly so trailing newlines/whitespace do not matter.
-		if matches := iterAnchorRe.FindAllStringSubmatch(body, -1); matches != nil {
-			for _, m := range matches {
-				if len(m) >= 2 {
-					n, err := strconv.Atoi(m[1])
-					if err == nil && n == targetIter {
-						return sha, nil
-					}
-				}
-			}
-		}
-	}
-	return "", nil
+	return strings.TrimSpace(out), nil
 }
 
 // NewDescribeIterStateTool creates the vv_describe_iter_state MCP tool.
@@ -210,7 +176,7 @@ func NewDescribeIterStateTool(cfg config.Config) Tool {
 			Description: "Return a server-minimal iter-state record for the current project: " +
 				"iter_n (project-wide next iteration-narrative number, derived from max `### Iteration N` in iterations.md + 1), branch (current git branch in agent CWD), " +
 				"vault_has_uncommitted_writes (bool from `git status --porcelain` in the vault repo), " +
-				"last_iter_anchor_sha (SHA of the previous iter's commit; null/omitted if not found). " +
+				"last_iter_anchor_sha (SHA of the most recent commit that wrote .vibe-vault/last-iter (the iter stamp file written by vv_stamp_iter); null/omitted if not found). " +
 				"The slash command computes commits_since_last_iter, files_changed, task_deltas, and " +
 				"test_counts itself via git/filesystem and bundles them into vv_render_wrap_text.",
 			InputSchema: json.RawMessage(`{

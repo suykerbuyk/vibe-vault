@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -113,6 +114,51 @@ func gitCommit(t *testing.T, dir, subject, body string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// gitCommitStamp writes the iter stamp file (.vibe-vault/last-iter) with
+// `iter\n`, git-adds it, and commits it with the given subject. Returns
+// the resulting commit SHA. This is the canonical anchor-producing
+// commit shape under the post-DESIGN-#93 stamp-file regime.
+func gitCommitStamp(t *testing.T, dir string, iter int, subject string) string {
+	t.Helper()
+	envs := []string{
+		"HOME=" + dir,
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=t@t",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=t@t",
+		"PATH=" + os.Getenv("PATH"),
+	}
+	stampDir := filepath.Join(dir, ".vibe-vault")
+	if err := os.MkdirAll(stampDir, 0o755); err != nil {
+		t.Fatalf("mkdir .vibe-vault: %v", err)
+	}
+	stampPath := filepath.Join(stampDir, "last-iter")
+	content := strconv.Itoa(iter) + "\n"
+	if err := os.WriteFile(stampPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write stamp file: %v", err)
+	}
+	add := exec.Command("git", "add", ".vibe-vault/last-iter")
+	add.Dir = dir
+	add.Env = envs
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("git add stamp: %s", out)
+	}
+	commit := exec.Command("git", "commit", "-q", "-m", subject)
+	commit.Dir = dir
+	commit.Env = envs
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit stamp: %s", out)
+	}
+	rev := exec.Command("git", "rev-parse", "HEAD")
+	rev.Dir = dir
+	rev.Env = envs
+	out, err := rev.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse: %s", out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func TestDescribeIterState_Basic(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
 
@@ -190,8 +236,7 @@ func TestDescribeIterState_PriorIterAnchorFound(t *testing.T) {
 	projDir := t.TempDir()
 	initGitRepo(t, projDir)
 	gitCommit(t, projDir, "chore: initial", "")
-	priorSHA := gitCommit(t, projDir, "feat: ship something",
-		"This shipped iter 41.\n\n## Iteration 41\n")
+	priorSHA := gitCommitStamp(t, projDir, 41, "feat: ship something (iter 41 stamp)")
 	gitCommit(t, projDir, "docs: update notes", "")
 
 	t.Chdir(projDir)
@@ -302,27 +347,183 @@ func TestDescribeIterState_NoVaultGit(t *testing.T) {
 	}
 }
 
-// TestLastIterAnchorSha_NoMatch asserts the helper returns ("", nil) when
-// the targetIter has no matching commit footer.
-func TestLastIterAnchorSha_NoMatch(t *testing.T) {
+// TestLastIterAnchorSha_StampFileFound asserts that when the stamp file
+// is committed and a later unrelated commit exists, the helper returns
+// the stamp commit's SHA — not the latest HEAD.
+func TestLastIterAnchorSha_StampFileFound(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
-	gitCommit(t, dir, "feat: only commit", "no iter footer here")
+	gitCommit(t, dir, "chore: initial", "")
+	stampSHA := gitCommitStamp(t, dir, 41, "feat: wrap iter 41")
+	laterSHA := gitCommit(t, dir, "docs: unrelated update", "")
 
-	got, err := lastIterAnchorSha(dir, 99)
+	got, err := lastIterAnchorSha(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != stampSHA {
+		t.Errorf("got %q, want stamp commit %q (later commit was %q)", got, stampSHA, laterSHA)
+	}
+}
+
+// TestLastIterAnchorSha_StampFileMissing_ReturnsEmpty asserts a repo
+// with commits but no stamp file returns ("", nil).
+func TestLastIterAnchorSha_StampFileMissing_ReturnsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	gitCommit(t, dir, "chore: initial", "")
+	gitCommit(t, dir, "feat: something", "")
+
+	got, err := lastIterAnchorSha(dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got != "" {
-		t.Errorf("got %q, want empty string for no match", got)
+		t.Errorf("got %q, want empty string when no stamp commit exists", got)
 	}
 }
 
-// TestLastIterAnchorSha_TargetIterZero asserts iter <= 0 short-circuits.
-func TestLastIterAnchorSha_TargetIterZero(t *testing.T) {
-	got, err := lastIterAnchorSha(".", 0)
-	if err != nil || got != "" {
-		t.Errorf("got (%q, %v), want (\"\", nil)", got, err)
+// TestLastIterAnchorSha_StampFileUntracked_ReturnsEmpty asserts that a
+// stamp file written to disk but never `git add`-ed yields ("", nil).
+// `git log -- <path>` requires the path be tracked; an untracked file
+// produces no commits.
+func TestLastIterAnchorSha_StampFileUntracked_ReturnsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	gitCommit(t, dir, "chore: initial", "")
+
+	stampDir := filepath.Join(dir, ".vibe-vault")
+	if err := os.MkdirAll(stampDir, 0o755); err != nil {
+		t.Fatalf("mkdir .vibe-vault: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stampDir, "last-iter"), []byte("41\n"), 0o644); err != nil {
+		t.Fatalf("write stamp: %v", err)
+	}
+
+	got, err := lastIterAnchorSha(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty string for untracked stamp file", got)
+	}
+}
+
+// TestLastIterAnchorSha_StampFileMultipleVersions_ReturnsLatest asserts
+// that when the stamp file is committed twice (different iters), the
+// most recent commit's SHA wins.
+func TestLastIterAnchorSha_StampFileMultipleVersions_ReturnsLatest(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	gitCommit(t, dir, "chore: initial", "")
+	firstSHA := gitCommitStamp(t, dir, 41, "feat: wrap iter 41")
+	secondSHA := gitCommitStamp(t, dir, 42, "feat: wrap iter 42")
+
+	got, err := lastIterAnchorSha(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != secondSHA {
+		t.Errorf("got %q, want latest stamp commit %q (first was %q)", got, secondSHA, firstSHA)
+	}
+}
+
+// TestLastIterAnchorSha_StampPreservedAcrossRebase is the regression-lock
+// for the wrap-shape-rebase-merge-not-recognized thread. A stamp commit
+// on a feature branch, rebased onto main, must still be discoverable as
+// the anchor by its (rebased) SHA. Rebase-merge preserves
+// most-recent-touch on a tracked file.
+func TestLastIterAnchorSha_StampPreservedAcrossRebase(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	gitCommit(t, dir, "chore: initial main", "")
+
+	envs := []string{
+		"HOME=" + dir,
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=t@t",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=t@t",
+		"PATH=" + os.Getenv("PATH"),
+	}
+
+	// Branch off, write the stamp, and commit on the feature branch.
+	cb := exec.Command("git", "checkout", "-q", "-b", "feature/wrap")
+	cb.Dir = dir
+	cb.Env = envs
+	if out, err := cb.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b: %s", out)
+	}
+	featureSHA := gitCommitStamp(t, dir, 41, "feat: wrap iter 41 on feature")
+
+	// Move main forward with an unrelated commit.
+	co := exec.Command("git", "checkout", "-q", "main")
+	co.Dir = dir
+	co.Env = envs
+	if out, err := co.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout main: %s", out)
+	}
+	gitCommit(t, dir, "chore: main moves on", "")
+
+	// Switch back to feature branch and rebase onto main.
+	co2 := exec.Command("git", "checkout", "-q", "feature/wrap")
+	co2.Dir = dir
+	co2.Env = envs
+	if out, err := co2.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout feature: %s", out)
+	}
+	rb := exec.Command("git", "rebase", "-q", "main")
+	rb.Dir = dir
+	rb.Env = envs
+	if out, err := rb.CombinedOutput(); err != nil {
+		t.Fatalf("git rebase: %s", out)
+	}
+
+	// After rebase, HEAD points at the rebased version of the stamp
+	// commit; that is the SHA the helper should return.
+	rev := exec.Command("git", "rev-parse", "HEAD")
+	rev.Dir = dir
+	rev.Env = envs
+	out, err := rev.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %s", out)
+	}
+	rebasedSHA := strings.TrimSpace(string(out))
+	if rebasedSHA == featureSHA {
+		t.Fatalf("rebase should have rewritten the stamp commit's SHA; got identical %q", featureSHA)
+	}
+
+	got, err := lastIterAnchorSha(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != rebasedSHA {
+		t.Errorf("got %q, want rebased stamp commit %q (pre-rebase was %q)", got, rebasedSHA, featureSHA)
+	}
+}
+
+// TestLastIterAnchorSha_NoGit_ReturnsEmpty asserts a non-git directory
+// yields ("", nil).
+func TestLastIterAnchorSha_NoGit_ReturnsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	got, err := lastIterAnchorSha(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty string for non-git directory", got)
+	}
+}
+
+// TestLastIterAnchorSha_EmptyCwd_ReturnsEmpty asserts the empty-cwd
+// guard returns ("", nil).
+func TestLastIterAnchorSha_EmptyCwd_ReturnsEmpty(t *testing.T) {
+	got, err := lastIterAnchorSha("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty string for empty cwd", got)
 	}
 }
 
