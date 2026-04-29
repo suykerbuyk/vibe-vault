@@ -206,9 +206,38 @@ session capture.
   or `git add .`.
 - `git commit -F commit.msg` — uses the file written by
   `vv_set_commit_msg`.
-- `git push <remote> <branch>` per the project's workflow rules. On
-  feature-branch merge patterns, push to the feature branch and let
-  the operator handle the merge.
+- `git push` decision tree (DESIGN #94's CI bypass):
+
+  Compute the wrap-commit's diff:
+
+      git diff --name-only HEAD~1 HEAD
+
+  - If the diff lists ONLY `.vibe-vault/last-iter` (the
+    `bookkeeping`-shape inaugural-stamp pattern), push directly to
+    `main`:
+
+        git push <remote> main
+
+    The CI's `detect-admin-commit` job classifies this as
+    admin-only and short-circuits `Test` + `Lint` to success in
+    20-40 seconds; branch protection is satisfied without a PR.
+
+  - Otherwise (the diff includes ANY non-stamp file), push to a
+    feature branch and let the operator open a PR:
+
+        git push <remote> <feature-branch>
+
+    Standard PR pattern — full CI runs, operator reviews and
+    merges. Applies to all `fresh-feature` and `planning` wraps
+    by definition (those shapes always have non-stamp changes:
+    code, tasks, docs, etc.).
+
+  The decision is mechanical: based on `git diff --name-only`
+  output, not on shape classification or operator judgment. A
+  `bookkeeping` wrap with the stamp ALONE goes direct; a
+  `bookkeeping` wrap that also retires a task or files a new
+  carried-forward thread (which the orchestrator may bundle in
+  the same commit) takes the PR path.
 
 ### Stage 6 — Vault sync
 
