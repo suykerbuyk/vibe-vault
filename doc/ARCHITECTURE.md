@@ -312,7 +312,7 @@ output: {
   iter_n:                       int,      # index.NextIteration()
   branch:                       string,   # git rev-parse --abbrev-ref HEAD
   vault_has_uncommitted_writes: bool,     # git status --porcelain in vault
-  last_iter_anchor_sha:         string|null  # log search for "## Iteration N-1"; null if absent
+  last_iter_anchor_sha:         string|null  # git log -n 1 --format=%H -- .vibe-vault/last-iter; null if file not yet tracked (DESIGN #93)
 }
 ```
 
@@ -558,6 +558,8 @@ repo/
 ├── CLAUDE.md              Regular file (MCP-first instructions)
 ├── commit.msg             Regular file (working commit message)
 ├── .vibe-vault.toml       Project identity (committed to repo)
+├── .vibe-vault/
+│   └── last-iter          Iter anchor stamp file written by vv_stamp_iter; git log of this path is the canonical wrap anchor (DESIGN #93)
 └── .claude/
     ├── commands/          Regular directory (deployed from vault agentctx/)
     ├── rules/             Regular directory

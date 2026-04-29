@@ -2268,3 +2268,157 @@ Key architectural and design decisions in vibe-vault, with rationale.
     such feature must demonstrate that its executor has access
     to every input its quality gate demands, lest it repeat the
     iter-162 defect.
+
+93. **Mechanical iter anchor via `.vibe-vault/last-iter` stamp
+    file; written by `vv_stamp_iter`, looked up via `git log -n 1
+    -- .vibe-vault/last-iter`.** Direction-C (Decision 92) collapsed
+    the wrap pipeline to record-and-manage but kept the iter anchor
+    on a free-text signal: `vv_describe_iter_state` searched
+    commit bodies for an `## Iteration N` H2 footer. Iters 168–170
+    surfaced two carried-forward threads
+    (`wrap-anchor-when-prior-iter-was-vault-only`,
+    `wrap-shape-rebase-merge-not-recognized`) whose patches kept
+    bouncing because the underlying signal was already dead.
+
+    **Decision.** The wrap pipeline anchors on a project-tracked
+    stamp file at `<projectPath>/.vibe-vault/last-iter` whose
+    write is performed by the `vv_stamp_iter` MCP tool as the
+    canonical Stage 4 step. `vv_describe_iter_state.last_iter_anchor_sha`
+    is computed by `git log -n 1 --format=%H -- .vibe-vault/last-iter`
+    — the SHA of the most recent commit that touched the stamp
+    file. The stamp is committed every wrap; from the second wrap
+    onward the anchor is always present and always correct.
+
+    **Why.** Forensics on the prior signal: of the last 200 commits
+    across all branches as of iter 170, only 5 contained the
+    `## Iteration N` H2 footer (iters 153, 155, 159, 162, 164 —
+    all from the pre-Direction-C dispatch-ladder era; last sighting
+    is iter 164's commit `25b1892`). Decision 92's wrap.md rewrite
+    did not instruct the orchestrator to emit the footer, and
+    `vv_render_wrap_text` does not synthesize it. The convention
+    died with Direction-C; nothing has been replenishing the signal
+    for ~6 iters. Both carried-forward threads
+    (`wrap-anchor-when-prior-iter-was-vault-only`,
+    `wrap-shape-rebase-merge-not-recognized`) were symptoms of the
+    same dead convention rather than independent bugs — every
+    "rebase-merge not recognized" or "vault-only iter mis-anchored"
+    failure traced back to the body-grep loop returning empty or
+    falling through to a 50-commit-deep stale anchor.
+
+    **What this supersedes.** The body-grep loop in
+    `lastIterAnchorSha` and the `iterAnchorRe` regex
+    (`internal/mcp/tools_describe_iter_state.go`) are deleted; the
+    new helper is ~15 lines and shells `git log -n 1 --format=%H
+    -- .vibe-vault/last-iter`. The `targetIter int` argument that
+    discriminated footer matches is gone — there is exactly one
+    anchor SHA (most recent commit touching the stamp), so no
+    discrimination is needed. The walk-back-by-N approach proposed
+    in v1 of this task's plan is abandoned in favor of Option D
+    (the stamp file): walk-back was operating on the same dead
+    signal and would have returned increasingly stale anchors as
+    the convention continued to atrophy.
+
+    **Why a stamp file.** The stamp removes free-text from the
+    loop entirely. The MCP tool writes a single decimal integer
+    plus newline (e.g. `170\n`) to a tracked file; git records the
+    commit SHA; `git log -n 1 -- <path>` retrieves it. Three
+    primitives, all mechanical, all enforced by infrastructure
+    outside the LLM. The tool is the only writer (server-enforced),
+    no prompt-engineering surface remains, and `git log` of a tracked
+    path survives every merge style by construction — rebase-merge,
+    squash-merge, ff-merge, and direct commit all preserve which
+    commit last touched a tracked file. `Config.StateDir()`
+    (`internal/config/config.go:499`) returns
+    `<vaultPath>/.vibe-vault` for host-local vault state and is
+    a different filesystem path with different content semantics
+    from the stamp's `<projectPath>/.vibe-vault/last-iter`; the two
+    never overlap because vault-path and project-path are distinct
+    in `~/.config/vibe-vault/config.toml`. Future maintainers
+    grepping for `.vibe-vault/` will hit both contexts and must
+    state which root any reference is relative to.
+
+    **Migration.** Existing projects don't have `.vibe-vault/last-iter`
+    at the time this decision lands. The first post-PR wrap creates
+    and commits it; subsequent wraps find it via `git log --
+    .vibe-vault/last-iter`. Pre-creation wraps fall through to a
+    single mechanical fallback in `wrap.md` Stage 1: `git rev-list
+    --max-parents=0 HEAD | tail -1` — the project's oldest root
+    commit, deterministic, no operator judgment. The resulting
+    `commits_since_last_iter` window spans the project's entire
+    history; shape classification falls naturally into
+    `fresh-feature` (or `planning` if the only delta is a new task
+    file). One-time transition per project.
+
+    **Companion shape-taxonomy rework.** With every wrap stamping,
+    the prior `vault-only` vs `reconciliation` distinction collapses:
+    both now key on the same observable (empty
+    `commits_since_last_iter` window) rather than on stamp-touch
+    inspection. `vault-only` and `reconciliation` retire; the new
+    `bookkeeping` shape replaces both — empty commits AND empty
+    `task_deltas.added` → `bookkeeping`, mechanically composed
+    `chore(wrap): stamp iter N` commit with a one-line
+    "Bookkeeping iter — no project-side work this cycle." body.
+    `fresh-feature` relaxes to drop the prior `task_deltas.added
+    empty` constraint, so the four shape rules now partition the
+    `(commits-empty, task-added-empty)` Cartesian cleanly:
+    `fresh-feature` (any commits) / `planning` (empty + new task)
+    / `bookkeeping` (empty + no task) / `writes-already-landed`
+    (orthogonal short-circuit on dirty vault + iter row already
+    present in iterations.md). Rebase-merge and squash-merge of a
+    previously-wrapped feature branch land naturally in
+    `bookkeeping` because the merge produces no project work
+    between anchor (the rebased/squashed wrap commit) and HEAD.
+    Shape detection lives in `templates/agentctx/commands/wrap.md`,
+    not in Go, so the rules remain editable without rebuild +
+    reinstall.
+
+    **Alternatives rejected.** *Restore the H2 footer convention.*
+    Pure prompt-engineering — every wrap depends on the LLM
+    faithfully copying a wrap.md instruction into the commit body.
+    One missed wrap silently poisons every subsequent anchor
+    lookup. Not server-enforceable. *Subject-regex on a `(#NN)`
+    PR-merge suffix.* Externally dependent (GitHub-specific),
+    conflates "PR merge" with "iter wrap" (not all PR merges are
+    wraps), and doesn't help the walk-back side of the problem
+    at all. *Walk-back-by-N through the dead footer signal.* See
+    "What this supersedes" above — operating on the same dead
+    convention.
+
+    **`atomicWriteFile` extraction.** The atomic write helper
+    formerly inlined as `atomicWriteCommitMsg` in
+    `internal/mcp/tools_commit_msg.go:144-177` extracts to a
+    package-private `atomicWriteFile(path, data)` helper alongside
+    `dirOf`. The temp-file prefix renames from `.vv-commit-msg-*`
+    to `.vv-tmp-*` so the helper's name matches its scope. Both
+    `vv_set_commit_msg` and `vv_stamp_iter` call it, and any
+    future tool that needs same-filesystem-rename atomicity gets
+    it for free.
+
+    **Net MCP tool count: 39 → 40.** Single addition
+    (`vv_stamp_iter`); no retirements. The integration test's
+    exact-set assertion at `expectedTools` in
+    `test/integration_test.go` updates in lockstep.
+
+    Source: `internal/mcp/tools_stamp_iter.go`,
+    `internal/mcp/tools_stamp_iter_test.go` (9 tests),
+    `internal/mcp/tools_describe_iter_state.go`
+    (`lastIterAnchorSha` rewrite; `iterAnchorRe` deleted),
+    `internal/mcp/tools_describe_iter_state_test.go` (2 tests
+    deleted — `_NoMatch`, `_TargetIterZero`; 7
+    `TestLastIterAnchorSha_*` tests added covering stamp-found,
+    stamp-missing, untracked, multiple-versions, rebase-preservation,
+    no-git tolerance, empty-cwd; `_PriorIterAnchorFound` reseeded
+    to write the stamp instead of an H2 footer),
+    `internal/mcp/server.go` (`vv_stamp_iter` registered alongside
+    `vv_set_commit_msg`), `internal/mcp/tools_commit_msg.go`
+    (helper extraction), `templates/agentctx/commands/wrap.md`
+    (Stage 1 fallback rewrite, shape-table rewrite for the
+    `bookkeeping` collapse, Stage 4 `vv_stamp_iter` step, Stage 5
+    git-add reminder). Phase 5 commit `9f64793`. Phase 1+2 commit
+    `48c36d3`. Phase 3+4 commit `a9d6a77`. Phase 6 + Phase 7 +
+    Phase 8 (this entry): docs only.
+    Re-open conditions: future per-project anchors beyond the
+    iter stamp (e.g., last-feature-branch base, last-release tag)
+    should reuse the stamp-file pattern under `.vibe-vault/`
+    rather than reviving any commit-body-grep mechanism; one
+    file per anchor purpose.
