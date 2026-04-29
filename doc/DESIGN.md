@@ -2438,9 +2438,10 @@ Key architectural and design decisions in vibe-vault, with rationale.
     `detect-admin-commit` job that checks whether the diff is
     contained within an allowlist of administrative paths. When
     so, the `Test` and `Lint` jobs short-circuit to success in
-    <10 seconds, satisfying the branch protection's named status
-    checks without running the substantive build. The allowlist
-    starts at `.vibe-vault/last-iter` only.
+    20-40 seconds (cold-start + full clone + early-exit, dominated
+    by runner provisioning), satisfying the branch protection's
+    named status checks without running the substantive build.
+    The allowlist starts at `.vibe-vault/last-iter` only.
 
     **Why.** Wrap commits under DESIGN #93 produce single-file
     changes to the iter stamp file that the CI cannot meaningfully
