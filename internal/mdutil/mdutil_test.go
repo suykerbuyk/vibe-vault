@@ -308,18 +308,22 @@ func TestReplaceSubsectionBody_SubNotFound(t *testing.T) {
 func TestReplaceSubsectionBody_AmbiguousMultiMatch(t *testing.T) {
 	doc := "## Open Threads\n\n### dup\n\nbody1\n\n### dup\n\nbody2\n"
 	got, err := ReplaceSubsectionBody(doc, "Open Threads", "dup", "new")
-	if err != nil {
-		t.Fatalf("multi-match should not return error, got: %v", err)
+	if err == nil {
+		t.Fatalf("multi-match should return hard error, got got=%q", got)
 	}
-	if !strings.HasPrefix(got, "candidates_warning:") {
-		t.Errorf("multi-match should encode candidates_warning prefix")
+	// Direction-C D9: error must mention slug ambiguity and candidates.
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("error should mention 'ambiguous'; got %v", err)
 	}
-	if !strings.Contains(got, "new") {
-		t.Error("new body should be present")
+	if !strings.Contains(err.Error(), "dup") {
+		t.Errorf("error should list candidate slugs; got %v", err)
 	}
-	// First occurrence replaced, second untouched.
-	if !strings.Contains(got, "body2") {
-		t.Error("second occurrence should be untouched")
+	// Document MUST be unchanged on error: callers receive "" (no string
+	// payload) so any subsequent atomic-write would write empty content.
+	// This test asserts the err-not-nil contract — doc preservation is
+	// the caller's responsibility (they read the original from disk).
+	if got != "" {
+		t.Errorf("multi-match should return empty doc on error; got %q", got)
 	}
 }
 
@@ -588,15 +592,18 @@ func TestRemoveSubsection_NotFound(t *testing.T) {
 func TestRemoveSubsection_MultiMatch(t *testing.T) {
 	doc := "## Open Threads\n\n### dup\n\nbody1\n\n### dup\n\nbody2\n"
 	got, err := RemoveSubsection(doc, "Open Threads", "dup")
-	if err != nil {
-		t.Fatalf("multi-match should not error, got: %v", err)
+	if err == nil {
+		t.Fatalf("multi-match should return hard error, got got=%q", got)
 	}
-	if !strings.HasPrefix(got, "candidates_warning:") {
-		t.Error("multi-match should encode candidates_warning prefix")
+	// Direction-C D9: hard error with slug ambiguity wording.
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("error should mention 'ambiguous'; got %v", err)
 	}
-	// Second dup should survive.
-	if !strings.Contains(got, "body2") {
-		t.Error("second occurrence should be untouched")
+	if !strings.Contains(err.Error(), "dup") {
+		t.Errorf("error should list candidate slugs; got %v", err)
+	}
+	if got != "" {
+		t.Errorf("multi-match should return empty doc on error; got %q", got)
 	}
 }
 
@@ -639,5 +646,61 @@ func TestAtomicWriteFile_OverwritesExisting(t *testing.T) {
 	}
 	if string(data) != "new" {
 		t.Errorf("got %q, want %q", data, "new")
+	}
+}
+
+// TestCountSubsectionMatches covers the slug-counter helper ported into
+// mdutil from the (Phase 4-retiring) tools_quality_check.go.
+func TestCountSubsectionMatches(t *testing.T) {
+	doc := "## Open Threads\n\n### alpha\n\nbody\n\n### beta\n\nbody\n\n### alpha\n\nbody\n"
+	if got := CountSubsectionMatches(doc, "Open Threads", "alpha"); got != 2 {
+		t.Errorf("alpha count = %d, want 2", got)
+	}
+	if got := CountSubsectionMatches(doc, "Open Threads", "beta"); got != 1 {
+		t.Errorf("beta count = %d, want 1", got)
+	}
+	if got := CountSubsectionMatches(doc, "Open Threads", "ghost"); got != 0 {
+		t.Errorf("ghost count = %d, want 0", got)
+	}
+	if got := CountSubsectionMatches(doc, "Missing Parent", "alpha"); got != 0 {
+		t.Errorf("missing parent count = %d, want 0", got)
+	}
+}
+
+// TestCountAllSubsectionSlugs returns the full slug map.
+func TestCountAllSubsectionSlugs(t *testing.T) {
+	doc := "## Open Threads\n\n### alpha\n\nbody\n\n### Carried forward\n\n- foo\n\n### alpha\n\nbody\n"
+	got := CountAllSubsectionSlugs(doc, "Open Threads", "Carried forward")
+	if got["alpha"] != 2 {
+		t.Errorf("alpha count = %d, want 2", got["alpha"])
+	}
+	if _, ok := got["carried forward"]; ok {
+		t.Errorf("carried forward should be excluded; got: %v", got)
+	}
+}
+
+// TestCountCarriedSlugsIn reads the `### Carried forward` sub-section.
+func TestCountCarriedSlugsIn(t *testing.T) {
+	doc := `## Open Threads
+
+### Carried forward
+
+- **foo-bar** — Title body
+- **baz-qux** — Other title body
+
+### thread-x
+
+unrelated
+`
+	got := CountCarriedSlugsIn(doc, "Open Threads", "Carried forward")
+	if got["foo-bar"] != 1 {
+		t.Errorf("foo-bar count = %d, want 1", got["foo-bar"])
+	}
+	if got["baz-qux"] != 1 {
+		t.Errorf("baz-qux count = %d, want 1", got["baz-qux"])
+	}
+	// unrelated thread-x should not appear in the carried map.
+	if _, ok := got["thread-x"]; ok {
+		t.Errorf("thread-x should not be counted as carried; got: %v", got)
 	}
 }

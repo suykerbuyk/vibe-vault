@@ -263,10 +263,10 @@ func applyThreadReplace(cfg config.Config, project string, tr BundleThreadReplac
 	if err != nil {
 		return err
 	}
-	raw, err := mdutil.ReplaceSubsectionBody(content, openThreadsSection, tr.Slug, tr.Body)
+	updated, err := mdutil.ReplaceSubsectionBody(content, openThreadsSection, tr.Slug, tr.Body)
 	if err != nil {
+		// Direction-C D9: multi-match is now a hard error.
 		return err
 	}
-	updated, _ := extractCandidatesWarning(raw)
 	return mdutil.AtomicWriteFile(absPath, []byte(updated), 0o644)
 }

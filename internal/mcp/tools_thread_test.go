@@ -307,20 +307,21 @@ body2
 		"slug":    "dup",
 		"body":    "new body",
 	})
-	result, err := tool.Handler(params)
-	if err != nil {
-		t.Fatalf("multi-match should not return error, got: %v", err)
+	// Direction-C D9: multi-match is now a hard error.
+	_, err := tool.Handler(params)
+	if err == nil {
+		t.Fatal("multi-match should return hard error")
 	}
-	var res map[string]any
-	if err := json.Unmarshal([]byte(result), &res); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("error should mention 'ambiguous'; got %v", err)
 	}
-	if res["candidates_warning"] == nil || res["candidates_warning"].(string) == "" {
-		t.Error("multi-match should include candidates_warning")
-	}
+	// resume.md must be unchanged (no atomic-write happened).
 	data, _ := os.ReadFile(filepath.Join(c.VaultPath, "Projects", "proj", "agentctx", "resume.md"))
-	if !strings.Contains(string(data), "new body") {
-		t.Error("new body should be present")
+	if string(data) != doc {
+		t.Errorf("resume.md should be unchanged on hard error\noriginal:\n%s\ngot:\n%s", doc, string(data))
+	}
+	if strings.Contains(string(data), "new body") {
+		t.Error("new body should not be written when slug ambiguous")
 	}
 }
 
@@ -451,21 +452,18 @@ body2
 		"project": "proj",
 		"slug":    "dup",
 	})
-	result, err := tool.Handler(params)
-	if err != nil {
-		t.Fatalf("multi-match should not error, got: %v", err)
+	// Direction-C D9: multi-match is now a hard error.
+	_, err := tool.Handler(params)
+	if err == nil {
+		t.Fatal("multi-match should return hard error")
 	}
-	var res map[string]any
-	if err := json.Unmarshal([]byte(result), &res); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("error should mention 'ambiguous'; got %v", err)
 	}
-	if res["candidates_warning"] == nil || res["candidates_warning"].(string) == "" {
-		t.Error("multi-match should include candidates_warning")
-	}
+	// resume.md must be unchanged on hard error: both dup bodies survive.
 	data, _ := os.ReadFile(filepath.Join(c.VaultPath, "Projects", "proj", "agentctx", "resume.md"))
-	// Second dup body should survive.
-	if !strings.Contains(string(data), "body2") {
-		t.Error("second occurrence should survive")
+	if string(data) != doc {
+		t.Errorf("resume.md should be unchanged on hard error\noriginal:\n%s\ngot:\n%s", doc, string(data))
 	}
 }
 

@@ -300,11 +300,11 @@ func applyThreadRemove(cfg config.Config, project, slug string) error {
 	if err != nil {
 		return err
 	}
-	raw, err := mdutil.RemoveSubsection(content, openThreadsSection, slug)
+	updated, err := mdutil.RemoveSubsection(content, openThreadsSection, slug)
 	if err != nil {
+		// Direction-C D9: multi-match is now a hard error.
 		return err
 	}
-	updated, _ := extractCandidatesWarning(raw)
 	return mdutil.AtomicWriteFile(absPath, []byte(updated), 0o644)
 }
 
