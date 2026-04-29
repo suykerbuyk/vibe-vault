@@ -9,12 +9,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -23,8 +19,6 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/narrative"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
 	"github.com/suykerbuyk/vibe-vault/internal/transcript"
-	"github.com/suykerbuyk/vibe-vault/internal/wraprender"
-	"github.com/suykerbuyk/vibe-vault/templates"
 )
 
 // applyWriteRecord records the outcome of a single dispatch step.
@@ -417,208 +411,17 @@ func applyCaptureSesssion(cfg config.Config, _ string, cc BundleCaptureContent) 
 // result. Returns the rendered file content (so the caller can fingerprint
 // it for the metric line) plus any error.
 //
-// The current-state block now emits Iterations / MCP / Templates only;
+// The current-state block emits Iterations / MCP / Templates only;
 // test-count tracking lives in operator-authored prose adjacent to the
 // marker (Phase 2 review, Option C). projectRoot is retained on the
-// signature for future state-block fields that need a working directory
-// but is not consulted by computeCurrentState today.
+// signature for future state-block fields that need a working directory.
+//
+// Phase 2 of Direction-C: this is now a thin wrapper around the shared
+// RenderResumeStateBlocks entry point in resume_state_blocks.go. The
+// underlying helpers (collectActiveTasks, computeCurrentState,
+// collectHistoryRows) live alongside RenderResumeStateBlocks so they
+// survive the Phase 4 deletion of this file.
 func applyResumeStateBlocks(cfg config.Config, project, projectRoot string) (string, error) {
 	_ = projectRoot // reserved for future state-block fields; see doc comment.
-	resumeContent, absPath, err := readResume(cfg, project)
-	if err != nil {
-		return "", err
-	}
-
-	tasks, err := collectActiveTasks(cfg, project)
-	if err != nil {
-		return "", fmt.Errorf("collect active tasks: %w", err)
-	}
-
-	state, err := computeCurrentState(cfg, project)
-	if err != nil {
-		return "", fmt.Errorf("compute current state: %w", err)
-	}
-
-	rows, err := collectHistoryRows(cfg, project, 10)
-	if err != nil {
-		return "", fmt.Errorf("collect history rows: %w", err)
-	}
-
-	blocks := map[string]string{
-		wraprender.RegionActiveTasks:        wraprender.RenderActiveTasks(tasks),
-		wraprender.RegionCurrentState:       wraprender.RenderCurrentState(state),
-		wraprender.RegionProjectHistoryTail: wraprender.RenderProjectHistoryTail(rows, 10),
-	}
-
-	updated, err := wraprender.ApplyMarkerBlocks(resumeContent, blocks)
-	if err != nil {
-		return "", fmt.Errorf("apply marker blocks: %w", err)
-	}
-
-	if err := mdutil.AtomicWriteFile(absPath, []byte(updated), 0o644); err != nil {
-		return "", fmt.Errorf("write resume: %w", err)
-	}
-	return updated, nil
-}
-
-// collectActiveTasks walks Projects/<p>/agentctx/tasks/*.md (excluding
-// done/ and cancelled/ subdirs) and returns wraprender-shaped front-matter
-// records. Sort order is delegated to the renderer.
-func collectActiveTasks(cfg config.Config, project string) ([]wraprender.TaskFrontMatter, error) {
-	tasksDir := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx", "tasks")
-	if _, err := vaultPrefixCheck(tasksDir, cfg.VaultPath); err != nil {
-		return nil, err
-	}
-	entries, err := os.ReadDir(tasksDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var out []wraprender.TaskFrontMatter
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		slug := strings.TrimSuffix(e.Name(), ".md")
-		title, status, priority := parseTaskHeader(filepath.Join(tasksDir, e.Name()))
-		out = append(out, wraprender.TaskFrontMatter{
-			Slug:     slug,
-			Title:    title,
-			Status:   status,
-			Priority: priority,
-		})
-	}
-	return out, nil
-}
-
-// computeCurrentState gathers the headline counts the renderer needs.
-// Iteration count comes from a heading scan of iterations.md; MCP-tool
-// count from a throw-away Server populated via RegisterAllTools; embedded
-// template count from templates.AgentctxFS().
-//
-// Test-count tracking is intentionally absent from the rendered marker
-// block (Phase 2 review, Option C). Operator-authored prose adjacent to
-// the marker captures any test-count narrative.
-func computeCurrentState(cfg config.Config, project string) (wraprender.CurrentState, error) {
-	state := wraprender.CurrentState{}
-
-	iterPath := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx", "iterations.md")
-	if _, err := vaultPrefixCheck(iterPath, cfg.VaultPath); err == nil {
-		data, readErr := os.ReadFile(iterPath)
-		if readErr == nil {
-			state.Iterations = len(scanIterationNumbers(string(data)))
-		} else if !os.IsNotExist(readErr) {
-			return state, fmt.Errorf("read iterations.md: %w", readErr)
-		}
-	}
-
-	tools, prompts := countMCPTools(cfg)
-	state.MCPTools = tools
-	_ = prompts // current renderer hard-codes "+ 1 prompt"
-
-	templateCount, err := countAgentctxTemplates()
-	if err != nil {
-		return state, fmt.Errorf("count templates: %w", err)
-	}
-	state.Templates = templateCount
-
-	return state, nil
-}
-
-// countMCPTools returns the count of registered tools (and prompts) on a
-// throw-away Server. The Server is wired with the canonical
-// RegisterAllTools list so the rendered count tracks production reality.
-func countMCPTools(cfg config.Config) (tools, prompts int) {
-	srv := NewServer(ServerInfo{Name: "vibe-vault", Version: ""}, log.New(io.Discard, "", 0))
-	RegisterAllTools(srv, cfg)
-	tools = len(srv.ToolNames())
-	prompts = len(srv.prompts)
-	return tools, prompts
-}
-
-// countAgentctxTemplates walks the embedded `templates/agentctx/` FS and
-// returns the count of files (excluding directories). Mirrors the
-// `Embedded templates: N` headline in the live vibe-vault resume.md.
-func countAgentctxTemplates() (int, error) {
-	count := 0
-	err := fs.WalkDir(templates.AgentctxFS(), ".", func(_ string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() {
-			count++
-		}
-		return nil
-	})
-	return count, err
-}
-
-// collectHistoryRows scans Projects/<p>/agentctx/iterations.md and returns
-// the last `n` `### Iteration N — Title (YYYY-MM-DD)` headings as
-// HistoryRow records. Returns the rows in iteration-ascending order; the
-// renderer handles the tail-window slice.
-func collectHistoryRows(cfg config.Config, project string, n int) ([]wraprender.HistoryRow, error) {
-	iterPath := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx", "iterations.md")
-	if _, err := vaultPrefixCheck(iterPath, cfg.VaultPath); err != nil {
-		return nil, err
-	}
-	data, err := os.ReadFile(iterPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	parsed := parseIterations(string(data))
-	rows := make([]wraprender.HistoryRow, 0, len(parsed))
-	for _, it := range parsed {
-		rows = append(rows, wraprender.HistoryRow{
-			Iteration: it.Number,
-			Date:      it.Date,
-			Summary:   summarizeIterationNarrative(it.Narrative),
-		})
-	}
-	// Document-order is iteration-ascending in vibe-vault, but defensively
-	// sort by iteration number so out-of-order edits don't break the tail.
-	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Iteration < rows[j].Iteration })
-
-	if n > 0 && len(rows) > n {
-		rows = rows[len(rows)-n:]
-	}
-	return rows, nil
-}
-
-// summarizeIterationNarrative extracts a one-line summary from an iteration
-// body. Picks the first non-blank paragraph, joins its lines on " ",
-// truncates to ~120 characters at a word boundary, and replaces stray
-// pipe characters so the summary is safe to drop into a GFM table cell
-// (the renderer also escapes pipes; this is defense in depth).
-func summarizeIterationNarrative(narr string) string {
-	const maxLen = 120
-	for _, para := range strings.Split(narr, "\n\n") {
-		para = strings.TrimSpace(para)
-		if para == "" {
-			continue
-		}
-		// Join wrapped lines with single spaces.
-		lines := strings.Split(para, "\n")
-		flat := strings.Join(lines, " ")
-		flat = strings.TrimSpace(flat)
-		if flat == "" {
-			continue
-		}
-		if len(flat) <= maxLen {
-			return flat
-		}
-		// Truncate at last word boundary before maxLen.
-		cut := flat[:maxLen]
-		if i := strings.LastIndex(cut, " "); i > 0 {
-			cut = cut[:i]
-		}
-		return strings.TrimRight(cut, " ,;:") + "…"
-	}
-	return ""
+	return RenderResumeStateBlocks(cfg, project)
 }
