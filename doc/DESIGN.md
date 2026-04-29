@@ -1274,7 +1274,12 @@ Key architectural and design decisions in vibe-vault, with rationale.
     `Makefile`).
 
 83. **Reuse `internal/llm/` for agentic dispatch; sibling
-    `AgenticProvider` interface alongside text-only `Provider`.** The
+    `AgenticProvider` interface alongside text-only `Provider`.**
+    *Superseded by #92 (Direction-C). The executor-isolation defect
+    documented in #92 retired the entire `AgenticProvider` /
+    `AnthropicAgentic` / `RunTools` chain as dead code; the new
+    render path consumes only the basic single-turn `Provider`
+    interface. Retained for historical reference.* The
     pre-existing `internal/llm/Provider` interface (`internal/llm/types.go`)
     is text-only — single-turn `ChatCompletion(ctx, request) (Response, error)`
     with no tool-use plumbing. The `wrap-model-tiering` epic introduces a
@@ -1323,7 +1328,14 @@ Key architectural and design decisions in vibe-vault, with rationale.
 84. **Two-stage /wrap dispatch with orchestrator quality gate; QC runs
     BEFORE apply (H3-v2). Architecture A1: dispatch loop server-side via
     `vv_wrap_dispatch` MCP tool; `internal/wrapdispatch/` runs in-process
-    inside the MCP server.** /wrap was iter-157 inline-Opus — the
+    inside the MCP server.**
+    *Superseded by #92 (Direction-C). The dispatch ladder was
+    architecturally unable to produce the citation-rigor output its
+    QC layer demanded — the executor was forbidden from fetching
+    context yet QC required commit SHAs and per-paragraph citations.
+    The retirement removed the entire `vv_wrap_dispatch` /
+    `internal/wrapdispatch/` / wrap-executor agent / QC layer chain.
+    Retained for historical reference.* /wrap was iter-157 inline-Opus — the
     orchestrator-side procedure direct-emitted iteration narrative,
     thread updates, carried bullets, commit message, and capture summary
     in a single Opus turn. Iter 161 baseline measurement showed 17 min
@@ -1402,7 +1414,15 @@ Key architectural and design decisions in vibe-vault, with rationale.
     build-time generation of `.claude/agents/<name>.md` artifacts. BOTH
     the MCP tool AND the generated file are v2-portability scaffolding;
     v1's `vv_wrap_dispatch` handler reads the registry via direct Go
-    call.** The `wrap-model-tiering` epic introduces the `wrap-executor`
+    call.**
+    *Superseded by #92 (Direction-C). The `wrap-executor` agent
+    template was deleted in Direction-C Phase 4 — its
+    `forbidden_tools` list was the load-bearing source of the
+    executor-isolation defect (see #92). The `internal/agentregistry/`
+    package and the `vv_get_agent_definition` MCP tool survive as
+    generic agent-registry scaffolding with no remaining wrap-flow
+    consumer; the registry's `agents/` directory ships empty in
+    Direction-C. Retained for historical reference.* The `wrap-model-tiering` epic introduces the `wrap-executor`
     agent definition — a system prompt plus tool whitelist plus
     escalation triggers plus output_format contract that drives the
     dispatch executor's behavior. Three distribution surfaces are shipped
@@ -1450,7 +1470,14 @@ Key architectural and design decisions in vibe-vault, with rationale.
 86. **Skeleton + prose split; orchestrator-facts cached host-local in
     `~/.cache/vibe-vault/wrap-bundles/iter-<N>-skeleton.json`; per-tier
     prose ephemeral; log-rotate keeps three most recent skeletons.**
-    C2-v3 finding (plan v5 review): the original Phase 3 contract
+    *Superseded by #92 (Direction-C). The skeleton + prose split was
+    a consequence of the dispatch ladder's executor-isolation defect
+    (#92): the executor needed a `WrapBundle` it could mutate without
+    fetching context. Direction-C retires the bundle pipeline entirely;
+    `vv_render_wrap_text` receives the project context bundle inline
+    and returns prose directly. `internal/wrapbundlecache/` (and the
+    `_legacy/` migration scaffolding from #91) retire with the
+    pipeline. Retained for historical reference.* C2-v3 finding (plan v5 review): the original Phase 3 contract
     required the synthesizer to emit prose the executor had not yet
     generated, putting cart before horse. The bundle splits into two
     artifacts:
@@ -1514,7 +1541,18 @@ Key architectural and design decisions in vibe-vault, with rationale.
 
 87. **Server-side quality gate runs four trigger checks against
     proposed outputs without touching vault state; the H3-v2 invariant
-    is structural.** Decision 8 of the wrap-model-tiering plan defines
+    is structural.**
+    *Superseded by #92 (Direction-C). The QC layer was the gate that
+    surfaced the executor-isolation defect: it demanded commit SHAs
+    and per-paragraph citations the sandboxed executor could not
+    produce. Direction-C retired the entire `vv_wrap_quality_check`
+    tool and `internal/mcp/tools_quality_check.go` (517 lines).
+    Of the four QC rules: `multi_match_ambiguity` was lifted into
+    `mdutil.ReplaceSubsectionBody` and `mdutil.RemoveSubsection` as
+    a hard error (#92); the other three rules dropped (citation
+    accuracy is now the LLM's responsibility validated at operator
+    review time, since the renderer receives proper context).
+    Retained for historical reference.* Decision 8 of the wrap-model-tiering plan defines
     six escalation triggers. Four are owned by `vv_wrap_quality_check`
     (the tool); the other two — `mcp_tool_error_after_retry` and
     `missing_terminal_signal` — fire from the `internal/wrapdispatch`
@@ -1572,7 +1610,17 @@ Key architectural and design decisions in vibe-vault, with rationale.
 88. **Per-wrap dispatch metrics in parallel `wrap-dispatch.jsonl`
     artifact; existing per-field `wrap-metrics.jsonl` untouched.
     `[wrap]` config schema with H3-v3 Overlay map-merge fix; `vv stats
-    wrap` aggregates both.** C4 finding: the existing
+    wrap` aggregates both.**
+    *Superseded by #92 (Direction-C). All three observable surfaces
+    retired with the dispatch infrastructure: `wrap-dispatch.jsonl`
+    (written only by `internal/wrapdispatch/`), `wrap-metrics.jsonl`
+    (written only by `wrapapply.finishApply`), and the
+    `vv stats wrap` CLI subcommand. `internal/wrapmetrics/` deleted.
+    The `[wrap].escalation_ladder` config field also retired with
+    a one-line stderr deprecation log on detection (#92, decision
+    D5). `[wrap].tiers` and `[wrap].default_model` survive as
+    `vv_render_wrap_text`'s tier→provider:model lookup table.
+    Retained for historical reference.* C4 finding: the existing
     `wrap-metrics.jsonl` writer (`internal/wrapmetrics/writer.go`)
     carries per-field drift records (synth_sha256 vs apply_sha256 per
     bundle field). Per-wrap dispatch metrics (per-tier durations,
@@ -2045,3 +2093,178 @@ Key architectural and design decisions in vibe-vault, with rationale.
     `wrapbundlecache.InspectAll`), `cmd/vv/stats_wrap_test.go`
     (4 tests, +1 from 3). Phase 1 commit `e29aaec`, Phase 2 commit
     `f811392`.
+
+92. **Direction-C: Wrap pipeline collapse — record-and-manage, not
+    interpret.** Iters 163–167 surfaced a steady stream of wrap-flow
+    failures (sonnet QC failures, opus marginal passes, surgical
+    fallback used in five consecutive iters). The audit traced the
+    pattern to a structural defect, not a model-quality issue: the
+    dispatch ladder shipped iter 162 (DESIGN #84) was architecturally
+    unable to produce the citation-rigor output its QC layer (#87)
+    demanded.
+
+    **Root cause: executor isolation.** Two facts from the v4 plan
+    audit make this concrete:
+
+    1. The wrap-executor agent template
+       (`internal/agentregistry/agents/wrap-executor.md`, line 6,
+       deleted in Phase 4) explicitly forbade `vv_get_resume`,
+       `vv_get_iterations`, `Read`, and every other context-fetch
+       tool — the executor was a sandboxed prose-drafter with no
+       ability to consult project state.
+    2. The skeleton (`WrapSkeleton`,
+       `internal/mcp/wrapbundle.go:41–54`) carried slug-IDs and
+       file paths but NOT commit SHAs, decision text, narrative
+       context, or resume.md state. The user prompt in
+       `dispatch.go:312–332` injected only the skeleton JSON +
+       prior-tier escalation reasons.
+
+    QC then required the executor to cite specific commit SHAs,
+    decision-number references, and per-paragraph file/function
+    citations (`tools_quality_check.go:87–93`). The LLM was given
+    an impossible task. Sonnet's failures and opus's marginal passes
+    weren't a model-quality issue; the LLM was correctly refusing
+    (or marginally hallucinating) when the required citations were
+    absent from its input. No amount of tier escalation, prompt
+    tuning, or QC relaxation could fix this — the defect was in
+    the architectural premise (sandboxed executor + slug-only
+    skeleton).
+
+    **The new shape.** Direction-C collapses the bundle pipeline
+    into two new MCP tools and a context-aware slash command:
+
+    - `vv_describe_iter_state(project?)` — minimal server state
+      record. Returns `{iter_n, branch, vault_has_uncommitted_writes,
+      last_iter_anchor_sha}`. Server-computable fields only;
+      everything else (commits since last iter, files changed, task
+      deltas, test counts) is computed by the slash command via
+      git/filesystem, anchored by `last_iter_anchor_sha`.
+      ~40 lines reusing existing helpers
+      (`index.Index.NextIteration`, `vaultsync` git plumbing).
+    - `vv_render_wrap_text(kind, tier, iter_state, project_context)`
+      — single context-aware renderer with a `kind:` discriminator
+      (`iter_narrative` | `commit_msg` | `iter_narrative_and_commit_msg`).
+      One LLM call, returns prose. Consumes only the basic single-turn
+      `Provider` interface; no `AgenticProvider`, no `RunTools`, no
+      multi-turn loop. Tier-string lookup via `[wrap.tiers]`;
+      single-tier-per-call (operator re-runs with `--tier=opus` if
+      output is poor; no auto-escalation).
+    - `templates/agentctx/commands/wrap.md` rewritten as the
+      canonical surgical-render path (218 lines). Shape detection
+      (`fresh-feature` / `planning` / `reconciliation` / `vault-only`
+      / `writes-already-landed`) lives in the slash command, not
+      Go code, so shape semantics are editable without rebuild +
+      reinstall (the `make install re-embeds templates` friction
+      documented in auto-memory). Three of five shapes don't need
+      LLM synthesis at all.
+
+    The principle: **/wrap records history; it does not interpret
+    history.** Source control and the vault filesystem are the
+    canonical record. The LLM's job is to write short, accurate
+    prose when prose is needed — nothing more. Everything else
+    (file mutation, git plumbing, vault sync) is deterministic.
+
+    **D4b auto-heal hooks for marker-bounded resume.md state
+    regions.** DESIGN #90 introduced three marker-bounded regions
+    rendered last in `ApplyBundle` Step 9
+    (`active-tasks` / `current-state` / `project-history-tail`).
+    With `ApplyBundle` retired, the same mechanism is preserved
+    via post-write hooks in `vv_append_iteration` and
+    `vv_update_resume`: after their primary write succeeds, the
+    handler re-renders the three regions from filesystem ground
+    truth via the same `wraprender.ApplyMarkerBlocks` machinery.
+    The Step-9 helpers (`collectActiveTasks`, `computeCurrentState`,
+    `collectHistoryRows`) extracted from the deleted
+    `tools_apply_wrap_bundle.go` into
+    `internal/mcp/resume_state_blocks.go` for reuse. Byte-identity
+    regression-locked against the prior Step-9 output by
+    `internal/mcp/resume_state_blocks_test.go`.
+
+    **mdutil semantic change: hard-error multi-match.**
+    `mdutil.ReplaceSubsectionBody` and `mdutil.RemoveSubsection`
+    formerly returned a `"candidates_warning:"` prefix on
+    multi-match (a soft warning consumers had to extract via
+    `extractCandidatesWarning`). They now hard-error. This lifts
+    the QC layer's `multi_match_ambiguity` rule into the write
+    path: `vv_thread_replace` and `vv_thread_remove` no longer need
+    the warning-extraction dance — the err branch catches multi-match
+    directly. The `extractCandidatesWarning` helper and the
+    `CandidatesWarning` JSON field on the thread result type are
+    deleted. The two dead production callers in the retired
+    `tools_apply_wrap_bundle.go` and `wrapapply.go` retire with
+    Phase 4. Test sites in `internal/mdutil/mdutil_test.go` and
+    `internal/mcp/tools_thread_test.go` rewritten to assert
+    `err != nil` and document-unchanged on multi-match.
+
+    **Config simplification.** `WrapConfig.EscalationLadder` removed
+    from the struct, defaults, validation, overlay, and tests. The
+    legacy key silently no-ops (BurntSushi/toml is non-strict by
+    default — `Load()` never calls `MetaData.Undecoded()`); a
+    one-line stderr deprecation log on `md.IsDefined("wrap",
+    "escalation_ladder")` helps operators clean up legacy config
+    without surprise behavior change. `WrapConfig.Tiers` and
+    `WrapConfig.DefaultModel` survive as `vv_render_wrap_text`'s
+    tier→provider:model lookup table.
+
+    **Net MCP tool count: 43 → 39.** Five retirements
+    (`vv_synthesize_wrap_bundle`, `vv_apply_wrap_bundle_by_handle`,
+    `vv_wrap_quality_check`, `vv_wrap_dispatch`,
+    `vv_prepare_wrap_skeleton`), one fold (`vv_render_commit_msg`
+    folds into `vv_render_wrap_text`'s `kind: "commit_msg"` variant),
+    two additions (`vv_describe_iter_state`, `vv_render_wrap_text`).
+    The integration test's exact-set assertion at `expectedTools`
+    in `test/integration_test.go` was updated in lockstep. Internal
+    packages retired: `internal/wrapdispatch/`,
+    `internal/wrapbundlecache/`, `internal/wrapmetrics/`. Internal
+    LLM-side dead code retired: `internal/llm/anthropic_agentic.go`,
+    `AgenticProvider` interface in `internal/llm/types.go`,
+    `RunTools` method on `anthropicHTTPCore`. CLI subcommand retired:
+    `vv stats wrap` (the entire subcommand — all three sections
+    sourced their data from the retired infrastructure). Agent
+    template retired: `wrap-executor.md` (the
+    `internal/agentregistry/` package and `vv_get_agent_definition`
+    MCP tool survive as generic agent-registry scaffolding with
+    no remaining wrap-flow consumer).
+
+    **What this closes.** `dispatch-qc-planning-iter-rigidity` (the
+    QC layer goes away); surgical-fallback-as-default (surgical IS
+    canonical now); the iter-7 `vv_render_commit_msg` XML-mangling
+    class on the vibe-vault side (regression-tested by
+    `TestRenderWrapText_XMLSpecialCharsRoundTrip` —
+    XML-special-character prose round-trips verbatim through
+    `json.Unmarshal` + verbatim-write); and `wrap-pipeline-idempotency`
+    (the `writes-already-landed` shape becomes first-class via
+    slash-command shape detection). Implicit: the
+    `AgenticProvider` / `AnthropicAgentic` / `RunTools` multi-turn
+    tool-use surface area retires as dead code; future agentic
+    features would re-introduce as needed.
+
+    Source: `internal/mcp/tools_describe_iter_state.go`,
+    `internal/mcp/tools_describe_iter_state_test.go`,
+    `internal/mcp/tools_render_wrap_text.go`,
+    `internal/mcp/tools_render_wrap_text_test.go`,
+    `internal/mcp/wrap_prompts.go` (system preamble + 3 user-prompt
+    constants), `internal/mcp/resume_state_blocks.go`,
+    `internal/mcp/resume_state_blocks_test.go` (D4b auto-heal byte-
+    identity coverage), `internal/mcp/tools_context_write.go` (D4b
+    hook insertion in `NewAppendIterationTool` and
+    `NewUpdateResumeTool`), `internal/mdutil/mdutil.go`
+    (`ReplaceSubsectionBody`, `RemoveSubsection` hard-error),
+    `internal/mdutil/mdutil_test.go` (rewritten multi-match
+    coverage), `internal/mcp/tools_thread.go` (caller updates;
+    `extractCandidatesWarning` deleted), `internal/mcp/tools_thread_test.go`
+    (rewritten ambiguity tests), `internal/config/config.go`
+    (`EscalationLadder` removed; deprecation log in `Load()`),
+    `internal/config/config_test.go` (escalation tests removed),
+    `templates/agentctx/commands/wrap.md` (canonical surgical-render
+    path, 218 lines). Phase 2 commits `d3ea015`, `db878b7`, `add2a08`,
+    `dc91bb5`, `903d17f`. Phase 3 commit `e034650`. Phase 4 commits
+    `163fa82`, `c8705fc`, `c63ddc0`, `1f8da79`. Phase 5 (this entry):
+    docs only.
+    Re-open conditions: future agentic-tool-use features
+    (vault-graph search, multi-document planning, chained
+    code-edit loops) would re-introduce an `AgenticProvider`
+    interface and a per-task multi-turn dispatcher — but each
+    such feature must demonstrate that its executor has access
+    to every input its quality gate demands, lest it repeat the
+    iter-162 defect.

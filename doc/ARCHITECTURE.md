@@ -213,174 +213,169 @@ Claude Code / AI agent
         │                            → or vault-side fallback path
         ├─── vv_thread_insert        → mdutil.InsertSubsection() on resume.md
         ├─── vv_thread_replace       → mdutil.ReplaceSubsectionBody() on resume.md
+        │                            → hard-error on multi-match (DESIGN #92)
         ├─── vv_thread_remove        → mdutil.RemoveSubsection() on resume.md
+        │                            → hard-error on multi-match (DESIGN #92)
         ├─── vv_carried_add          → mdutil.AddCarriedBullet() on resume.md
         ├─── vv_carried_remove       → mdutil.RemoveCarriedBullet() on resume.md
         ├─── vv_carried_promote_to_task → remove bullet + create task file
-        ├─── vv_render_commit_msg    → git status + diff --cached --stat
-        │                            → render subject + body from convention file
-        ├─── vv_synthesize_wrap_bundle→ read resume.md, iterations.md, knowledge.md
-        │                            → build WrapBundle (all fields + SHA-256
-        │                               fingerprints at synth time)
-        ├─── vv_apply_wrap_bundle_by_handle    → in-process dispatch (see Canonical Wrap
-        │                               Pattern diagram below); logs drift metrics
-        │                               to ~/.cache/vibe-vault/wrap-metrics.jsonl
+        ├─── vv_describe_iter_state  → minimal iter-state record (DESIGN #92):
+        │                              {iter_n, branch,
+        │                               vault_has_uncommitted_writes,
+        │                               last_iter_anchor_sha}
+        ├─── vv_render_wrap_text     → unified context-aware renderer (DESIGN #92):
+        │                              kind ∈ {iter_narrative, commit_msg,
+        │                                      iter_narrative_and_commit_msg};
+        │                              tier-string lookup via [wrap.tiers];
+        │                              single-turn Provider call; returns prose
         │
         └─── prompt: vv_session_guidelines → agent instructions for capture
 ```
 
-### Canonical Wrap Pattern
+### Canonical Wrap-Render Path (DESIGN #92, Direction-C)
 
-The recommended `/wrap` flow uses two tools instead of seven sequential
-surgical calls. `vv_synthesize_wrap_bundle` reads all relevant vault state in one
-call and returns a `WrapBundle` JSON object. The AI edits the bundle fields
-(iteration narrative, thread updates, carried bullets, commit message,
-capture summary). `vv_apply_wrap_bundle_by_handle` dispatches all writes in a single
-in-process call — no MCP round-trips per write.
+The bundle-synthesize / bundle-apply / dispatch-ladder pipeline
+(formerly DESIGN #83–#88) was retired iter 168 by Direction-C; the
+section above describing it is replaced by this one. The dispatch
+ladder was architecturally unable to produce the citation-rigor
+output its QC layer demanded — the executor was forbidden from
+fetching context yet QC required commit SHAs and per-paragraph
+citations. See DESIGN #92 for the full architectural-root-cause
+write-up.
 
-```
-vv_synthesize_wrap_bundle(project, project_path)
-        │
-        ▼  WrapBundle JSON (with synth-time SHA-256 per field)
-   AI edits bundle fields
-   (iteration block, threads, carried bullets, commit msg, capture)
-        │
-        ▼
-vv_apply_wrap_bundle_by_handle(project, project_path, bundle)
-        │
-        ▼  in-process sequential dispatch:
-        ├── 1. vv_append_iteration       (iteration_block)
-        ├── 2. vv_thread_insert          (resume_thread_blocks, each)
-        ├── 3. vv_thread_replace         (resume_threads_to_replace, each; H2-v3)
-        ├── 4. vv_thread_remove          (resume_threads_to_close, each)
-        ├── 5. vv_carried_add            (carried_changes.add, each)
-        ├── 6. vv_carried_remove         (carried_changes.remove, each)
-        ├── 7. vv_set_commit_msg         (commit_msg)
-        ├── 8. vv_capture_session        (capture_session)
-        └── 9. resume_state_blocks       (DESIGN #90; state-derived sub-regions)
-                │
-                ▼  for each field:
-        wrapmetrics.AppendBundleLines()
-        → ~/.cache/vibe-vault/wrap-metrics.jsonl
-          (synth SHA vs apply SHA, logged but never abort)
-
-On first error: returns applied_writes + error_at_step.
-Completed writes are not rolled back (each is semantically correct
-in isolation).
-```
-
-**Step 9 — `resume_state_blocks`** (DESIGN #90). After
-`capture_session` succeeds, `applyResumeStateBlocks` re-renders three
-marker-bounded regions in `Projects/<p>/agentctx/resume.md` from
-filesystem ground truth: the `### Active tasks (N)` H3 inside
-`## Open Threads` (sourced from `tasks/*.md` minus `done/` /
-`cancelled/`), the invariant-bullet block inside `## Current State`
-(Iterations from `iterations.md` heading scan, MCP tool count from
-`(*mcp.Server).ToolNames()`, embedded template count from
-`templates.AgentctxFS()` walk; the Tests count is deliberately NOT
-emitted — operator-chosen scope reduction documented in DESIGN #90),
-and the last-N=10 rows of the iteration table inside
-`## Project History (recent)`. The renderer
-(`internal/wraprender/markers.go`) is self-healing: it locates
-`<!-- vv:<region>:start --> ... <!-- vv:<region>:end -->` pairs and
-replaces their contents in place, OR inserts the pair at a sensible
-default location if absent. Step 9 is the last resume.md mutation in
-any wrap cycle, so prior `vv_update_resume` clobbers from the inline
-orchestrator path are healed automatically. Step 9's metric line
-records `synth_sha == apply_sha == fingerprint(rendered_content)` and
-is special-cased out of `driftSummary` (the bundle never carries
-marker content, so synth-vs-apply drift accounting is meaningless).
-Both inline and dispatch paths converge on `ApplyBundle`, so Step 9
-fires uniformly for both — closing the iter-165–166 dispatch-path-
-specific drift class.
-
-The per-tool surgical APIs (`vv_thread_insert`, `vv_set_commit_msg`, etc.)
-remain available for hand-edits but are not called from the canonical flow.
-
-### Wrap Dispatch (Architecture A1)
-
-The `wrap-model-tiering` epic (DESIGN #83-#88) splits the bundle synthesis
-into a skeleton + prose pair and moves the per-tier executor dispatch loop
-server-side, in-process inside the MCP server, behind a single
-`vv_wrap_dispatch` MCP tool. The orchestrator (Opus, in the Claude Code
-session) emits ONE MCP call per tier; the handler runs the multi-turn
-tool-use loop with a downgraded executor (Sonnet first, escalating to Opus
-on QC failure) and returns proposed outputs or an `escalate_reason`.
-Quality gating runs BEFORE apply (H3-v2): the vault is atomic from its
-perspective.
+The new shape: **/wrap records history; it does not interpret
+history.** The slash command does shape detection and git/filesystem
+state collection; two new MCP tools handle the LLM-touching parts;
+the existing surgical-apply tools handle vault and git plumbing.
 
 ```
 operator: /wrap
     │
     ▼
-orchestrator (Opus, Claude Code session)
+slash command (templates/agentctx/commands/wrap.md, 218 lines)
     │
-    ├── pre-flight: vv mcp check --tools (assert 5 wrap tools present)
+    ├── vv_describe_iter_state(project?)
+    │     → server-minimal record: {iter_n, branch,
+    │                               vault_has_uncommitted_writes,
+    │                               last_iter_anchor_sha}
     │
-    ├── vv_prepare_wrap_skeleton(orchestrator-facts)
-    │     → server writes ~/.cache/vibe-vault/wrap-bundles/<project>/iter-<N>-skeleton.json
-    │     → returns SkeletonHandle{iter, path, sha256}
+    ├── slash command computes via git/filesystem:
+    │     - commits_since_last_iter (git log <anchor>..HEAD)
+    │     - files_changed           (git diff --name-only <anchor>..HEAD)
+    │     - task_deltas             (walk agentctx/tasks/ vs <anchor>:tasks/)
+    │     - test_counts             (TESTING.md or `go test -list .`)
     │
-    ├── for tier in [sonnet, opus]:
-    │     │
-    │     │ ┌──────────────────────────────────────────────────────────┐
-    │     │ │ vv_wrap_dispatch(handle, tier, "wrap-executor")          │
-    │     │ │  (server-side, in-process, in MCP server)                │
-    │     │ │   ├── resolve tier → provider:model from [wrap.tiers]    │
-    │     │ │   ├── agentregistry.Lookup("wrap-executor") (direct Go)  │
-    │     │ │   ├── instantiate AgenticProvider                        │
-    │     │ │   ├── ToolsRequest{system, messages, tools=[             │
-    │     │ │   │     vv_synthesize_wrap_bundle (OQ-5 direct helper),  │
-    │     │ │   │     wrap_executor_finish (in-loop, H4-v3)]}          │
-    │     │ │   ├── provider.RunTools() → multi-turn loop              │
-    │     │ │   │     │ executor: vv_synthesize_wrap_bundle(prose)     │
-    │     │ │   │     │   → handler routes to FillBundle() directly    │
-    │     │ │   │     │ executor: wrap_executor_finish(status, ...)    │
-    │     │ │   │     │   → captured in Go variable (in-loop)          │
-    │     │ │   ├── stderr progress: [wrap-dispatch] tier=... t=...    │
-    │     │ │   ├── write DispatchLine to wrap-dispatch.jsonl          │
-    │     │ │   └── return {outputs?, escalate_reason?, metrics}       │
-    │     │ └──────────────────────────────────────────────────────────┘
-    │     │
-    │     ├── if escalate_reason: continue
-    │     │
-    │     ├── vv_wrap_quality_check(handle, outputs)
-    │     │     → 4 trigger checks (read-only against vault)
-    │     │     → if !passed: continue
-    │     │
-    │     └── break  # tier succeeded
+    ├── shape detection (slash-command pattern-match):
+    │     fresh-feature   | planning | reconciliation
+    │     vault-only      | writes-already-landed
+    │     (5 shapes; only the first 2 always need an LLM call)
     │
-    ├── vv_apply_wrap_bundle_by_handle(handle, outputs)
-    │     → mutate vault: iter + threads + carried + commit_msg + capture
+    ├── if shape needs prose:
+    │     parallel-fetch context bundle:
+    │       - vv_get_resume        → project_context.resume_state
+    │       - vv_get_iterations    → project_context.recent_iterations
+    │       - vv_get_friction_trends → project_context.friction_trends
+    │       (open_threads parsed from resume_state)
     │
-    └── git plumbing (Bash): add, commit, push
+    │     vv_render_wrap_text(
+    │       kind: "iter_narrative_and_commit_msg" | "iter_narrative" | "commit_msg",
+    │       tier: "haiku" | "sonnet" | "opus",   # [wrap.tiers] lookup
+    │       iter_state: {iter_n, branch, last_iter_anchor_sha,
+    │                    commits_since_last_iter, files_changed,
+    │                    task_deltas, test_counts},
+    │       project_context: {resume_state, recent_iterations,
+    │                         open_threads, friction_trends}
+    │     )
+    │       │
+    │       ▼  single-turn Provider call (NOT AgenticProvider — retired)
+    │     → {narrative_title?, narrative_body?,
+    │        commit_subject?,  commit_prose_body?}
+    │
+    ├── mechanical apply:
+    │     vv_append_iteration (auto-heals resume.md — D4b hook)
+    │     vv_update_resume    (auto-heals resume.md — D4b hook)
+    │     vv_thread_{insert,replace,remove}
+    │     vv_carried_{add,remove,promote_to_task}
+    │     vv_set_commit_msg
+    │     vv_capture_session
+    │
+    └── mechanical plumbing:
+          git add <files>; git commit -F commit.msg; git push
+          vv vault push   (force-with-lease convergence per DESIGN #81)
 ```
 
-Key invariants:
+**`vv_describe_iter_state` schema (server side).**
 
-- **Skeleton handle compare-and-set** — every consumer
-  (`vv_synthesize_wrap_bundle`, `vv_apply_wrap_bundle_by_handle`,
-  `vv_wrap_quality_check`, `vv_wrap_dispatch`) verifies the on-disk
-  skeleton's sha256 matches the handle's; mismatch returns `"skeleton
-  cache file modified after handle issued"`. Protects against
-  concurrent /wrap runs and manual cache edits. (DESIGN #86.)
-- **QC reads, never mutates** — `vv_wrap_quality_check` runs the
-  multi-match dry-run against live vault state but is byte-equality
-  invariant on resume.md / iterations.md.
-  `TestVVWrapQualityCheck_NoVaultMutation` is structural. (DESIGN #87.)
-- **Synthesize routes in-process** — when the executor calls
-  `vv_synthesize_wrap_bundle` from inside the dispatch loop, the handler's
-  local `ToolExecutor` invokes `internal/mcp/wrapbundle.go::FillBundle()`
-  via direct Go call (NOT a re-entrant MCP roundtrip). (DESIGN #84,
-  OQ-5.)
-- **Terminal signal is in-loop, not registered** — the executor finishes
-  the conversation by calling the in-loop tool spec
-  `wrap_executor_finish(status, reason?, outputs?)`; that name is NOT in
-  the registered MCP tool list. Treating it as a registered tool would
-  leak a private handshake into the public surface. (DESIGN #84, H4-v3.)
-- **Per-wrap dispatch metrics** — `wrap-dispatch.jsonl` is a sibling to
-  the existing `wrap-metrics.jsonl`; the two writers and schemas are
-  independent. `vv stats wrap` reads both. (DESIGN #88.)
+```
+input:  {project?: string}                # optional explicit project
+output: {
+  iter_n:                       int,      # index.NextIteration()
+  branch:                       string,   # git rev-parse --abbrev-ref HEAD
+  vault_has_uncommitted_writes: bool,     # git status --porcelain in vault
+  last_iter_anchor_sha:         string|null  # log search for "## Iteration N-1"; null if absent
+}
+```
+
+The slash command computes the rest itself (commits, files, task
+deltas, test counts) so shape detection lives in editable markdown,
+not Go.
+
+**`vv_render_wrap_text` schema.**
+
+```
+input:  {
+  kind:    "iter_narrative" | "commit_msg" | "iter_narrative_and_commit_msg",
+  tier:    string,                   # [wrap.tiers] lookup → provider:model
+  iter_state: {
+    iter_n:                 int,
+    branch:                 string,
+    last_iter_anchor_sha:   string|null,
+    commits_since_last_iter:[{sha, subject}],
+    files_changed:          [string],
+    task_deltas:            {added, retired, cancelled},
+    test_counts:            {unit, integration, lint}
+  },
+  project_context: {
+    resume_state:        string,
+    recent_iterations:   string,
+    open_threads:        [string],
+    friction_trends:     object
+  }
+}
+output: {
+  narrative_title?:    string,    # when kind includes "iter_narrative"
+  narrative_body?:     string,    # when kind includes "iter_narrative"
+  commit_subject?:     string,    # when kind includes "commit_msg"
+  commit_prose_body?:  string     # when kind includes "commit_msg"
+}
+```
+
+Single-turn `Provider.ChatCompletion`; no multi-turn loop, no
+auto-escalation. Operator re-runs with `--tier=opus` if the output
+is poor. Prompt templates (system preamble + 3 kind variants) live
+as Go string constants in `internal/mcp/wrap_prompts.go`; golden
+tests in `tools_render_wrap_text_test.go` snapshot prompt strings
+so prompt edits surface as reviewable diffs.
+
+**D4b auto-heal hooks for marker-bounded resume.md state regions.**
+DESIGN #90 introduced three marker-bounded regions
+(`active-tasks` / `current-state` / `project-history-tail`) rendered
+from filesystem ground truth as Step 9 of the now-retired
+`ApplyBundle`. Direction-C preserves the same semantic via post-write
+hooks: `NewAppendIterationTool` and `NewUpdateResumeTool` re-render
+the three regions from filesystem ground truth after their primary
+write succeeds, using the same `wraprender.ApplyMarkerBlocks`
+machinery. Helpers `collectActiveTasks` / `computeCurrentState` /
+`collectHistoryRows` extracted from the deleted
+`tools_apply_wrap_bundle.go` into `internal/mcp/resume_state_blocks.go`.
+Byte-identity regression-locked against the prior Step-9 output
+by `internal/mcp/resume_state_blocks_test.go`. The same
+self-healing `ApplyMarkerBlocks` rule applies — markers absent →
+inserted; markers present → contents replaced in place.
+
+The per-tool surgical APIs (`vv_thread_insert`, `vv_set_commit_msg`,
+etc.) ARE the path now — there is no separate canonical bundle
+flow. The slash command sequences the calls.
 
 ### Context Sync Flow (`vv context`)
 
@@ -423,7 +418,7 @@ Source of truth: Tier 1 (Go embeds). See DESIGN.md decisions #41 and #46.
 |---------|------|----------------|
 | `cmd/vv` | `main.go` | CLI arg parsing, subcommand routing (including hook sub-subcommands), help via `internal/help`, `wantsHelp()` flag guard, unknown flag rejection, `runTrends()` with `--project` and `--weeks` flags, `runInject()` with `--project`/`--format`/`--sections`/`--max-tokens` flags, `runExport()` with `--format`/`--project` flags, `runContext()` with `sync` sub-subcommand (`--project`/`--all`/`--dry-run`/`--force`), `runCheck()` agentctx schema check |
 | `cmd/gen-man` | `main.go` | Generates `man/*.1` files from help registry (Subcommands + HookSubcommands + ContextSubcommands) |
-| `cmd/wrap-trace` | `main.go` | Phase 0 measurement harness: replays a session transcript through the full wrap pipeline, measures per-step latency and token cost, and emits a golden JSONL report. Reuses `internal/transcript/parser.go` for transcript reading; no production MCP dependency. |
+| `cmd/wrap-trace` | `main.go` | One-shot measurement harness (originally Phase 0 of the iter-152 wrap-acceleration epic): replays a session transcript and emits a per-phase decomposition table. Reuses `internal/transcript/parser.go` for transcript reading; no production MCP dependency. Survives Direction-C as a transcript inspection utility — its outputs no longer drive any active wrap path. |
 | `templates` | `embed.go` | `//go:embed all:agentctx` — embeds 23 agentctx template files (commands, skills, settings) into the binary; `AgentctxFS()` returns the `embed.FS`. Templates use `{{PROJECT}}`/`{{DATE}}` placeholders resolved at runtime. These are Tier 1 of the three-tier template cascade (see DESIGN.md #46). |
 | `context` | `context.go` | `Init()` — scaffold vault-resident context (templates from embed.FS, repo-side CLAUDE.md symlink + .claude/{commands,rules,skills,agents} symlinks, agentctx symlink, .version); `Migrate()` — copy local files to vault + force-update repo-side; `claudeSubdirs` var defines .claude/ subdirectories; helpers: safeWrite, safeSymlink, gitignoreEnsure, copyFile/Dir |
 | `context` | `schema.go` | `VersionFile` TOML struct, `ReadVersion`/`WriteVersion`, `LatestSchemaVersion` const (10), `Migration` type + registry (0→1 through 7→8 plus a no-op 9→10 contract-marker entry that brings post-v7 vaults to v10 in one step), `MigrationContext` (incl. `DryRun` field), `migrationsFrom()` |
@@ -442,16 +437,12 @@ Source of truth: Tier 1 (Go embeds). See DESIGN.md decisions #41 and #46.
 | `mcp` | `tools_commit_msg.go` | `vv_set_commit_msg` — writes `commit.msg` at an explicit `project_path` or falls back to a vault-side path; `subject` is required |
 | `mcp` | `tools_thread.go` | `vv_thread_insert`, `vv_thread_replace`, `vv_thread_remove` — surgical Open Threads subsection edits on `resume.md` using `mdutil` subsection family; rejects the reserved "Carried forward" slug |
 | `mcp` | `tools_carried.go` | `vv_carried_add`, `vv_carried_remove`, `vv_carried_promote_to_task` — manage `Carried forward` bullet list in resume.md via `mdutil.CarriedBullet` helpers; promote creates a task file and removes the bullet atomically |
-| `mcp` | `tools_render_commit_msg.go` | `vv_render_commit_msg` — reads `git status` + `git diff --cached --stat`, renders a conventional commit message from convention file and AI-supplied subject+body; `RenderCommitMsg()` exported as package-level function for reuse in `vv_synthesize_wrap_bundle` |
-| `mcp` | `tools_synthesize_wrap.go` | `vv_synthesize_wrap_bundle` — handle-based; reads cached skeleton via `wrapbundlecache`, calls `wrapbundle.FillBundle()` with executor-supplied prose, returns the filled `WrapBundle`. Compare-and-set via `skeleton_sha256`. Replaces the pre-epic inline `vv_synthesize_wrap` (DESIGN #86, Decision 23 fold). |
-| `mcp` | `tools_apply_wrap_bundle.go` | `vv_apply_wrap_bundle_by_handle` — handle-based in-process orchestrator: dispatches all `WrapBundle` writes via `wrapapply.ApplyBundle()` (no MCP round-trips); applies the H2-v3 ordering `iter → thread_insert → thread_replace → thread_remove → carried_add → carried_remove → set_commit_msg → capture → resume_state_blocks` (Step 9, DESIGN #90); logs synth-vs-apply SHA drift to `wrapmetrics` (Step 9 special-cased to skip the drift counter); fail-stop on first error, no rollback. The new `applyResumeStateBlocks` helper re-renders the three marker-bounded resume.md sub-regions (active-tasks, current-state, project-history-tail) from filesystem ground truth. |
-| `mcp` | `tools_prepare_skeleton.go` | `vv_prepare_wrap_skeleton` — collects orchestrator-supplied facts, calls `wrapbundle.BuildSkeleton()`, threads `args.Project` through to persist at `~/.cache/vibe-vault/wrap-bundles/<project>/iter-<N>-skeleton.json` via `wrapbundlecache.Write(project, iter, data)`, log-rotates that project's subdirectory via `wrapbundlecache.RotateKeepN(project, wrapbundlecache.DefaultRotationN)` (single-source-of-truth `N=3`); returns `SkeletonHandle{iter, path, sha256}` whose `path` self-encodes the per-project subdirectory so downstream Read tools need no schema bump (DESIGN #86, #91). |
-| `mcp` | `wrapbundle.go` | `WrapSkeleton` + `WrapBundle` types; `BuildSkeleton()` (orchestrator-facts only) and `FillBundle(skeleton, prose)` (executor prose merge) pure helpers. Source of the skeleton sha256 stamp consumed by all four handle-aware tools. |
-| `mcp` | `wrapapply.go` | Extracted `ApplyBundle(ctx, ...)` helper carrying the H2-v3 mutation-class dispatch order including the `thread_replace` step plus DESIGN #90's Step 9 `resume_state_blocks` (last). Called by both `vv_apply_wrap_bundle_by_handle` and the dispatch handler's quality-gate path. The package comment documents Step 9 ordering vs `vv_update_resume`: Step 9 must remain LAST so any prior orchestrator clobber of a marker pair is healed by `wraprender.ApplyMarkerBlocks`'s self-healing insertion. |
-| `wraprender` | `markers.go` | Renderer for resume.md state-derived sub-regions (DESIGN #90). Public API: `RenderActiveTasks`, `RenderCurrentState`, `RenderProjectHistoryTail`, `ApplyMarkerBlocks`. The latter is **self-healing** — it replaces marker-pair contents in place when the pair is present, OR inserts the pair at a sensible default location relative to existing H2/H3 anchors when absent. Drives `applyResumeStateBlocks` in `internal/mcp/tools_apply_wrap_bundle.go`. |
-| `mcp` | `tools_quality_check.go` | `vv_wrap_quality_check` — runs the four QC triggers (multi-match ambiguity, mutation-count mismatch, semantic-presence failure, commit-subject invalid) against proposed outputs; reads vault state for the dry-run check but never mutates it (H3-v2 invariant; DESIGN #87). Compare-and-set via `skeleton_sha256`. |
-| `mcp` | `tools_wrap_dispatch.go` | `vv_wrap_dispatch` — server-side dispatch entry point (Architecture A1). Resolves `tier` → `provider:model` from `[wrap.tiers]`, looks up agent definition via `agentregistry`, calls `llm.ResolveAPIKey(tierProvider, cfg.Providers)` to obtain the key (DESIGN #89; same resolver as `NewProvider`), instantiates `AgenticProvider`, runs `internal/wrapdispatch.Dispatch()` and returns `{outputs?, escalate_reason?, dispatch_metrics}`; emits stderr progress lines and writes one `DispatchLine` per call (DESIGN #84). |
-| `mcp` | `tools_agents.go` | `vv_get_agent_definition(name)` — alternative read path for the embedded agent registry (v2 portability scaffolding; v1 `vv_wrap_dispatch` reads via direct Go call). Returns sha256-stamped agent definition record. |
+| `mcp` | `tools_describe_iter_state.go` | `vv_describe_iter_state` — minimal iter-state record (DESIGN #92). Returns `{iter_n, branch, vault_has_uncommitted_writes, last_iter_anchor_sha}`. Server-computable fields only; the slash command computes `commits_since_last_iter` / `files_changed` / `task_deltas` / `test_counts` itself via git/filesystem anchored by `last_iter_anchor_sha`. |
+| `mcp` | `tools_render_wrap_text.go` | `vv_render_wrap_text` — unified context-aware wrap-text renderer (DESIGN #92). Single tool with a `kind:` discriminator (`iter_narrative` \| `commit_msg` \| `iter_narrative_and_commit_msg`); single-turn `Provider.ChatCompletion` call (NOT `AgenticProvider` — retired in Direction-C); tier-string lookup via `[wrap.tiers]`. Operator re-runs with `--tier=opus` if output is poor (no auto-escalation). |
+| `mcp` | `wrap_prompts.go` | Prompt-template constants for `vv_render_wrap_text` (DESIGN #92): one common system preamble plus three kind-specific user-prompt constants. Templates are byte-stable Go string constants so prompt edits surface as reviewable diffs (golden tests in `tools_render_wrap_text_test.go`). |
+| `mcp` | `resume_state_blocks.go` | D4b auto-heal hook (DESIGN #92). Helpers `collectActiveTasks` / `computeCurrentState` / `collectHistoryRows` extracted from the deleted `tools_apply_wrap_bundle.go`. Called from `NewAppendIterationTool` and `NewUpdateResumeTool` after their primary write succeeds: re-renders the three marker-bounded resume.md sub-regions (active-tasks, current-state, project-history-tail) from filesystem ground truth via `wraprender.ApplyMarkerBlocks`. Byte-identity regression-locked against the pre-Direction-C Step-9 output. |
+| `wraprender` | `markers.go` | Renderer for resume.md state-derived sub-regions (DESIGN #90 mechanism preserved by DESIGN #92 D4b). Public API: `RenderActiveTasks`, `RenderCurrentState`, `RenderProjectHistoryTail`, `ApplyMarkerBlocks`. The latter is **self-healing** — it replaces marker-pair contents in place when the pair is present, OR inserts the pair at a sensible default location relative to existing H2/H3 anchors when absent. Now driven by the D4b post-write hooks in `vv_append_iteration` and `vv_update_resume` (formerly Step 9 of the retired `ApplyBundle`). |
+| `mcp` | `tools_agents.go` | `vv_get_agent_definition(name)` — generic read path for the embedded agent registry. The wrap-executor agent template retired with the dispatch ladder (DESIGN #92); the registry's `agents/` directory ships empty in Direction-C. Tool surfaces remain as scaffolding for future agent-flow features. |
 | `mcp` | `tools_vault.go` | 8 generic vault-relative file accessor tools: `vv_vault_read`, `vv_vault_list`, `vv_vault_exists`, `vv_vault_sha256`, `vv_vault_write`, `vv_vault_edit`, `vv_vault_delete`, `vv_vault_move`. Each constructor (`NewVault*Tool(cfg config.Config)`) closure-captures `cfg.VaultPath`; the AI passes vault-relative paths only and the handler joins them under the configured vault root via `vaultfs` package. Write/edit/delete/move accept an optional `expected_sha256` for compare-and-set. Reads cap at 1 MB by default (settable up to 10 MB via `max_bytes`). |
 | `mcp` | `prompts.go` | `NewSessionGuidelinesPrompt()` — agent instructions for when/how to call `vv_capture_session` |
 | `help` | `commands.go` | Command/Flag/Arg structs, Version var (build-time injection via ldflags), registry of 17 subcommands + 2 hook + 3 context + 3 vault subcommands (status, pull, push), ManName() with space→hyphen |
@@ -503,8 +494,8 @@ Source of truth: Tier 1 (Go embeds). See DESIGN.md decisions #41 and #46.
 | `zed` | `batch.go` | Batch capture helpers for backfill |
 | `effectiveness` | `effectiveness.go` | Context depth vs session outcome correlation (cohort analysis, Pearson correlation) |
 | `identity` | `identity.go` | `.vibe-vault.toml` parser — explicit project name/domain/tags override |
-| `llm` | `provider.go`, `types.go`, `retry.go`, `openai.go`, `anthropic.go`, `google.go` | Multi-provider LLM abstraction: `Provider` interface, OpenAI-compatible/Anthropic/Gemini implementations, retry with backoff. `NewProvider(enrich, providers)` calls `ResolveAPIKey(enrich.Provider, providers)` to obtain the key (config-first / env-fallback / actionable-error), so hook + synthesis paths share the same resolution semantics as `vv_wrap_dispatch` (DESIGN #89) |
-| `llm` | `keyresolver.go` | `ResolveAPIKey(provider, providers) (string, error)` — single resolution point for Anthropic / OpenAI / Google API keys. Three-tier precedence: `[providers.<P>].api_key` (config) → `os.Getenv(envVarFor(provider))` → actionable error naming both `vv config set-key <provider> <key>` and the env var. Called by `NewProvider` (hook + synthesis path, routes by `[enrichment].provider`) AND by the dispatch handler in `internal/mcp/tools_wrap_dispatch.go` (routes by `[wrap.tiers]` provider-prefix). Different routing axes, identical resolution (DESIGN #89). |
+| `llm` | `provider.go`, `types.go`, `retry.go`, `openai.go`, `anthropic.go`, `google.go` | Multi-provider LLM abstraction: `Provider` interface (single-turn `ChatCompletion`), OpenAI-compatible/Anthropic/Gemini implementations, retry with backoff. `NewProvider(enrich, providers)` calls `ResolveAPIKey(enrich.Provider, providers)` to obtain the key (config-first / env-fallback / actionable-error), so hook + synthesis paths share the same resolution semantics as the wrap-render path (DESIGN #89, #92). The `AgenticProvider` interface and `AnthropicAgentic` implementation retired in DESIGN #92 as dead code. |
+| `llm` | `keyresolver.go` | `ResolveAPIKey(provider, providers) (string, error)` — single resolution point for Anthropic / OpenAI / Google API keys. Three-tier precedence: `[providers.<P>].api_key` (config) → `os.Getenv(envVarFor(provider))` → actionable error naming both `vv config set-key <provider> <key>` and the env var. Called by `NewProvider` (hook + synthesis path, routes by `[enrichment].provider`) AND by the wrap-render path in `internal/mcp/tools_render_wrap_text.go` (routes by `[wrap.tiers]` provider-prefix per DESIGN #92). Different routing axes, identical resolution (DESIGN #89). |
 | `templates` (internal) | `templates.go`, `diff.go`, `reset.go` | Template registry, vault-vs-embedded comparison, `vv templates` status reporting |
 | `vaultsync` | `vaultsync.go` | `Classify()` — file classification (Regenerable/AppendOnly/Manual/ConfigFile) for conflict resolution; `GetStatus()` — vault git state (branch, clean/dirty, ahead/behind); `Pull()` — fetch + rebase with auto-stash and classification-driven conflict resolution; `CommitAndPush()` — stage all, commit with hostname stamp, push with rebase-fallback + force-with-lease convergence to prior remotes; `EnsureRemote()` — verify origin exists |
 | `synthesis` | `types.go` | Data structures: `Input`, `Result`, `Learning`, `StaleEntry`, `ResumeUpdate`, `TaskUpdate`, `ActionReport` |
@@ -516,14 +507,8 @@ Source of truth: Tier 1 (Go embeds). See DESIGN.md decisions #41 and #46.
 | `mdutil` | `mdutil.go` | Shared markdown/text utilities: `SignificantWords()` (4+ char, stop-word filtered), `Overlap()`/`SetIntersection()` (word set operations), `ReplaceSectionBody()` (heading-targeted markdown editing), `AtomicWriteFile()` (temp + rename crash safety); subsection family: `ReplaceSubsectionBody()`, `InsertSubsection()`, `RemoveSubsection()`, `NormalizeSubheadingSlug()` (text up to first ` — ` separator) |
 | `vaultfs` | `safety.go`, `read.go`, `write.go`, `types.go` | Generic vault-relative file accessors (read, list, exists, sha256, write, edit, delete, move) with path-traversal protection, case-insensitive `.git` refusal, atomic writes via `mdutil` delegation. `ValidateRelPath()` rejects absolute paths, `..` segments, null/control bytes, empty, and bare `.`; `ResolveSafePath()` joins under the configured vault root and verifies the realpath via `filepath.EvalSymlinks` stays inside the vault; `IsRefusedWritePath()` rejects any path whose segment matches `.git` case-insensitively. Linux-primary scope (no Windows-reserved-name check). Powers the eight `vv_vault_*` MCP tools. |
 | `mdutil` | `carried.go` | `CarriedBullet` type + liberal-on-read parser (`ParseCarriedForward`) + strict-on-write emitter (`EmitCarriedBullets`, `BuildCarriedBullet`); `AddCarriedBullet()`, `RemoveCarriedBullet()`, `GetCarriedBullet()` for resume.md "Carried forward" subsections |
-| `wrapmetrics` | `writer.go` | Host-local JSONL metric writer at `~/.cache/vibe-vault/wrap-metrics.jsonl`; `AppendLine()`, `AppendBundleLines()`, `CacheDir()`, rotation to `wrap-metrics-archive-YYYY.jsonl` at 1000-line threshold via `rotateIfNeeded()` |
-| `wrapmetrics` | `dispatch_writer.go` | Append-only writer for the per-wrap dispatch jsonl `~/.cache/vibe-vault/wrap-dispatch.jsonl` (sibling to `wrap-metrics.jsonl`). `WriteDispatchLine()` emits one `DispatchLine{tier, provider_model, duration_ms, outcome, expected_mutations, actual_mutations, input_tokens, output_tokens, escalate_reason}` per `vv_wrap_dispatch` invocation; `ReadDispatchLines(limit)` for `vv stats wrap`. Two writers and schemas independent of the per-field drift writer (DESIGN #88). |
-| `wrapmetrics` | `stats.go` | `ComputeWrapStats()` aggregates both jsonl files: per-tier median duration, escalation rate, top reasons, plus per-field median drift_bytes. `FormatWrapStats()` renders the `vv stats wrap` terminal output. |
-| `wrapbundlecache` | `cache.go` | Host-local skeleton cache at `~/.cache/vibe-vault/wrap-bundles/<project>/iter-<N>-skeleton.json` (per-project subdirectory layout, DESIGN #91). Public API: `DefaultRotationN = 3` (exported single source of truth shared by the call-site rotation and the read-side diagnostic), `CacheDir(project)`, `SkeletonPath(project, iter)`, `Write(project, iter, data)` (atomic temp+rename inside the per-project subdir), `Read(path)` with path-traversal rejection AND an actionable `os.IsNotExist` wrap citing `DefaultRotationN`, `RotateKeepN(project, n)` (per-project rotation; tolerates `os.IsNotExist`; emits one stderr line when deletions happen), and `InspectAll() (map[string]ProjectStats, error)` powering `vv stats wrap`. Package-local `validateProject` mirrors `internal/mcp.validateProjectName` to avoid an import cycle (sync expectation in the function comment). On first `CacheDir(project)` call per process, gated by `sync.Once`, `migrateLegacyFiles` relocates pre-existing flat-layout `<base>/iter-*-skeleton.json` files to `<base>/_legacy/`; multi-process safe via per-rename `os.IsNotExist` tolerance. `LegacyIterSentinel = -1` and `LegacyProjectName = "_legacy"` are exported constants the `vv stats wrap` renderer keys on for the `_legacy` row's parenthetical. Survives MCP server restart; underpins the skeleton-handle compare-and-set (DESIGN #86, #91). |
-| `wrapdispatch` | `dispatch.go` | Pure-Go dispatch loop logic invoked by the `vv_wrap_dispatch` MCP handler. `Dispatch(ctx, Request) (Response, error)` runs the agentic LLM tool-use loop (mockable `AgenticProvider` seam for tests), routes the in-loop `vv_synthesize_wrap_bundle` callback to `internal/mcp/wrapbundle.FillBundle()` directly (OQ-5), recognizes the in-loop terminal signal `wrap_executor_finish` (H4-v3), enforces a max-iterations breaker, emits stderr progress per executor tool-call, and returns either `{outputs, metrics}` or `{escalate_reason, metrics}` (DESIGN #84). |
-| `agentregistry` | `registry.go`, `embedded.go` | Embedded registry of agent definitions (system prompt + tool whitelist + escalation triggers + output_format). `Lookup(name)` returns the stored definition with sha256 stamp; `List()` returns sorted names. `//go:embed agents/*.md` ships definitions in-binary. v1 `vv_wrap_dispatch` consumes via direct Go call; the MCP tool `vv_get_agent_definition` and the generated `.claude/agents/wrap-executor.md` artifact (via `make agents`) are v2 portability surfaces (DESIGN #85). |
-| `llm` | `anthropichttp.go` | `anthropicHTTPCore` shared HTTP plumbing core (base URL, model, API key, max tokens, retry policy, http.Client). Embedded by both text-only `Anthropic` and tool-use `AnthropicAgentic` to eliminate duplication of header injection + retry + status branching (C1-v2 fix; DESIGN #83). Pattern anticipates a future `openaihttp.go` for v2 multi-provider lift. |
-| `llm` | `anthropic_agentic.go`, `types.go` | `AgenticProvider interface { Provider; RunTools(ctx, ToolsRequest) (ToolsResponse, error) }` defined in `types.go` next to the existing text-only `Provider`. `AnthropicAgentic` (v1) implements it via Anthropic's tool-use API: multi-turn loop with `ToolExecutor` callback, `tool_use` / `tool_result` block round-tripping, max-iterations breaker, and integration test build-tagged behind `//go:build integration` (DESIGN #83). |
+| `agentregistry` | `registry.go`, `embedded.go` | Embedded registry of agent definitions (system prompt + tool whitelist + escalation triggers + output_format). `Lookup(name)` returns the stored definition with sha256 stamp; `List()` returns sorted names. `//go:embed agents/*.md` ships definitions in-binary. The `wrap-executor` definition retired with the dispatch ladder in DESIGN #92; the `agents/` directory is currently empty. The package and the `vv_get_agent_definition` MCP tool survive as scaffolding for future agent-flow features. |
+| `llm` | `anthropichttp.go` | `anthropicHTTPCore` shared HTTP plumbing for the text-only `Anthropic` provider (base URL, model, API key, max tokens, retry policy, http.Client). The agentic-side embedding (formerly `AnthropicAgentic`) retired with the dispatch ladder in DESIGN #92; the core remains as plain `Anthropic` plumbing. |
 | `meta` | `provenance.go`, `sanitize.go` | `Stamp()` — resolves host/user/cwd/origin_project for provenance metadata. `HomeDir()` — config-aware home directory. `ProjectRoot(cwd, vaultPath)` — walks up the directory tree checking for `agentctx/` first, then `.git/`; returns `ErrIsVaultRoot` if matched directory equals the configured vault path |
 | `sanitize` | `redact.go` | Regex-based XML tag stripping for Claude Code wrapper tags |
 | `memory` | `memory.go` | `Link()`/`Unlink()` for `vv memory` — slug derivation (symlink-resolved + `/` → `-`), project resolution via `session.DetectProject`, migrate pre-existing host-local memory into the vault target (drop identical, move unique, quarantine conflicts to sibling `memory-conflicts/{timestamp}/` under `--force`), establish/remove the `~/.claude/projects/{slug}/memory` ↔ `Projects/{name}/agentctx/memory` symlink. Host-local writes go through to the vault by POSIX symlink semantics; see DESIGN.md #48 |
