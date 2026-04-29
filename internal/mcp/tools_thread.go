@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
@@ -39,12 +38,11 @@ func rejectCarriedForwardReplace(slug string) error {
 
 // threadWriteResult is the JSON shape returned by all vv_thread_* tools.
 type threadWriteResult struct {
-	VaultPath          string `json:"vault_path"`
-	ProjectPath        string `json:"project_path"`
-	BytesWritten       int    `json:"bytes_written"`
-	Position           string `json:"position,omitempty"`
-	Slug               string `json:"slug,omitempty"`
-	CandidatesWarning  string `json:"candidates_warning,omitempty"`
+	VaultPath    string `json:"vault_path"`
+	ProjectPath  string `json:"project_path"`
+	BytesWritten int    `json:"bytes_written"`
+	Position     string `json:"position,omitempty"`
+	Slug         string `json:"slug,omitempty"`
 }
 
 // readResume reads resume.md for a project and returns its content + abs path.
@@ -65,7 +63,7 @@ func readResume(cfg config.Config, project string) (content, absPath string, err
 }
 
 // writeResume atomically writes updated resume content and returns the result JSON.
-func writeResume(cfg config.Config, absPath, project, updated, slug, positionLabel string, warning string) (string, error) {
+func writeResume(cfg config.Config, absPath, project, updated, slug, positionLabel string) (string, error) {
 	if err := mdutil.AtomicWriteFile(absPath, []byte(updated), 0o644); err != nil {
 		return "", fmt.Errorf("write resume: %w", err)
 	}
@@ -78,31 +76,11 @@ func writeResume(cfg config.Config, absPath, project, updated, slug, positionLab
 	if positionLabel != "" {
 		res.Position = positionLabel
 	}
-	if warning != "" {
-		res.CandidatesWarning = warning
-	}
 	data, err := json.MarshalIndent(res, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("marshal result: %w", err)
 	}
 	return string(data) + "\n", nil
-}
-
-// extractCandidatesWarning splits the candidates_warning prefix from the
-// modified document returned by ReplaceSubsectionBody / RemoveSubsection.
-// Returns (doc, warningDetail) where warningDetail is non-empty only when
-// a "candidates_warning:" prefix is present.
-func extractCandidatesWarning(s string) (doc, warning string) {
-	const pfx = "candidates_warning:"
-	if !strings.HasPrefix(s, pfx) {
-		return s, ""
-	}
-	rest := s[len(pfx):]
-	nl := strings.Index(rest, "\n")
-	if nl < 0 {
-		return rest, ""
-	}
-	return rest[nl+1:], rest[:nl]
 }
 
 // NewThreadInsertTool creates the vv_thread_insert tool.
@@ -190,7 +168,7 @@ func NewThreadInsertTool(cfg config.Config) Tool {
 			if args.Position.AnchorSlug != "" {
 				posLabel = args.Position.Mode + ":" + args.Position.AnchorSlug
 			}
-			return writeResume(cfg, absPath, project, updated, args.Slug, posLabel, "")
+			return writeResume(cfg, absPath, project, updated, args.Slug, posLabel)
 		},
 	}
 }
@@ -253,13 +231,14 @@ func NewThreadReplaceTool(cfg config.Config) Tool {
 				return "", err
 			}
 
-			raw, err := mdutil.ReplaceSubsectionBody(content, openThreadsSection, args.Slug, args.Body)
+			updated, err := mdutil.ReplaceSubsectionBody(content, openThreadsSection, args.Slug, args.Body)
 			if err != nil {
+				// Direction-C D9: multi-match is now a hard error; the err
+				// branch catches it directly. No more candidates_warning
+				// prefix to extract.
 				return "", err
 			}
-
-			updated, warning := extractCandidatesWarning(raw)
-			return writeResume(cfg, absPath, project, updated, args.Slug, "", warning)
+			return writeResume(cfg, absPath, project, updated, args.Slug, "")
 		},
 	}
 }
@@ -313,13 +292,12 @@ func NewThreadRemoveTool(cfg config.Config) Tool {
 				return "", err
 			}
 
-			raw, err := mdutil.RemoveSubsection(content, openThreadsSection, args.Slug)
+			updated, err := mdutil.RemoveSubsection(content, openThreadsSection, args.Slug)
 			if err != nil {
+				// Direction-C D9: multi-match is now a hard error.
 				return "", err
 			}
-
-			updated, warning := extractCandidatesWarning(raw)
-			return writeResume(cfg, absPath, project, updated, args.Slug, "", warning)
+			return writeResume(cfg, absPath, project, updated, args.Slug, "")
 		},
 	}
 }

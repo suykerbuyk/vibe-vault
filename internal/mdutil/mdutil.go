@@ -167,9 +167,9 @@ var htmlCommentLineRE = func() func(string) bool {
 // Rules:
 //   - Zero matches → error listing all available slugs.
 //   - One match → replace silently; return (modifiedDoc, nil).
-//   - Multiple matches → replace first occurrence; the returned string contains
-//     a "candidates_warning" prefix — callers that care may strip it, but the
-//     doc value itself is always the modified document (err remains nil).
+//   - Multiple matches → hard error (Direction-C D9: ambiguity is a
+//     pre-write structural failure, not a post-hoc warning). The returned
+//     error lists the candidate slugs to help the operator disambiguate.
 //
 // The newBody must NOT include the ### heading line. The function re-emits the
 // original heading line verbatim.
@@ -212,6 +212,16 @@ func ReplaceSubsectionBody(doc, parentHeading, subHeading, newBody string) (stri
 		available := subheadingSlugs(lines, parentStart, parentEnd)
 		return "", fmt.Errorf("slug %q not found in %s; available: %v", subHeading, parentHeading, available)
 	}
+	if len(matches) > 1 {
+		// Direction-C D9: ambiguity is a pre-write structural failure.
+		var candidateSlugs []string
+		for _, mm := range matches {
+			candidateSlugs = append(candidateSlugs, NormalizeSubheadingSlug(
+				strings.TrimPrefix(strings.TrimSpace(lines[mm.headLineIdx]), "### ")))
+		}
+		return "", fmt.Errorf("slug %q ambiguous in %s: %d matches (candidates: %s); resolve duplicates before retrying",
+			subHeading, parentHeading, len(matches), strings.Join(candidateSlugs, ","))
+	}
 
 	m := matches[0]
 
@@ -231,17 +241,7 @@ func ReplaceSubsectionBody(doc, parentHeading, subHeading, newBody string) (stri
 	result = append(result, "")
 	result = append(result, lines[m.bodyEnd:]...)
 
-	out := strings.Join(result, "\n")
-	if len(matches) > 1 {
-		// Multiple matches: warn via a prefix that the tool layer will surface.
-		var candidateSlugs []string
-		for _, mm := range matches {
-			candidateSlugs = append(candidateSlugs, NormalizeSubheadingSlug(
-				strings.TrimPrefix(strings.TrimSpace(lines[mm.headLineIdx]), "### ")))
-		}
-		return "candidates_warning:" + strings.Join(candidateSlugs, ",") + "\n" + out, nil
-	}
-	return out, nil
+	return strings.Join(result, "\n"), nil
 }
 
 // InsertPosition describes where inside a ## parent section a new ### block
@@ -349,7 +349,9 @@ func InsertSubsection(doc, parentHeading string, pos InsertPosition, subHeading,
 //
 //   - Zero matches → error.
 //   - One match → remove silently.
-//   - Multiple matches → remove first occurrence; warning encoded in returned string.
+//   - Multiple matches → hard error (Direction-C D9: ambiguity is a
+//     pre-write structural failure, not a post-hoc warning). The returned
+//     error lists the candidate slugs to help the operator disambiguate.
 func RemoveSubsection(doc, parentHeading, subHeading string) (string, error) {
 	lines := strings.Split(doc, "\n")
 
@@ -382,6 +384,16 @@ func RemoveSubsection(doc, parentHeading, subHeading string) (string, error) {
 		available := subheadingSlugs(lines, parentStart, parentEnd)
 		return "", fmt.Errorf("slug %q not found in %s; available: %v", subHeading, parentHeading, available)
 	}
+	if len(matches) > 1 {
+		// Direction-C D9: ambiguity is a pre-write structural failure.
+		var candidateSlugs []string
+		for _, mm := range matches {
+			candidateSlugs = append(candidateSlugs, NormalizeSubheadingSlug(
+				strings.TrimPrefix(strings.TrimSpace(lines[mm.headLineIdx]), "### ")))
+		}
+		return "", fmt.Errorf("slug %q ambiguous in %s: %d matches (candidates: %s); resolve duplicates before retrying",
+			subHeading, parentHeading, len(matches), strings.Join(candidateSlugs, ","))
+	}
 
 	m := matches[0]
 
@@ -400,16 +412,7 @@ func RemoveSubsection(doc, parentHeading, subHeading string) (string, error) {
 	}
 	result = append(result, lines[m.bodyEnd:]...)
 
-	out := strings.Join(result, "\n")
-	if len(matches) > 1 {
-		var candidateSlugs []string
-		for _, mm := range matches {
-			candidateSlugs = append(candidateSlugs, NormalizeSubheadingSlug(
-				strings.TrimPrefix(strings.TrimSpace(lines[mm.headLineIdx]), "### ")))
-		}
-		return "candidates_warning:" + strings.Join(candidateSlugs, ",") + "\n" + out, nil
-	}
-	return out, nil
+	return strings.Join(result, "\n"), nil
 }
 
 // AtomicWriteFile writes data to path via a temp file + rename for crash safety.
@@ -445,6 +448,105 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	}
 	tmpPath = ""
 	return nil
+}
+
+// CountSubsectionMatches counts the number of ### sub-heading slugs that
+// match the given normalized slug inside the named ## parent section. The
+// slug comparison uses NormalizeSubheadingSlug on both sides so the
+// caller's `slug` argument is treated identically to the renderer.
+//
+// Returns 0 when the parent section is missing.
+func CountSubsectionMatches(doc, parentHeading, slug string) int {
+	lines := strings.Split(doc, "\n")
+	parentStart, parentEnd := findParentSection(lines, parentHeading)
+	if parentStart == -1 {
+		return 0
+	}
+	target := NormalizeSubheadingSlug(slug)
+	count := 0
+	for i := parentStart + 1; i < parentEnd; i++ {
+		line := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(line, "### ") {
+			s := NormalizeSubheadingSlug(strings.TrimPrefix(line, "### "))
+			if s == target {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// CountAllSubsectionSlugs returns a map from normalized slug → count of
+// occurrences for every ### sub-heading inside the named ## parent
+// section. excludeSlug is treated as a normalized slug to skip (used by
+// callers that own a specific slug via a separate API — e.g. the
+// "Carried forward" sub-heading is not counted as a thread). Pass "" to
+// count everything.
+//
+// Returns an empty map when the parent section is missing.
+func CountAllSubsectionSlugs(doc, parentHeading, excludeSlug string) map[string]int {
+	out := make(map[string]int)
+	lines := strings.Split(doc, "\n")
+	parentStart, parentEnd := findParentSection(lines, parentHeading)
+	if parentStart == -1 {
+		return out
+	}
+	excl := NormalizeSubheadingSlug(excludeSlug)
+	for i := parentStart + 1; i < parentEnd; i++ {
+		line := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(line, "### ") {
+			slug := NormalizeSubheadingSlug(strings.TrimPrefix(line, "### "))
+			if excludeSlug != "" && slug == excl {
+				continue
+			}
+			out[slug]++
+		}
+	}
+	return out
+}
+
+// CountCarriedSlugsIn returns a map from lowercased carried-forward slug
+// to occurrence count inside the named ### Carried forward sub-section
+// of the given ## parent heading. Returns an empty map when either
+// section is missing.
+//
+// The ported counterpart of internal/mcp/tools_quality_check.go's
+// countCarriedSlugs (Direction-C D9: lifted into mdutil so the helper
+// survives the Phase 4 retirement of tools_quality_check.go).
+func CountCarriedSlugsIn(doc, parentHeading, carriedHeading string) map[string]int {
+	out := make(map[string]int)
+	lines := strings.Split(doc, "\n")
+	parentStart, parentEnd := findParentSection(lines, parentHeading)
+	if parentStart == -1 {
+		return out
+	}
+	target := NormalizeSubheadingSlug(carriedHeading)
+	cfStart := -1
+	cfEnd := parentEnd
+	for i := parentStart + 1; i < parentEnd; i++ {
+		line := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(line, "### ") {
+			slug := NormalizeSubheadingSlug(strings.TrimPrefix(line, "### "))
+			if slug == target {
+				cfStart = i
+				for j := i + 1; j < parentEnd; j++ {
+					if strings.HasPrefix(strings.TrimSpace(lines[j]), "### ") {
+						cfEnd = j
+						break
+					}
+				}
+				break
+			}
+		}
+	}
+	if cfStart == -1 {
+		return out
+	}
+	body := strings.Join(lines[cfStart+1:cfEnd], "\n")
+	for _, b := range ParseCarriedForward(body) {
+		out[strings.ToLower(b.Slug)]++
+	}
+	return out
 }
 
 var stopWords = map[string]bool{
