@@ -12,14 +12,14 @@ import (
 )
 
 // anthropicHTTPCore holds the shared HTTP plumbing for Anthropic Messages API
-// callers. Both the single-turn Anthropic provider and the multi-turn
-// AnthropicAgentic provider embed *anthropicHTTPCore so they share connection
-// management, header construction, and endpoint routing in one place.
+// callers. The single-turn Anthropic provider embeds *anthropicHTTPCore so a
+// future agentic / multi-turn variant can share the same connection
+// management, header construction, and endpoint routing.
 //
 // The core is intentionally body-agnostic: callers marshal the request body
-// (single-turn vs. tool-use are wire-format-different) and parse the response
-// body themselves. The core is responsible only for wrapping a []byte payload
-// in an HTTP request with the correct headers and dispatching it.
+// and parse the response body themselves. The core is responsible only for
+// wrapping a []byte payload in an HTTP request with the correct headers and
+// dispatching it.
 type anthropicHTTPCore struct {
 	baseURL string
 	apiKey  string
