@@ -2429,29 +2429,48 @@ Key architectural and design decisions in vibe-vault, with rationale.
     starts at `.vibe-vault/last-iter` only.** Decision #93's
     mechanical iter anchor produces a wrap commit per cycle whose
     sole project-side change is a single integer written to
-    `.vibe-vault/last-iter`. Routing every such commit through a
-    full PR with ~9 minutes of Test + Lint adds friction without
-    correctness benefit; the diff carries no Go, no docs, no
-    config that affects build output.
+    `.vibe-vault/last-iter`. Subjecting every such commit's PR to
+    ~9 minutes of Test + Lint adds friction without correctness
+    benefit; the diff carries no Go, no docs, no config that
+    affects build output.
 
     **Decision.** `.github/workflows/ci.yml` introduces a leading
     `detect-admin-commit` job that checks whether the diff is
     contained within an allowlist of administrative paths. When
     so, the `Test` and `Lint` jobs short-circuit to success in
     20-40 seconds (cold-start + full clone + early-exit, dominated
-    by runner provisioning), satisfying the branch protection's
-    named status checks without running the substantive build.
-    The allowlist starts at `.vibe-vault/last-iter` only.
+    by runner provisioning) instead of the ~9 minutes a substantive
+    build takes. The named status checks the branch protection
+    requires are still produced — just quickly — and are still
+    consumed via the standard PR-merge path. The bypass shortens
+    the substantive build; it does not remove the PR. The allowlist
+    starts at `.vibe-vault/last-iter` only.
 
     **Why.** Wrap commits under DESIGN #93 produce single-file
     changes to the iter stamp file that the CI cannot meaningfully
     validate (no Go code touched, no documentation, no
-    configuration that affects build output). Routing every wrap
-    through a full PR cycle adds ~9 minutes of CI wall-clock plus
-    PR-management overhead per iter, with no correctness benefit.
-    The path-conditional bypass keeps protection in place for
-    substantive changes while removing the friction for
-    administrative ones.
+    configuration that affects build output). The bypass eliminates
+    the ~9 minutes of CI wall-clock per stamp-only PR (replaced
+    with ~20 seconds of admin-only short-circuit), but the PR
+    pattern itself remains in place because branch protection's
+    `required_status_checks: strict: true` runs PRE-push and won't
+    accept commits whose required checks haven't already passed on
+    a prior CI run. The path-conditional bypass keeps protection
+    in place for substantive changes while making the CI cost on
+    administrative ones negligible.
+
+    **Why a fast PR path, not a no-PR path.** GitHub branch
+    protection's strict required-status-checks setting demands the
+    named checks have already passed on a prior CI run before
+    accepting a push or merge. CI workflows run AFTER push/PR
+    creation. So a "direct push to main" pattern would require
+    disabling strict required-status-checks (or adopting Repository
+    Rulesets path-conditional bypass, Option B in the original task
+    plan), neither of which is in scope for DESIGN #94. The bypass
+    scope is therefore: keep the PR pattern, make the CI cost on
+    stamp-only PRs negligible. Verified live via PR #22 (21s
+    end-to-end) and PR #23 (17s end-to-end) — the operational
+    improvement is real even though the PR step remains.
 
     **Why CI-level, not branch-protection-level.** GitHub's legacy
     branch protection (currently in use on this repo) doesn't

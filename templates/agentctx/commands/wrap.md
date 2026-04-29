@@ -206,38 +206,34 @@ session capture.
   or `git add .`.
 - `git commit -F commit.msg` — uses the file written by
   `vv_set_commit_msg`.
-- `git push` decision tree (DESIGN #94's CI bypass):
+- `git push <remote> <feature-branch>` per the project's
+  branch-protection configuration. Every wrap commit goes through
+  a feature branch + PR; there is no direct-push-to-main path
+  under current branch protection (`required_status_checks: strict:
+  true` runs PRE-push and rejects any commit lacking a prior CI
+  pass).
 
-  Compute the wrap-commit's diff:
+  CI cost on the resulting PR depends on what the wrap commit
+  touches. Operator predictor:
 
       git diff --name-only HEAD~1 HEAD
 
   - If the diff lists ONLY `.vibe-vault/last-iter` (the
-    `bookkeeping`-shape inaugural-stamp pattern), push directly to
-    `main`:
+    `bookkeeping`-shape stamp-only pattern), the PR's CI completes
+    in ~20 seconds — DESIGN #94's `detect-admin-commit` job
+    classifies as `admin=true` and short-circuits `Test` + `Lint`
+    to success.
 
-        git push <remote> main
-
-    The CI's `detect-admin-commit` job classifies this as
-    admin-only and short-circuits `Test` + `Lint` to success in
-    20-40 seconds; branch protection is satisfied without a PR.
-
-  - Otherwise (the diff includes ANY non-stamp file), push to a
-    feature branch and let the operator open a PR:
-
-        git push <remote> <feature-branch>
-
-    Standard PR pattern — full CI runs, operator reviews and
-    merges. Applies to all `fresh-feature` and `planning` wraps
-    by definition (those shapes always have non-stamp changes:
-    code, tasks, docs, etc.).
+  - Otherwise (the diff includes ANY non-stamp file), full Lint +
+    Test runs (~9 minutes). Standard PR pattern — operator reviews
+    and merges. Applies to all `fresh-feature` and `planning`
+    wraps by definition (those shapes always have non-stamp
+    changes: code, tasks, docs, etc.).
 
   The decision is mechanical: based on `git diff --name-only`
-  output, not on shape classification or operator judgment. A
-  `bookkeeping` wrap with the stamp ALONE goes direct; a
-  `bookkeeping` wrap that also retires a task or files a new
-  carried-forward thread (which the orchestrator may bundle in
-  the same commit) takes the PR path.
+  output, used only to predict CI duration. The PR-vs-direct
+  distinction the prior wrap.md described was incorrect — see
+  DESIGN #94 "Why a fast PR path, not a no-PR path."
 
 ### Stage 6 — Vault sync
 
