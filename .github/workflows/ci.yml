@@ -10,6 +10,107 @@ permissions:
   contents: read
 
 jobs:
+  detect-admin-commit:
+    name: Detect admin-only commit
+    runs-on: ubuntu-latest
+    outputs:
+      is_admin_only: ${{ steps.check.outputs.admin }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+      - id: check
+        shell: bash
+        run: |
+          # CRITICAL DESIGN INVARIANT: this script must always exit 0.
+          #
+          # Branch protection requires Test + Lint status checks to pass.
+          # Those jobs use `needs: detect-admin-commit`. If THIS job fails,
+          # GitHub skips the dependent jobs, and skipped required checks
+          # are treated as not-passing — which bricks every merge to main
+          # repo-wide until the workflow is fixed (and `enforce_admins:
+          # true` means even repo admins can't override).
+          #
+          # Therefore: `set +e` everywhere, every failure path falls back
+          # to admin=false (which routes to full CI — the safe default),
+          # and the script always reaches the trailing `exit 0`.
+          set +e
+
+          # Default to substantive. Any successful detection of admin-only
+          # OVERRIDES this default; any failure path leaves it as-is.
+          ADMIN=false
+          REASON="default — substantive (admin=false)"
+
+          # Allowlist of paths whose modification alone constitutes an
+          # administrative change. Each addition requires a DESIGN-decision-
+          # style justification AND a concrete second use case. Keep small.
+          ALLOWLIST=(
+            ".vibe-vault/last-iter"
+          )
+
+          # Resolve diff range. Pull-request events: base.sha..head.sha.
+          # Push events: github.event.before..github.event.after. Other
+          # events (workflow_dispatch, schedule, etc.) leave both empty —
+          # we fall through to admin=false and run full CI defensively.
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          if [ -z "$BASE" ]; then
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.event.after }}"
+          fi
+
+          # First-push edge case: github.event.before is all-zeros for the
+          # first push of a branch. Treat as substantive so CI runs full.
+          # Force-push edge case: BASE is the OLD HEAD before force, which
+          # may not be an ancestor of HEAD; the diff range may show fewer
+          # files than reality. Force-pushing stamp commits is not a
+          # supported workflow — fall through to substantive on any oddity.
+          case "$BASE" in
+            0000000000000000000000000000000000000000|"")
+              REASON="empty or zero BASE (first-push, manual dispatch, or unknown event); routing to full CI"
+              ;;
+            *)
+              CHANGED=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null)
+              if [ $? -ne 0 ] || [ -z "$CHANGED" ]; then
+                REASON="git diff failed or empty (force-push? unrelated history?); routing to full CI"
+              else
+                echo "Changed files:"
+                echo "$CHANGED" | sed 's/^/  /'
+
+                # Build a fixed-string allowlist file for grep -vxFf.
+                # Fixed-string + whole-line matching avoids regex-metachar
+                # false positives (`.` in `.vibe-vault/last-iter` would
+                # match any character under `grep -E`; `axibe-vault/...`
+                # could slip through). `-x` requires exact line match,
+                # `-F` disables regex, `-f file` reads patterns from file.
+                ALLOWLIST_FILE=$(mktemp 2>/dev/null)
+                if [ -z "$ALLOWLIST_FILE" ]; then
+                  REASON="mktemp failed; routing to full CI"
+                else
+                  printf '%s\n' "${ALLOWLIST[@]}" > "$ALLOWLIST_FILE"
+                  OUT_OF_LIST=$(echo "$CHANGED" | grep -vxFf "$ALLOWLIST_FILE")
+                  rm -f "$ALLOWLIST_FILE"
+
+                  if [ -z "$OUT_OF_LIST" ]; then
+                    ADMIN=true
+                    REASON="all changes within admin allowlist; bypass active"
+                  else
+                    REASON="out-of-allowlist files present; routing to full CI"
+                    echo "Out-of-list files:"
+                    echo "$OUT_OF_LIST" | sed 's/^/  /'
+                  fi
+                fi
+              fi
+              ;;
+          esac
+
+          echo "Decision: admin=$ADMIN ($REASON)"
+          echo "admin=$ADMIN" >> "$GITHUB_OUTPUT"
+
+          # Defensive: regardless of any prior path, this job exits 0.
+          # See top-of-script invariant.
+          exit 0
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
