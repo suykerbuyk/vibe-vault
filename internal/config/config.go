@@ -52,22 +52,31 @@ type ProviderConfig struct {
 
 // WrapConfig holds the [wrap] section of config.toml.
 //
-// Phase 4 of wrap-model-tiering lifts tier→model resolution from a hardcoded
-// map in internal/mcp/tools_wrap_dispatch.go into operator-controlled config.
+// Phase 4 of wrap-model-tiering lifted tier→model resolution from a
+// hardcoded map in internal/mcp/tools_wrap_dispatch.go into operator-
+// controlled config. Direction-C (the wrap-pipeline-collapse epic)
+// retires the multi-tier escalation ladder: callers pick a tier per-call
+// and re-run with --tier=opus if a haiku/sonnet output is poor (no
+// auto-escalation).
 //
-// DefaultModel is the tier label /wrap starts with when no flag overrides it.
-// EscalationLadder is walked starting at DefaultModel; each entry must appear
-// as a key in Tiers. Tiers maps a tier label (e.g. "sonnet") to a
-// "provider:model" string (e.g. "anthropic:claude-sonnet-4-6"). v1 supports
-// only the "anthropic:" provider; Validate enforces this fail-fast at load.
+// DefaultModel is the tier label /wrap uses when no flag overrides it.
+// Tiers maps a tier label (e.g. "sonnet") to a "provider:model" string
+// (e.g. "anthropic:claude-sonnet-4-6"). v1 supports only the
+// "anthropic:" provider; Validate enforces this fail-fast at load.
 //
-// When the [wrap] section is absent from config.toml, Load() pre-populates
-// the three default tiers and DefaultModel="opus" — preserving the iter-157
-// inline-Opus behavior.
+// When the [wrap] section is absent from config.toml, Load() pre-
+// populates the three default tiers and DefaultModel="opus" —
+// preserving the iter-157 inline-Opus behavior.
+//
+// Direction-C D5: the legacy [wrap].escalation_ladder TOML key is
+// deprecated. Load() emits a stderr warning when it is encountered
+// (Q6 decision); the value is otherwise discarded. Removing the
+// struct field is forward-compat with BurntSushi/toml's permissive
+// decoder (audit-confirmed at config.go's Load() — never calls
+// MetaData.Undecoded()).
 type WrapConfig struct {
-	DefaultModel     string            `toml:"default_model"`     // e.g. "sonnet" / "opus" / "haiku"
-	EscalationLadder []string          `toml:"escalation_ladder"` // e.g. ["sonnet", "opus"]
-	Tiers            map[string]string `toml:"tiers"`             // tier name -> "provider:model"
+	DefaultModel string            `toml:"default_model"` // e.g. "sonnet" / "opus" / "haiku"
+	Tiers        map[string]string `toml:"tiers"`         // tier name -> "provider:model"
 }
 
 // SynthesisConfig controls the end-of-session synthesis agent.
@@ -204,8 +213,7 @@ func DefaultConfig() Config {
 			TimeoutSeconds: 60,
 		},
 		Wrap: WrapConfig{
-			DefaultModel:     "opus",
-			EscalationLadder: []string{},
+			DefaultModel: "opus",
 			Tiers: map[string]string{
 				"haiku":  "anthropic:claude-haiku-4-5",
 				"sonnet": "anthropic:claude-sonnet-4-6",
@@ -221,19 +229,16 @@ func DefaultConfig() Config {
 var wrapTierValueRe = regexp.MustCompile(`^[a-z]+:.+$`)
 
 // Validate checks the configuration for internal consistency.
-// Currently it covers the Wrap section: DefaultModel and EscalationLadder
-// must reference defined tiers, and each tier value must use a supported
-// provider prefix. Returns nil when the configuration is well-formed.
+// Currently it covers the Wrap section: DefaultModel must reference a
+// defined tier, and each tier value must use a supported provider
+// prefix. Returns nil when the configuration is well-formed.
 func (c Config) Validate() error {
 	// Wrap.Tiers may legitimately be empty (e.g. when the operator opts out
-	// of vv_wrap_dispatch entirely); skip wrap validation in that case.
+	// of wrap entirely); skip wrap validation in that case.
 	if len(c.Wrap.Tiers) == 0 {
 		if c.Wrap.DefaultModel != "" {
 			return fmt.Errorf("[wrap] default_model %q set but [wrap.tiers] is empty",
 				c.Wrap.DefaultModel)
-		}
-		if len(c.Wrap.EscalationLadder) > 0 {
-			return fmt.Errorf("[wrap] escalation_ladder set but [wrap.tiers] is empty")
 		}
 		return nil
 	}
@@ -259,13 +264,13 @@ func (c Config) Validate() error {
 		}
 	}
 
-	for _, tier := range c.Wrap.EscalationLadder {
-		if _, ok := c.Wrap.Tiers[tier]; !ok {
-			return fmt.Errorf("[wrap] escalation_ladder references undefined tier %q",
-				tier)
-		}
-	}
 	return nil
+}
+
+// deprecationWarner is the test seam used to capture deprecation
+// warnings in tests. Production writes to os.Stderr.
+var deprecationWarner = func(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format, args...)
 }
 
 // Load reads config from the standard path, falling back to defaults.
@@ -275,8 +280,21 @@ func Load() (Config, error) {
 	paths := configPaths()
 	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {
-			if _, err := toml.DecodeFile(p, &cfg); err != nil {
+			md, err := toml.DecodeFile(p, &cfg)
+			if err != nil {
 				return cfg, fmt.Errorf("parse config %s: %w", p, err)
+			}
+			// Direction-C D5: warn when the legacy
+			// [wrap].escalation_ladder key is present. The value is
+			// silently discarded by the struct-decode (the field
+			// no longer exists); the warning helps operators clean
+			// up legacy config without surprise behavior change.
+			if md.IsDefined("wrap", "escalation_ladder") {
+				deprecationWarner(
+					"vibe-vault: warning: [wrap].escalation_ladder is "+
+						"deprecated (retired in Direction-C wrap pipeline "+
+						"collapse) and is now ignored — remove from %s "+
+						"to silence this warning\n", p)
 			}
 			break
 		}
@@ -421,11 +439,10 @@ func (c Config) Overlay(projectConfigPath string) Config {
 	if md.IsDefined("wrap", "default_model") {
 		c.Wrap.DefaultModel = overlay.Wrap.DefaultModel
 	}
-	if md.IsDefined("wrap", "escalation_ladder") {
-		// Slice replacement: matches the existing Pricing.Models pattern
-		// at line ~290. Operators express the full ladder explicitly.
-		c.Wrap.EscalationLadder = overlay.Wrap.EscalationLadder
-	}
+	// Direction-C D5: [wrap].escalation_ladder is retired. Project-
+	// local overlays that still set it are silently ignored (the
+	// struct field no longer exists); Load() emits a stderr warning
+	// for the user-level config so operators learn about the rename.
 	if md.IsDefined("wrap", "tiers") {
 		// H3-v3: map MERGE semantics, not whole-replacement. The Load()
 		// path gets this for free from BurntSushi/toml's automatic map
