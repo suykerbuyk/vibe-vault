@@ -2530,3 +2530,58 @@ Key architectural and design decisions in vibe-vault, with rationale.
     per the allowlist policy above; migration to Repository
     Rulesets path-conditioning would supersede the workflow-level
     bypass entirely.
+
+95. **Clock-injection seam in `internal/zed/` for deterministic
+    debounce tests.** `internal/zed/clock.go` introduces a `Clock`
+    interface with one method (`AfterFunc(d time.Duration, f func()) Stoppable`)
+    and a `Stoppable` interface with one method (`Stop() bool` —
+    matches `*time.Timer.Stop()` so `realClock` can return a
+    `*time.Timer` directly without an adapter). Production passes
+    `realClock{}` (default when `WatcherConfig.Clock == nil`); tests
+    pass a `fakeClock` (in `clock_test.go`) that advances on demand
+    and tracks registration count for synchronization. `fakeTimer`
+    holds a back-pointer to its parent clock so `Stop()` acquires
+    the same mutex `Advance()` uses, serializing the two against
+    each other.
+
+    **Why.** Pre-existing flake `TestWatch_DebounceResetsOnRepeated-
+    Writes` (`internal/zed/watcher_test.go:61`, surfaced PR #18) was
+    timing-dependent on real-time `time.Sleep` between writes vs a
+    200ms debounce window. CI scheduler hiccups >150ms split one
+    expected callback fire into two. Two sibling tests
+    (`DebounceFiresAfterQuiet`, `IgnoresNonWALWrites`) had latent
+    same-category flake potential and are converted in the same
+    commit. `TestWatch_ContextCancellation` is left untouched: it
+    doesn't bracket a debounce window, so a fake-clock variant
+    earns nothing.
+
+    **Steady-state sync.** Test conversions use
+    `waitForCondition(Pending()==1 && Registered()>=N)` rather than
+    immediate `assert Pending()==1` to absorb fsnotify multi-event
+    delivery (Linux `os.WriteFile`'s `O_TRUNC + Write` produces 1–2
+    `IN_MODIFY` events per call) and to avoid observing the
+    transient `Pending()==0` between the watcher's `Stop()` and
+    `AfterFunc()` calls (two non-atomic statements at
+    `watcher.go:71-74`).
+
+    **Scope.** Single package, single timing primitive. The seam
+    is intentionally narrow — generalizing to `internal/clock/` for
+    cross-package use is deferred until a second package needs it.
+
+    **Alternatives rejected.** Real-time margin bump doesn't
+    eliminate the flake category — flakes return on slower
+    runners. Channel synchronization doesn't address the wall-clock
+    dependence inherent to debounce semantics. An earlier
+    plan-revision had `fakeTimer.Stop()` mutating `cancelled`/
+    `fired` without the back-pointer mutex; rejected during
+    review-plan as a data race against `Advance()`, even though the
+    project's CI doesn't currently run `-race`.
+
+    Source: `internal/zed/clock.go` + `internal/zed/clock_test.go`
+    + `internal/zed/watcher.go` (commit `92db838`); test
+    conversions in `internal/zed/watcher_test.go` (commit
+    `4f0eb62`). Re-open conditions: a second package needs the
+    Clock seam (lift to `internal/clock/`); CI gains `-race` and a
+    new helper-side race regresses; or a debounce-bracketing test
+    not currently in scope is added and starts flaking — fold the
+    same conversion pattern in.
