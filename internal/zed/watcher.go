@@ -18,6 +18,7 @@ type WatcherConfig struct {
 	DBPath   string        // path to threads.db
 	Debounce time.Duration // quiet period before firing (default 5m)
 	Logger   *log.Logger
+	Clock    Clock
 }
 
 // Watch monitors the Zed threads database directory for WAL writes.
@@ -29,6 +30,9 @@ func Watch(ctx context.Context, cfg WatcherConfig, onChange func()) error {
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = log.Default()
+	}
+	if cfg.Clock == nil {
+		cfg.Clock = realClock{}
 	}
 
 	watcher, err := fsnotify.NewWatcher()
@@ -44,8 +48,9 @@ func Watch(ctx context.Context, cfg WatcherConfig, onChange func()) error {
 
 	walBase := filepath.Base(cfg.DBPath) + "-wal"
 
-	var timer *time.Timer
+	var timer Stoppable
 	defer func() {
+		// interface-nil: timer is nil iff zero interface (no AfterFunc call yet)
 		if timer != nil {
 			timer.Stop()
 		}
@@ -71,7 +76,7 @@ func Watch(ctx context.Context, cfg WatcherConfig, onChange func()) error {
 			if timer != nil {
 				timer.Stop()
 			}
-			timer = time.AfterFunc(cfg.Debounce, onChange)
+			timer = cfg.Clock.AfterFunc(cfg.Debounce, onChange)
 
 		case err, ok := <-watcher.Errors:
 			if !ok {
