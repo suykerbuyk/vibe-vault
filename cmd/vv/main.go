@@ -778,10 +778,21 @@ func runVault() {
 	cfg := mustLoadConfig()
 
 	switch args[0] {
+	case "merge-driver":
+		// Internal subcommand invoked by git as the vv-surface merge driver.
+		// No help, no surface gate, no auto-install — just resolve.
+		runVaultMergeDriver(args[1:])
+		return
+
 	case "status":
 		if wantsHelp(args[1:]) {
 			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVaultStatus))
 			return
+		}
+		if !hasFlag(args[1:], "--no-install-merge-driver") {
+			if _, err := EnsureMergeDriverInstalled(cfg.VaultPath); err != nil {
+				log.Printf("warning: merge-driver auto-install: %v", err)
+			}
 		}
 		s, err := vaultsync.GetStatus(cfg.VaultPath)
 		if err != nil {
@@ -805,6 +816,11 @@ func runVault() {
 		if wantsHelp(args[1:]) {
 			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVaultPull))
 			return
+		}
+		if !hasFlag(args[1:], "--no-install-merge-driver") {
+			if _, err := EnsureMergeDriverInstalled(cfg.VaultPath); err != nil {
+				log.Printf("warning: merge-driver auto-install: %v", err)
+			}
 		}
 		result, err := vaultsync.Pull(cfg.VaultPath)
 		if err != nil {
