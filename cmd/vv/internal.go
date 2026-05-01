@@ -22,11 +22,18 @@ const internalUsage = `Usage: vv internal <subcommand> [flags]
 Operator-internal commands. Not part of the user-facing surface.
 
 Subcommands:
-  generate-agents    Regenerate .claude/agents/<name>.md files from the
-                     embedded agentregistry catalogue.
+  generate-agents       Regenerate .claude/agents/<name>.md files from the
+                        embedded agentregistry catalogue.
+  verify-tool-surface   Verify the live MCP tool inventory matches the
+                        golden manifest at internal/mcp/tool_surface.golden.json.
 
 Flags for generate-agents:
-  --out-dir <dir>    Output directory (default: .claude/agents).
+  --out-dir <dir>       Output directory (default: .claude/agents).
+
+Flags for verify-tool-surface:
+  --update-golden       Refresh the golden manifest. Requires
+                        MCPSurfaceVersion to have been bumped past the
+                        recorded golden surface.
 `
 
 // runInternal dispatches `vv internal <subcommand>`.
@@ -43,6 +50,8 @@ func runInternal() {
 	switch args[0] {
 	case "generate-agents":
 		runInternalGenerateAgents(args[1:])
+	case "verify-tool-surface":
+		runInternalVerifyToolSurface(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown internal command: %s\n", args[0])
 		fmt.Fprint(os.Stderr, internalUsage)
