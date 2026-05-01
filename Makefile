@@ -83,8 +83,11 @@ uninstall: ## Remove installed binary and man pages
 	@echo "Uninstalled $(BINARY) from $(BINDIR)"
 
 ##@ Workflow
-.PHONY: pre-commit hooks
-pre-commit: vet lint test integration ## Run vet + lint + test + integration (pre-commit check)
+.PHONY: pre-commit hooks verify-tool-surface
+pre-commit: vet lint test integration build verify-tool-surface ## Run vet + lint + test + integration + tool-surface verifier (pre-commit check)
+
+verify-tool-surface: build ## Verify the live MCP tool inventory matches internal/mcp/tool_surface.golden.json
+	./$(BINARY) internal verify-tool-surface
 
 hooks: ## Configure git hooks path
 	git config core.hooksPath .githooks

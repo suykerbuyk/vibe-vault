@@ -1,0 +1,234 @@
+{
+  "surface_version": 11,
+  "tools": [
+    {
+      "name": "vv_append_iteration",
+      "required_inputs": [
+        "narrative",
+        "title"
+      ]
+    },
+    {
+      "name": "vv_bootstrap_context",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_capture_session",
+      "required_inputs": [
+        "summary"
+      ]
+    },
+    {
+      "name": "vv_carried_add",
+      "required_inputs": [
+        "slug",
+        "title"
+      ]
+    },
+    {
+      "name": "vv_carried_promote_to_task",
+      "required_inputs": [
+        "new_task_slug",
+        "slug"
+      ]
+    },
+    {
+      "name": "vv_carried_remove",
+      "required_inputs": [
+        "slug"
+      ]
+    },
+    {
+      "name": "vv_describe_iter_state",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_get_agent_definition",
+      "required_inputs": [
+        "name"
+      ]
+    },
+    {
+      "name": "vv_get_effectiveness",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_get_friction_trends",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_get_iterations",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_get_knowledge",
+      "required_inputs": [
+        "project"
+      ]
+    },
+    {
+      "name": "vv_get_learning",
+      "required_inputs": [
+        "slug"
+      ]
+    },
+    {
+      "name": "vv_get_project_context",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_get_project_root",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_get_resume",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_get_session_detail",
+      "required_inputs": [
+        "date",
+        "project"
+      ]
+    },
+    {
+      "name": "vv_get_task",
+      "required_inputs": [
+        "task"
+      ]
+    },
+    {
+      "name": "vv_get_workflow",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_list_learnings",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_list_projects",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_list_tasks",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_manage_task",
+      "required_inputs": [
+        "action",
+        "task"
+      ]
+    },
+    {
+      "name": "vv_refresh_index",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_render_wrap_text",
+      "required_inputs": [
+        "iter_state",
+        "kind",
+        "project_name",
+        "tier"
+      ]
+    },
+    {
+      "name": "vv_search_sessions",
+      "required_inputs": null
+    },
+    {
+      "name": "vv_set_commit_msg",
+      "required_inputs": [
+        "content",
+        "project_path"
+      ]
+    },
+    {
+      "name": "vv_stamp_iter",
+      "required_inputs": [
+        "iter",
+        "project_path"
+      ]
+    },
+    {
+      "name": "vv_thread_insert",
+      "required_inputs": [
+        "body",
+        "position",
+        "slug"
+      ]
+    },
+    {
+      "name": "vv_thread_remove",
+      "required_inputs": [
+        "slug"
+      ]
+    },
+    {
+      "name": "vv_thread_replace",
+      "required_inputs": [
+        "body",
+        "slug"
+      ]
+    },
+    {
+      "name": "vv_update_resume",
+      "required_inputs": [
+        "content",
+        "section"
+      ]
+    },
+    {
+      "name": "vv_vault_delete",
+      "required_inputs": [
+        "path"
+      ]
+    },
+    {
+      "name": "vv_vault_edit",
+      "required_inputs": [
+        "old_string",
+        "path"
+      ]
+    },
+    {
+      "name": "vv_vault_exists",
+      "required_inputs": [
+        "path"
+      ]
+    },
+    {
+      "name": "vv_vault_list",
+      "required_inputs": [
+        "path"
+      ]
+    },
+    {
+      "name": "vv_vault_move",
+      "required_inputs": [
+        "from_path",
+        "to_path"
+      ]
+    },
+    {
+      "name": "vv_vault_read",
+      "required_inputs": [
+        "path"
+      ]
+    },
+    {
+      "name": "vv_vault_sha256",
+      "required_inputs": [
+        "path"
+      ]
+    },
+    {
+      "name": "vv_vault_write",
+      "required_inputs": [
+        "content",
+        "path"
+      ]
+    }
+  ]
+}
