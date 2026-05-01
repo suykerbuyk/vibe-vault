@@ -2,21 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 // Package atomicfile provides an atomic file write primitive shared across
-// vibe-vault internals. Phase 1a will extend Write with stamp-on-success
-// behavior keyed on vaultPath; for now vaultPath is reserved and ignored.
+// vibe-vault internals. On a successful write with a non-empty vaultPath the
+// resolved <stampDir>/.surface file is touched (best-effort) so the vault
+// records the MCP tool surface that produced the change.
 package atomicfile
 
 import (
 	"fmt"
 	"os"
+
+	"github.com/suykerbuyk/vibe-vault/internal/surface"
 )
 
 // Write atomically writes data to path via a same-directory temp file and
-// os.Rename. Parent directories are created as needed. The vaultPath
-// parameter is reserved for future stamp-on-success behavior (Phase 1a)
-// and is currently ignored.
+// os.Rename. Parent directories are created as needed.
+//
+// When vaultPath != "" and the write target resolves under a recognized
+// vault layout (Projects/<p>/, Knowledge/, Templates/), a successful write
+// refreshes the corresponding .surface file as a best-effort side channel.
+// Stamping failures are logged to stderr but never propagate — the primary
+// write has already succeeded.
 func Write(vaultPath, path string, data []byte) error {
-	_ = vaultPath // reserved for Phase 1a stamp-on-success
 	if err := os.MkdirAll(dirOf(path), 0o755); err != nil {
 		return fmt.Errorf("create parent directories: %w", err)
 	}
@@ -46,7 +52,27 @@ func Write(vaultPath, path string, data []byte) error {
 		return fmt.Errorf("rename into place: %w", err)
 	}
 	removeTemp = false
+
+	if vaultPath != "" {
+		stampOnSuccess(vaultPath, path)
+	}
 	return nil
+}
+
+// stampOnSuccess refreshes the .surface stamp for a successful vault write.
+// Any error is logged to stderr but never fails the primary write.
+func stampOnSuccess(vaultPath, writePath string) {
+	stampDir, err := surface.ResolveStampDir(vaultPath, writePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "vv: warning — surface resolve failed for %q: %v\n", writePath, err)
+		return
+	}
+	if stampDir == "" {
+		return
+	}
+	if err := surface.WriteStamp(stampDir, surface.MCPSurfaceVersion, surface.WriterFingerprint(vaultPath)); err != nil {
+		fmt.Fprintf(os.Stderr, "vv: warning — surface stamp failed for %q: %v\n", stampDir, err)
+	}
 }
 
 // dirOf returns the directory component of path.

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/suykerbuyk/vibe-vault/internal/atomicfile"
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
 
@@ -243,7 +244,7 @@ func propagateSharedSubdir(vaultPath, agentctxPath, subdir string, dryRun, force
 		srcPath := filepath.Join(templatesDir, e.Name())
 		dstPath := filepath.Join(projectSubDir, e.Name())
 		qualPath := subdir + "/" + e.Name()
-		actions = append(actions, propagateFile(srcPath, dstPath, qualPath, vars, dryRun, force)...)
+		actions = append(actions, propagateFile(vaultPath, srcPath, dstPath, qualPath, vars, dryRun, force)...)
 	}
 	return actions
 }
@@ -274,7 +275,7 @@ func propagateTopLevel(vaultPath, agentctxPath string, dryRun, force bool) []Fil
 		}
 		dstPath := filepath.Join(agentctxPath, name)
 		qualPath := name
-		actions = append(actions, propagateFile(srcPath, dstPath, qualPath, vars, dryRun, force)...)
+		actions = append(actions, propagateFile(vaultPath, srcPath, dstPath, qualPath, vars, dryRun, force)...)
 	}
 	return actions
 }
@@ -295,7 +296,7 @@ func propagateTopLevel(vaultPath, agentctxPath string, dryRun, force bool) []Fil
 //   - Baseline + template unchanged since last sync → nothing
 //   - Baseline + template changed, user clean → UPDATE
 //   - Baseline + template changed, user changed → CONFLICT (unless force: UPDATE)
-func propagateFile(srcPath, dstPath, qualPath string, vars TemplateVars, dryRun, force bool) []FileAction {
+func propagateFile(vaultPath, srcPath, dstPath, qualPath string, vars TemplateVars, dryRun, force bool) []FileAction {
 	rawSrc, err := os.ReadFile(srcPath)
 	if err != nil {
 		return nil
@@ -310,10 +311,10 @@ func propagateFile(srcPath, dstPath, qualPath string, vars TemplateVars, dryRun,
 		if mkErr := os.MkdirAll(filepath.Dir(dstPath), 0o755); mkErr != nil {
 			return []FileAction{{Path: qualPath, Action: "ERROR: " + mkErr.Error()}}
 		}
-		if wErr := os.WriteFile(dstPath, srcData, 0o644); wErr != nil {
+		if wErr := atomicfile.Write(vaultPath, dstPath, srcData); wErr != nil {
 			return []FileAction{{Path: qualPath, Action: "ERROR: " + wErr.Error()}}
 		}
-		writeBaseline(dstPath, srcData)
+		writeBaseline(vaultPath, dstPath, srcData)
 		cleanPending(dstPath)
 		return []FileAction{{Path: qualPath, Action: "CREATE", Location: "vault"}}
 	}
@@ -338,7 +339,7 @@ func propagateFile(srcPath, dstPath, qualPath string, vars TemplateVars, dryRun,
 		if bytes.Equal(tmpl, proj) {
 			// Identical — backfill .baseline silently
 			if !dryRun {
-				writeBaseline(dstPath, srcData)
+				writeBaseline(vaultPath, dstPath, srcData)
 				cleanPending(dstPath)
 			}
 			return nil
@@ -347,10 +348,10 @@ func propagateFile(srcPath, dstPath, qualPath string, vars TemplateVars, dryRun,
 		// With --force, overwrite anyway.
 		if force {
 			if !dryRun {
-				if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
+				if err := atomicfile.Write(vaultPath, dstPath, srcData); err != nil {
 					return []FileAction{{Path: qualPath, Action: "ERROR: " + err.Error()}}
 				}
-				writeBaseline(dstPath, srcData)
+				writeBaseline(vaultPath, dstPath, srcData)
 				cleanPending(dstPath)
 			}
 			return []FileAction{{Path: qualPath, Action: "UPDATE", Location: "vault"}}
@@ -373,10 +374,10 @@ func propagateFile(srcPath, dstPath, qualPath string, vars TemplateVars, dryRun,
 		if dryRun {
 			return []FileAction{{Path: qualPath, Action: "DRY-RUN", Location: "vault"}}
 		}
-		if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
+		if err := atomicfile.Write(vaultPath, dstPath, srcData); err != nil {
 			return []FileAction{{Path: qualPath, Action: "ERROR: " + err.Error()}}
 		}
-		writeBaseline(dstPath, srcData)
+		writeBaseline(vaultPath, dstPath, srcData)
 		cleanPending(dstPath)
 		return []FileAction{{Path: qualPath, Action: "UPDATE", Location: "vault"}}
 	}
@@ -384,10 +385,10 @@ func propagateFile(srcPath, dstPath, qualPath string, vars TemplateVars, dryRun,
 	// Both template and user changed → conflict.
 	if force {
 		if !dryRun {
-			if err := os.WriteFile(dstPath, srcData, 0o644); err != nil {
+			if err := atomicfile.Write(vaultPath, dstPath, srcData); err != nil {
 				return []FileAction{{Path: qualPath, Action: "ERROR: " + err.Error()}}
 			}
-			writeBaseline(dstPath, srcData)
+			writeBaseline(vaultPath, dstPath, srcData)
 			cleanPending(dstPath)
 		}
 		return []FileAction{{Path: qualPath, Action: "UPDATE", Location: "vault"}}
@@ -406,8 +407,10 @@ func isSidecar(name string) bool {
 }
 
 // writeBaseline writes a .baseline sidecar with TrimSpace-normalized content.
-func writeBaseline(dstPath string, data []byte) {
-	_ = os.WriteFile(dstPath+".baseline", bytes.TrimSpace(data), 0o644)
+// vaultPath is forwarded to atomicfile so the .baseline write triggers
+// surface stamping when the dst lives inside the vault.
+func writeBaseline(vaultPath, dstPath string, data []byte) {
+	_ = atomicfile.Write(vaultPath, dstPath+".baseline", bytes.TrimSpace(data))
 }
 
 // readBaseline reads the .baseline sidecar for a file.
@@ -645,7 +648,9 @@ func migrate4to5(ctx MigrationContext) ([]FileAction, error) {
 		}
 		_ = os.MkdirAll(link, 0o755)
 		for name, data := range files {
-			_ = os.WriteFile(filepath.Join(link, name), data, 0o644)
+			// Repo-side write; ctx.VaultPath is forwarded so atomicfile can
+			// no-op the stamp (paths outside the vault resolve to "").
+			_ = atomicfile.Write(ctx.VaultPath, filepath.Join(link, name), data)
 		}
 		actions = append(actions, FileAction{Path: ".claude/" + sub, Action: "UPDATE", Location: "repo"})
 	}
@@ -656,9 +661,9 @@ func migrate4to5(ctx MigrationContext) ([]FileAction, error) {
 		// Read current content before removing symlink
 		content, _ := os.ReadFile(commitMsgPath)
 		os.Remove(commitMsgPath)
-		_ = os.WriteFile(commitMsgPath, content, 0o644)
+		_ = atomicfile.Write(ctx.VaultPath, commitMsgPath, content)
 	} else if os.IsNotExist(err) {
-		_ = os.WriteFile(commitMsgPath, []byte(""), 0o644)
+		_ = atomicfile.Write(ctx.VaultPath, commitMsgPath, []byte(""))
 	}
 	actions = append(actions, FileAction{Path: "commit.msg", Action: "UPDATE", Location: "repo"})
 
@@ -763,7 +768,8 @@ func deploySubdirToRepo(repoPath, agentctxPath, subdir string) []FileAction {
 		if err == nil && bytes.Equal(existing, data) {
 			continue
 		}
-		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+		// host-local write; no vault stamp
+		if err := atomicfile.Write("", dstPath, data); err != nil {
 			continue
 		}
 		actions = append(actions, FileAction{
@@ -799,7 +805,8 @@ func gitignoreRemove(giPath, entry string) (bool, error) {
 		return false, nil
 	}
 
-	return true, os.WriteFile(giPath, []byte(strings.Join(filtered, "\n")), 0o644)
+	// host-local write; no vault stamp
+	return true, atomicfile.Write("", giPath, []byte(strings.Join(filtered, "\n")))
 }
 
 // dirContentsChanged walks src and dst and returns true if any file differs

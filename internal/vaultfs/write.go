@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/suykerbuyk/vibe-vault/internal/mdutil"
+	"github.com/suykerbuyk/vibe-vault/internal/atomicfile"
 )
 
 // Write places content at relPath under vaultPath atomically.
@@ -25,9 +25,10 @@ import (
 // supplied, the call returns an error (the caller asserted a prior version
 // that isn't there).
 //
-// Atomicity is delegated to mdutil.AtomicWriteFile per D5; vaultfs always
-// passes perm = 0o644. Parent directories are created implicitly by mdutil
-// (D9 satisfied transitively).
+// Atomicity is delegated to atomicfile.Write per D5; vaultfs always passes
+// the vault root so the write triggers MCP surface stamping. Parent
+// directories are created implicitly by atomicfile (D9 satisfied
+// transitively).
 func Write(vaultPath, relPath, content, expectedSha256 string) (WriteResult, error) {
 	if IsRefusedWritePath(relPath) {
 		return WriteResult{}, fmt.Errorf("%w: %s", ErrRefusedPath, relPath)
@@ -51,7 +52,7 @@ func Write(vaultPath, relPath, content, expectedSha256 string) (WriteResult, err
 	}
 
 	data := []byte(content)
-	if err := mdutil.AtomicWriteFile(abs, data, 0o644); err != nil {
+	if err := atomicfile.Write(vaultPath, abs, data); err != nil {
 		return WriteResult{}, fmt.Errorf("vaultfs: atomic write %s: %w", relPath, err)
 	}
 	sum := sha256.Sum256(data)
@@ -115,7 +116,7 @@ func Edit(vaultPath, relPath, oldString, newString string, replaceAll bool, expe
 		replacements = 1
 	}
 	data := []byte(updated)
-	if err := mdutil.AtomicWriteFile(abs, data, 0o644); err != nil {
+	if err := atomicfile.Write(vaultPath, abs, data); err != nil {
 		return EditResult{}, fmt.Errorf("vaultfs: atomic write %s: %w", relPath, err)
 	}
 	sum := sha256.Sum256(data)
@@ -208,6 +209,9 @@ func Move(vaultPath, fromPath, toPath string) (MoveResult, error) {
 	if err := os.MkdirAll(filepath.Dir(dstAbs), 0o755); err != nil {
 		return MoveResult{}, fmt.Errorf("vaultfs: mkdir %s parent: %w", toPath, err)
 	}
+	// Move uses os.Rename directly: it does not write new content, so it
+	// does not route through atomicfile (and thus does not trigger surface
+	// stamping). Phase 1a treats stamping as content-write semantics.
 	if err := os.Rename(srcAbs, dstAbs); err != nil {
 		return MoveResult{}, fmt.Errorf("vaultfs: rename %s -> %s: %w", fromPath, toPath, err)
 	}

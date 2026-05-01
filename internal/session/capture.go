@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/suykerbuyk/vibe-vault/internal/atomicfile"
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 	"github.com/suykerbuyk/vibe-vault/internal/enrichment"
 	"github.com/suykerbuyk/vibe-vault/internal/friction"
@@ -405,7 +406,7 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 		return nil, fmt.Errorf("create session dir: %w", err)
 	}
 
-	if err := os.WriteFile(absPath, []byte(markdown), 0o644); err != nil {
+	if err := atomicfile.Write(cfg.VaultPath, absPath, []byte(markdown)); err != nil {
 		return nil, fmt.Errorf("write note: %w", err)
 	}
 
