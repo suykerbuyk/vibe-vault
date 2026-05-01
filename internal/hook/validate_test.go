@@ -451,6 +451,339 @@ func TestValidateHooks(t *testing.T) {
 			}
 		}
 	})
+
+	// Case 18: iter-180 dogfooding regression — the EXACT `vp hook` shape
+	// from the operator's first dogfooding install. Two PreCompact entries:
+	// the bare `vv hook` and the `vp hook` carrying optional `timeout: 30`.
+	// Pre-fix this produced a false-positive Fail because Phase 0 schema-
+	// discovery only enumerated `required` fields. v1 must accept it.
+	t.Run("iter180_dogfooding_regression_vp_hook_timeout", func(t *testing.T) {
+		hooks := map[string]any{
+			"PreCompact": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{"type": "command", "command": "vv hook"},
+					},
+				},
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{"type": "command", "command": "vp hook", "timeout": float64(30)},
+					},
+				},
+			},
+		}
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors for iter-180 dogfooding fixture, got %d: %v", len(errs), errs)
+		}
+	})
+
+	// Case 19: per-variant optional-field accept matrix. One subtest per
+	// (variant × optional field) pair, asserting 0 errors. Confirms the
+	// schema's full per-variant `properties` map is honored.
+
+	// command variant — timeout, async, asyncRewake, shell, if, statusMessage.
+	t.Run("command_optional_timeout_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "command", "command": "x", "timeout": float64(30)})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("command_optional_async_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "command", "command": "x", "async": true})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("command_optional_asyncRewake_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "command", "command": "x", "asyncRewake": true})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("command_optional_shell_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "command", "command": "x", "shell": "bash"})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("command_optional_if_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "command", "command": "x", "if": "Bash(*)"})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("command_optional_statusMessage_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "command", "command": "x", "statusMessage": "running"})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+
+	// prompt variant — model, timeout, if, statusMessage.
+	t.Run("prompt_optional_model_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "prompt", "prompt": "say hi", "model": "haiku"})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("prompt_optional_timeout_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "prompt", "prompt": "say hi", "timeout": float64(30)})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("prompt_optional_if_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "prompt", "prompt": "say hi", "if": "Bash(*)"})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("prompt_optional_statusMessage_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "prompt", "prompt": "say hi", "statusMessage": "running"})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+
+	// agent variant — model, timeout, if, statusMessage.
+	t.Run("agent_optional_model_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "agent", "prompt": "do thing", "model": "haiku"})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("agent_optional_timeout_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "agent", "prompt": "do thing", "timeout": float64(30)})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("agent_optional_if_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "agent", "prompt": "do thing", "if": "Bash(*)"})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("agent_optional_statusMessage_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "agent", "prompt": "do thing", "statusMessage": "running"})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+
+	// http variant — headers, allowedEnvVars, timeout, if, statusMessage.
+	t.Run("http_optional_headers_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{
+			"type":    "http",
+			"url":     "https://example.com/hook",
+			"headers": map[string]any{"Authorization": "Bearer x"},
+		})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("http_optional_allowedEnvVars_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{
+			"type":           "http",
+			"url":            "https://example.com/hook",
+			"allowedEnvVars": []any{"TOKEN"},
+		})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("http_optional_timeout_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "http", "url": "https://example.com/hook", "timeout": float64(30)})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("http_optional_if_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "http", "url": "https://example.com/hook", "if": "Bash(*)"})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("http_optional_statusMessage_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "http", "url": "https://example.com/hook", "statusMessage": "running"})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+
+	// mcp_tool variant — input, timeout, if, statusMessage.
+	t.Run("mcp_tool_optional_input_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{
+			"type":   "mcp_tool",
+			"server": "vibe-vault",
+			"tool":   "vv_capture_session",
+			"input":  map[string]any{"key": "v"},
+		})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("mcp_tool_optional_timeout_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{
+			"type": "mcp_tool", "server": "vibe-vault", "tool": "vv_capture_session", "timeout": float64(30),
+		})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("mcp_tool_optional_if_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{
+			"type": "mcp_tool", "server": "vibe-vault", "tool": "vv_capture_session", "if": "Bash(*)",
+		})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+	t.Run("mcp_tool_optional_statusMessage_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{
+			"type": "mcp_tool", "server": "vibe-vault", "tool": "vv_capture_session", "statusMessage": "running",
+		})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+
+	// Case 20: cross-variant rejection — confirms per-variant table isolation.
+	// `model` is valid for prompt/agent only — must be rejected on command.
+	// Likewise url, command, prompt collide across variants.
+	t.Run("command_with_model_rejected", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "command", "command": "x", "model": "haiku"})
+		errs := ValidateHooks(hooks)
+		if len(errs) == 0 {
+			t.Fatal("expected error, got none")
+		}
+		var found bool
+		for _, e := range errs {
+			if strings.Contains(e.Error(), "unknown field 'model'") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected 'unknown field model' error, got: %v", errs)
+		}
+	})
+	t.Run("command_with_url_rejected", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "command", "command": "x", "url": "https://example.com"})
+		errs := ValidateHooks(hooks)
+		if len(errs) == 0 {
+			t.Fatal("expected error, got none")
+		}
+		var found bool
+		for _, e := range errs {
+			if strings.Contains(e.Error(), "unknown field 'url'") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected 'unknown field url' error, got: %v", errs)
+		}
+	})
+	t.Run("prompt_with_command_rejected", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "prompt", "prompt": "x", "command": "y"})
+		errs := ValidateHooks(hooks)
+		if len(errs) == 0 {
+			t.Fatal("expected error, got none")
+		}
+		var found bool
+		for _, e := range errs {
+			if strings.Contains(e.Error(), "unknown field 'command'") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected 'unknown field command' error, got: %v", errs)
+		}
+	})
+	t.Run("http_with_prompt_rejected", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{"type": "http", "url": "https://example.com", "prompt": "x"})
+		errs := ValidateHooks(hooks)
+		if len(errs) == 0 {
+			t.Fatal("expected error, got none")
+		}
+		var found bool
+		for _, e := range errs {
+			if strings.Contains(e.Error(), "unknown field 'prompt'") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected 'unknown field prompt' error, got: %v", errs)
+		}
+	})
+
+	// Case 21: combined optional fields on one entry — multiple at once.
+	t.Run("command_with_multiple_optionals_valid", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{
+			"type":          "command",
+			"command":       "x",
+			"timeout":       float64(30),
+			"async":         true,
+			"statusMessage": "running",
+		})
+		errs := ValidateHooks(hooks)
+		if len(errs) != 0 {
+			t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+		}
+	})
+
+	// Case 22: regression-lock — truly unknown field still rejected.
+	// We tightened the OPTIONAL set; we did NOT loosen additionalProperties.
+	t.Run("command_with_weirdfield_rejected", func(t *testing.T) {
+		hooks := wrapVariant(map[string]any{
+			"type":       "command",
+			"command":    "x",
+			"weirdfield": float64(1),
+		})
+		errs := ValidateHooks(hooks)
+		if len(errs) == 0 {
+			t.Fatal("expected error, got none")
+		}
+		var found bool
+		for _, e := range errs {
+			if strings.Contains(e.Error(), "unknown field 'weirdfield'") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected 'unknown field weirdfield', got: %v", errs)
+		}
+	})
 }
 
 // wrapVariant wraps a hookCommand item inside a single matcher entry under
