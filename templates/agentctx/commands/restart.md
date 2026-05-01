@@ -1,3 +1,14 @@
+## Surface Handshake (DESIGN #97)
+
+Run `vv check --json` first and parse the `surface` check. If
+`status` is `"fail"`, the vault was last written by a newer `vv`
+binary than this host has installed; halt the bootstrap and report
+the actionable error to the operator (the `Detail` field names the
+out-of-date stamp directory and the version mismatch). The standard
+remediation is `cd ~/code/vibe-vault && git pull && make install`.
+
+If `status` is `"warn"` or `"pass"`, proceed to vault sync.
+
 ## Vault Sync (multi-machine)
 
 Before loading context, sync the vault to get the latest state from other

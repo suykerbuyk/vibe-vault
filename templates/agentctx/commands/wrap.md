@@ -49,6 +49,11 @@ wrap commit) and HEAD.
 
 ## Pre-flight
 
+0. **Surface handshake (DESIGN #97).** Run `vv check --json` and
+   parse the `surface` check. If `status` is `"fail"`, the vault is
+   ahead of this host's binary — halt and report the actionable
+   error; do not wrap with a stale binary. The standard remediation
+   is `cd ~/code/vibe-vault && git pull && make install`.
 1. `make pre-commit` clean before wrapping. Wrapping over a dirty
    pre-commit produces a misleading iter record.
 2. An API key is configured for the tier's provider. Tiers map
