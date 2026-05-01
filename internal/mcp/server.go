@@ -118,6 +118,20 @@ func (s *Server) ToolNames() []string {
 	return names
 }
 
+// ToolDefs returns the registered tool definitions in stable alphabetical
+// order. Used by the build-time surface verifier to compare live tools
+// against the golden manifest.
+func (s *Server) ToolDefs() []ToolDef {
+	defs := make([]ToolDef, 0, len(s.tools))
+	for _, t := range s.tools {
+		defs = append(defs, t.Definition)
+	}
+	sort.Slice(defs, func(i, j int) bool {
+		return defs[i].Name < defs[j].Name
+	})
+	return defs
+}
+
 // RegisterPrompt adds a prompt to the server.
 func (s *Server) RegisterPrompt(p Prompt) {
 	s.prompts[p.Definition.Name] = p
