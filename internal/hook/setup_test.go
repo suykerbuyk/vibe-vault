@@ -1346,3 +1346,438 @@ func TestUninstallClaudePlugin_CleansEmptyMaps(t *testing.T) {
 		t.Error("empty enabledPlugins should be removed")
 	}
 }
+
+// --- Phase 2: pre-write hooks-shape validation tests ---
+
+// brokenHooksFixture is the iter-178 regression shape: a bare
+// {type, command} entry directly under the event array, missing
+// the matcher-wrapper.
+func brokenHooksFixture() map[string]any {
+	return map[string]any{
+		"hooks": map[string]any{
+			"PostToolUse": []any{
+				map[string]any{
+					"command": "vv hook",
+					"type":    "command",
+				},
+			},
+		},
+	}
+}
+
+func TestInstall_RefusesOnBrokenHooks(t *testing.T) {
+	home := setupHome(t)
+	path := settingsPath(home)
+	writeJSON(t, path, brokenHooksFixture())
+
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = Install()
+	if err == nil {
+		t.Fatal("expected error for broken hooks")
+	}
+	if !strings.Contains(err.Error(), "PostToolUse") {
+		t.Errorf("error should mention PostToolUse, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "settings.json") {
+		t.Errorf("error should mention settings.json, got: %v", err)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(original) != string(after) {
+		t.Error("file should not have been modified on validation refusal")
+	}
+
+	if _, err := os.Stat(path + ".vv.bak"); !os.IsNotExist(err) {
+		t.Error("no backup should be created on validation refusal")
+	}
+}
+
+func TestInstallMCP_RefusesOnBrokenHooks(t *testing.T) {
+	home := setupHome(t)
+	path := settingsPath(home)
+	writeJSON(t, path, brokenHooksFixture())
+
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = InstallMCP()
+	if err == nil {
+		t.Fatal("expected error for broken hooks")
+	}
+	if !strings.Contains(err.Error(), "PostToolUse") {
+		t.Errorf("error should mention PostToolUse, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "settings.json") {
+		t.Errorf("error should mention settings.json, got: %v", err)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(original) != string(after) {
+		t.Error("file should not have been modified on validation refusal")
+	}
+
+	if _, err := os.Stat(path + ".vv.bak"); !os.IsNotExist(err) {
+		t.Error("no backup should be created on validation refusal")
+	}
+}
+
+func TestInstallClaudePlugin_RefusesOnBrokenHooks(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := settingsPath(home)
+	writeJSON(t, path, brokenHooksFixture())
+
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = InstallClaudePlugin()
+	if err == nil {
+		t.Fatal("expected error for broken hooks")
+	}
+	if !strings.Contains(err.Error(), "PostToolUse") {
+		t.Errorf("error should mention PostToolUse, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "settings.json") {
+		t.Errorf("error should mention settings.json, got: %v", err)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(original) != string(after) {
+		t.Error("file should not have been modified on validation refusal")
+	}
+
+	if _, err := os.Stat(path + ".vv.bak"); !os.IsNotExist(err) {
+		t.Error("no backup should be created on validation refusal")
+	}
+}
+
+func TestInstallMCPZed_DoesNotValidateClaudeHooks(t *testing.T) {
+	home := setupHome(t)
+	path := zedSettingsPath(home)
+
+	// Write a Zed settings.json containing the broken-hooks shape.
+	// vv must NOT validate Claude Code's hooks contract on the Zed
+	// path — Zed's settings file has its own schema. Validation
+	// would refuse install when there's no contract to enforce.
+	zedSettings := map[string]any{
+		"theme": "One Dark",
+		"hooks": map[string]any{
+			"PostToolUse": []any{
+				map[string]any{
+					"command": "vv hook",
+					"type":    "command",
+				},
+			},
+		},
+	}
+	writeJSON(t, path, zedSettings)
+
+	if err := InstallMCPZed(); err != nil {
+		t.Fatalf("InstallMCPZed should not validate Claude hooks shape, got: %v", err)
+	}
+
+	settings := readJSON(t, path)
+	if !hasMCPZed(settings) {
+		t.Error("vibe-vault entry should have been added")
+	}
+	// Broken hooks block stays in the file untouched — vv neither
+	// validated nor cleaned it up; that's Zed's problem.
+	hooks, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("hooks block should still be present")
+	}
+	if _, ok := hooks["PostToolUse"]; !ok {
+		t.Error("PostToolUse entry should still be present (not vv's job to clean up)")
+	}
+}
+
+func TestInstall_AcceptsWellFormedThirdPartyHooks(t *testing.T) {
+	home := setupHome(t)
+	path := settingsPath(home)
+	writeJSON(t, path, map[string]any{
+		"hooks": map[string]any{
+			"PostToolUse": []any{
+				map[string]any{
+					"matcher": "Edit",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "other-tool format",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	if err := Install(); err != nil {
+		t.Fatalf("Install should accept well-formed third-party hooks, got: %v", err)
+	}
+
+	settings := readJSON(t, path)
+	hooks := settings["hooks"].(map[string]any)
+
+	postToolUse, ok := hooks["PostToolUse"].([]any)
+	if !ok || len(postToolUse) != 1 {
+		t.Fatalf("PostToolUse should still have its 1 third-party entry, got: %v", hooks["PostToolUse"])
+	}
+	entry := postToolUse[0].(map[string]any)
+	if entry["matcher"] != "Edit" {
+		t.Errorf("third-party matcher was modified, got: %v", entry["matcher"])
+	}
+	innerHooks := entry["hooks"].([]any)
+	if len(innerHooks) != 1 {
+		t.Errorf("third-party inner hooks should be preserved, got: %v", innerHooks)
+	}
+	innerEntry := innerHooks[0].(map[string]any)
+	if innerEntry["command"] != "other-tool format" {
+		t.Errorf("third-party command was modified, got: %v", innerEntry["command"])
+	}
+
+	for _, ev := range []string{"SessionEnd", "Stop", "PreCompact"} {
+		if !hasEvent(settings, ev) {
+			t.Errorf("vv hook should have been added for %s", ev)
+		}
+	}
+}
+
+func TestInstallMCP_AcceptsWellFormedThirdPartyHooks(t *testing.T) {
+	home := setupHome(t)
+	path := settingsPath(home)
+	writeJSON(t, path, map[string]any{
+		"hooks": map[string]any{
+			"PostToolUse": []any{
+				map[string]any{
+					"matcher": "Edit",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "other-tool format",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	if err := InstallMCP(); err != nil {
+		t.Fatalf("InstallMCP should accept well-formed third-party hooks, got: %v", err)
+	}
+
+	settings := readJSON(t, path)
+	if !hasMCP(settings) {
+		t.Error("MCP server should have been added")
+	}
+
+	hooks := settings["hooks"].(map[string]any)
+	postToolUse, ok := hooks["PostToolUse"].([]any)
+	if !ok || len(postToolUse) != 1 {
+		t.Fatalf("third-party hooks should be unchanged, got: %v", hooks["PostToolUse"])
+	}
+	entry := postToolUse[0].(map[string]any)
+	if entry["matcher"] != "Edit" {
+		t.Errorf("third-party matcher was modified, got: %v", entry["matcher"])
+	}
+	innerHooks := entry["hooks"].([]any)
+	if len(innerHooks) != 1 {
+		t.Errorf("third-party inner hooks should be preserved, got: %v", innerHooks)
+	}
+}
+
+func TestInstallClaudePlugin_AcceptsWellFormedThirdPartyHooks(t *testing.T) {
+	home := setupHome(t)
+	t.Setenv("XDG_DATA_HOME", "")
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := settingsPath(home)
+	writeJSON(t, path, map[string]any{
+		"hooks": map[string]any{
+			"PostToolUse": []any{
+				map[string]any{
+					"matcher": "Edit",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "other-tool format",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	if err := InstallClaudePlugin(); err != nil {
+		t.Fatalf("InstallClaudePlugin should accept well-formed third-party hooks, got: %v", err)
+	}
+
+	settings := readJSON(t, path)
+	if !hasPluginMarketplace(settings) {
+		t.Error("plugin marketplace should have been added")
+	}
+
+	hooks := settings["hooks"].(map[string]any)
+	postToolUse, ok := hooks["PostToolUse"].([]any)
+	if !ok || len(postToolUse) != 1 {
+		t.Fatalf("third-party hooks should be unchanged, got: %v", hooks["PostToolUse"])
+	}
+	entry := postToolUse[0].(map[string]any)
+	if entry["matcher"] != "Edit" {
+		t.Errorf("third-party matcher was modified, got: %v", entry["matcher"])
+	}
+}
+
+func TestInstall_AcceptsAllFiveHookCommandVariants(t *testing.T) {
+	home := setupHome(t)
+	path := settingsPath(home)
+	// One valid entry of each hookCommand variant under different
+	// events, all from a foreign tool. The validator must not
+	// false-Fail on legitimate non-`command` types.
+	writeJSON(t, path, map[string]any{
+		"hooks": map[string]any{
+			"PostToolUse": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{"type": "command", "command": "format-tool"},
+					},
+				},
+			},
+			"UserPromptSubmit": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{"type": "prompt", "prompt": "Be concise."},
+					},
+				},
+			},
+			"SessionStart": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{"type": "agent", "prompt": "Welcome."},
+					},
+				},
+			},
+			"PreToolUse": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{"type": "http", "url": "https://example.com/hook"},
+					},
+				},
+			},
+			"PostCompact": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{
+							"type":   "mcp_tool",
+							"server": "some-server",
+							"tool":   "some-tool",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	if err := Install(); err != nil {
+		t.Fatalf("Install should accept all 5 hookCommand variants, got: %v", err)
+	}
+
+	settings := readJSON(t, path)
+	hooks := settings["hooks"].(map[string]any)
+
+	// Each foreign event entry should still be present and unchanged.
+	checks := []struct {
+		event   string
+		typeStr string
+		field   string
+		value   string
+	}{
+		{"PostToolUse", "command", "command", "format-tool"},
+		{"UserPromptSubmit", "prompt", "prompt", "Be concise."},
+		{"SessionStart", "agent", "prompt", "Welcome."},
+		{"PreToolUse", "http", "url", "https://example.com/hook"},
+	}
+	for _, c := range checks {
+		arr, ok := hooks[c.event].([]any)
+		if !ok || len(arr) == 0 {
+			t.Errorf("event %s missing or empty after Install", c.event)
+			continue
+		}
+		entry := arr[0].(map[string]any)
+		inner := entry["hooks"].([]any)
+		item := inner[0].(map[string]any)
+		if item["type"] != c.typeStr {
+			t.Errorf("%s: type mismatch, got %v want %s", c.event, item["type"], c.typeStr)
+		}
+		if item[c.field] != c.value {
+			t.Errorf("%s: %s mismatch, got %v want %s", c.event, c.field, item[c.field], c.value)
+		}
+	}
+	// mcp_tool variant: cross-check both required fields.
+	pc, ok := hooks["PostCompact"].([]any)
+	if !ok || len(pc) == 0 {
+		t.Error("PostCompact missing after Install")
+	} else {
+		entry := pc[0].(map[string]any)
+		inner := entry["hooks"].([]any)
+		item := inner[0].(map[string]any)
+		if item["type"] != "mcp_tool" {
+			t.Errorf("PostCompact: type mismatch, got %v", item["type"])
+		}
+		if item["server"] != "some-server" || item["tool"] != "some-tool" {
+			t.Errorf("PostCompact mcp_tool fields mangled: %v", item)
+		}
+	}
+
+	// vv hook entries should have been added to the three vv events
+	// (none of the foreign events overlap with hookEvents above).
+	for _, ev := range []string{"SessionEnd", "Stop", "PreCompact"} {
+		if !hasEvent(settings, ev) {
+			t.Errorf("vv hook should have been added for %s", ev)
+		}
+	}
+}
+
+func TestInstall_SanityGateOnAddHooks(t *testing.T) {
+	// Smoke test: well-formed empty settings → Install() →
+	// post-write hooks block is shape-valid. Proves the
+	// post-mutation sanity gate doesn't false-trigger on the
+	// happy path. (There's no clean way to make addHooks
+	// produce invalid output without modifying it; this is
+	// the achievable check.)
+	home := setupHome(t)
+
+	if err := Install(); err != nil {
+		t.Fatalf("Install on fresh home should succeed, got: %v", err)
+	}
+
+	path := settingsPath(home)
+	settings := readJSON(t, path)
+	if errs := ValidateHooks(settings["hooks"]); len(errs) != 0 {
+		t.Errorf("post-Install hooks block must be shape-valid; got errors: %v", errs)
+	}
+}
