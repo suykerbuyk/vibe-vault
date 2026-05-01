@@ -200,6 +200,85 @@ func TestWrite_RenameFails(t *testing.T) {
 	}
 }
 
+// TestWrite_StampsOnVaultPath verifies that a successful write under a
+// recognized vault layout (Projects/<p>/agentctx/) refreshes the .surface
+// file with the current MCPSurfaceVersion.
+func TestWrite_StampsOnVaultPath(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	if err := os.MkdirAll(agentctxDir, 0o755); err != nil {
+		t.Fatalf("seed agentctx dir: %v", err)
+	}
+	target := filepath.Join(agentctxDir, "foo.md")
+
+	if err := Write(vault, target, []byte("# hello")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	stampPath := filepath.Join(agentctxDir, ".surface")
+	got, err := os.ReadFile(stampPath)
+	if err != nil {
+		t.Fatalf("read .surface: %v", err)
+	}
+	body := string(got)
+	if !bytes.Contains(got, []byte("surface = 11")) {
+		t.Errorf(".surface missing surface=11; got %q", body)
+	}
+	if !bytes.Contains(got, []byte("last_writer")) {
+		t.Errorf(".surface missing last_writer; got %q", body)
+	}
+	if !bytes.Contains(got, []byte("last_write_at")) {
+		t.Errorf(".surface missing last_write_at; got %q", body)
+	}
+}
+
+// TestWrite_NoStampOnEmptyVaultPath verifies that vaultPath="" writes
+// successfully and leaves no .surface file behind. (Host-local writes must
+// not stamp.)
+func TestWrite_NoStampOnEmptyVaultPath(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "foo.md")
+	if err := Write("", target, []byte("hello")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".surface")); !os.IsNotExist(err) {
+		t.Fatalf(".surface should not exist for vaultPath=\"\"; stat err = %v", err)
+	}
+}
+
+// TestWrite_StampFailureDoesNotFailWrite verifies that a stamp-side error
+// (here, a stamp directory pre-occupied by a regular file with the same name
+// as .surface) does NOT fail the primary write.
+func TestWrite_StampFailureDoesNotFailWrite(t *testing.T) {
+	vault := t.TempDir()
+	agentctxDir := filepath.Join(vault, "Projects", "test", "agentctx")
+	if err := os.MkdirAll(agentctxDir, 0o755); err != nil {
+		t.Fatalf("seed agentctx dir: %v", err)
+	}
+	// Create a directory at the .surface path so rename-of-file-over-dir
+	// fails inside surface.WriteStamp. The primary write must still succeed.
+	stampPath := filepath.Join(agentctxDir, ".surface")
+	if err := os.MkdirAll(stampPath, 0o755); err != nil {
+		t.Fatalf("seed stamp blocker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stampPath, "child"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed stamp blocker child: %v", err)
+	}
+
+	target := filepath.Join(agentctxDir, "foo.md")
+	if err := Write(vault, target, []byte("primary")); err != nil {
+		t.Fatalf("Write must not fail when stamping fails: %v", err)
+	}
+	// Primary write succeeded; verify the file is on disk.
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if !bytes.Equal(got, []byte("primary")) {
+		t.Fatalf("target content mismatch: %q", got)
+	}
+}
+
 // TestDirOf covers the path-component helper across a few shapes.
 func TestDirOf(t *testing.T) {
 	cases := []struct {
