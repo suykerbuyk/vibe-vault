@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/suykerbuyk/vibe-vault/internal/atomicfile"
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
 
@@ -78,7 +79,7 @@ func NewStampIterTool(cfg config.Config) Tool {
 			}
 
 			data := []byte(strconv.Itoa(args.Iter) + "\n")
-			if err := atomicWriteFile(dest, data); err != nil {
+			if err := atomicfile.Write(cfg.VaultPath, dest, data); err != nil {
 				return "", fmt.Errorf("write last-iter: %w", err)
 			}
 

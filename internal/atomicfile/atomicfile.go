@@ -1,18 +1,22 @@
 // Copyright 2026 John Suykerbuyk <john@syketech.com>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-package mcp
+// Package atomicfile provides an atomic file write primitive shared across
+// vibe-vault internals. Phase 1a will extend Write with stamp-on-success
+// behavior keyed on vaultPath; for now vaultPath is reserved and ignored.
+package atomicfile
 
 import (
 	"fmt"
 	"os"
 )
 
-// atomicWriteFile writes data to path atomically via a temp file.
-// Creates parent directories as needed. The temp file is created in
-// the same directory as the destination so the final os.Rename is a
-// same-filesystem rename (atomic on POSIX).
-func atomicWriteFile(path string, data []byte) error {
+// Write atomically writes data to path via a same-directory temp file and
+// os.Rename. Parent directories are created as needed. The vaultPath
+// parameter is reserved for future stamp-on-success behavior (Phase 1a)
+// and is currently ignored.
+func Write(vaultPath, path string, data []byte) error {
+	_ = vaultPath // reserved for Phase 1a stamp-on-success
 	if err := os.MkdirAll(dirOf(path), 0o755); err != nil {
 		return fmt.Errorf("create parent directories: %w", err)
 	}
