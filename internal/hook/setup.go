@@ -45,6 +45,10 @@ func Install() error {
 		return err
 	}
 
+	if err := validateExistingHooks(path, settings); err != nil {
+		return err
+	}
+
 	if isInstalled(settings) {
 		fmt.Fprintf(os.Stderr, "vv hook already configured in %s\n", config.CompressHome(path))
 		return nil
@@ -55,6 +59,13 @@ func Install() error {
 	}
 
 	addHooks(settings)
+
+	// Sanity gate: addHooks must produce shape-valid output.
+	// If this ever fires, addHooks has a bug — the program
+	// must not write a known-invalid file.
+	if err := validateExistingHooks(path, settings); err != nil {
+		return fmt.Errorf("internal error: addHooks produced shape-invalid hooks block: %w", err)
+	}
 
 	if err := writeSettings(path, settings); err != nil {
 		return err
@@ -109,6 +120,10 @@ func InstallMCP() error {
 
 	settings, err := readSettings(path)
 	if err != nil {
+		return err
+	}
+
+	if err := validateExistingHooks(path, settings); err != nil {
 		return err
 	}
 
@@ -185,6 +200,10 @@ func InstallMCPZed() error {
 	if err != nil {
 		return err
 	}
+
+	// Note: Claude Code hooks-block shape validation (DESIGN #96)
+	// is intentionally skipped here — Zed's settings.json has its
+	// own schema. Re-evaluate if Zed grows a comparable contract.
 
 	if isMCPZedInstalled(settings) {
 		fmt.Fprintf(os.Stderr, "vibe-vault MCP server already configured in %s\n", config.CompressHome(path))
@@ -670,6 +689,10 @@ func InstallClaudePlugin() error {
 		return err
 	}
 
+	if err := validateExistingHooks(path, settings); err != nil {
+		return err
+	}
+
 	if isPluginInstalled(settings) {
 		fmt.Fprintf(os.Stderr, "vibe-vault plugin already configured in %s\n", config.CompressHome(path))
 		return nil
@@ -831,6 +854,34 @@ func removePluginEnabled(settings map[string]any) {
 	if len(plugins) == 0 {
 		delete(settings, "enabledPlugins")
 	}
+}
+
+// validateExistingHooks returns a single actionable error if
+// the settings map's "hooks" block is shape-invalid per the
+// schema contract pinned in DESIGN #96. Returns nil for absent
+// hooks (settings["hooks"] == nil) — that's the fresh-install
+// case where Install() will write the block from scratch.
+//
+// Called by Install(), InstallMCP(), and InstallClaudePlugin()
+// before any mutation, so a foreign-broken hooks entry refuses
+// every Claude Code settings.json writer — not just the hook
+// installer. Skipped on the Zed path (DESIGN #96 open question
+// 3: Claude Code's schema is what's pinned; Zed semantics may
+// differ).
+func validateExistingHooks(path string, settings map[string]any) error {
+	errs := ValidateHooks(settings["hooks"])
+	if len(errs) == 0 {
+		return nil
+	}
+	//nolint:staticcheck // ST1005: deliberately user-facing multi-line diagnostic per DESIGN #96.
+	return fmt.Errorf(`%s: %s
+
+Claude Code will reject this file. Fix: edit the offending entry
+to use the matcher-wrapper shape:
+  {"matcher": "", "hooks": [{"type": "command", "command": "..."}]}
+
+Then re-run this command. See doc/DESIGN.md #96 for the full
+schema contract.`, config.CompressHome(path), errs[0].Error())
 }
 
 // entryContainsVVHook checks whether a single hook entry contains "vv hook".
