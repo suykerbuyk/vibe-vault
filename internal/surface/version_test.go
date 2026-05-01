@@ -352,11 +352,174 @@ func TestWriterFingerprint(t *testing.T) {
 	})
 }
 
-func TestCheckCompatible_Stub(t *testing.T) {
-	if err := CheckCompatible("/any/vault"); err != nil {
-		t.Fatalf("Phase 1a stub should return nil, got %v", err)
+func TestCheckCompatible_VaultUnreachable(t *testing.T) {
+	t.Run("empty vault path returns nil", func(t *testing.T) {
+		if err := CheckCompatible(""); err != nil {
+			t.Fatalf("empty path should return nil, got %v", err)
+		}
+	})
+
+	t.Run("nonexistent vault path returns nil", func(t *testing.T) {
+		missing := filepath.Join(t.TempDir(), "does", "not", "exist")
+		if err := CheckCompatible(missing); err != nil {
+			t.Fatalf("nonexistent path should return nil, got %v", err)
+		}
+	})
+}
+
+func TestCheckCompatible_AllBelow(t *testing.T) {
+	vault := t.TempDir()
+
+	// Project stamp at MCPSurfaceVersion (boundary: equal is allowed).
+	projDir := filepath.Join(vault, "Projects", "p1", "agentctx")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatalf("seed: %v", err)
 	}
-	if err := CheckCompatible(""); err != nil {
-		t.Fatalf("empty path stub should return nil, got %v", err)
+	if err := WriteStamp(projDir, MCPSurfaceVersion, "writer1"); err != nil {
+		t.Fatalf("seed stamp: %v", err)
+	}
+
+	// Knowledge stamp below current surface.
+	knowDir := filepath.Join(vault, "Knowledge")
+	if err := os.MkdirAll(knowDir, 0o755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := WriteStamp(knowDir, MCPSurfaceVersion-1, "writer2"); err != nil {
+		t.Fatalf("seed stamp: %v", err)
+	}
+
+	if err := CheckCompatible(vault); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestCheckCompatible_AnyAbove(t *testing.T) {
+	vault := t.TempDir()
+
+	projDir := filepath.Join(vault, "Projects", "p1", "agentctx")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := WriteStamp(projDir, MCPSurfaceVersion+5, "deadbeef"); err != nil {
+		t.Fatalf("seed stamp: %v", err)
+	}
+
+	err := CheckCompatible(vault)
+	if err == nil {
+		t.Fatalf("expected *IncompatibleError, got nil")
+	}
+	ie, ok := err.(*IncompatibleError)
+	if !ok {
+		t.Fatalf("expected *IncompatibleError, got %T: %v", err, err)
+	}
+	if ie.BinarySurface != MCPSurfaceVersion {
+		t.Errorf("BinarySurface = %d, want %d", ie.BinarySurface, MCPSurfaceVersion)
+	}
+	if ie.VaultSurface != MCPSurfaceVersion+5 {
+		t.Errorf("VaultSurface = %d, want %d", ie.VaultSurface, MCPSurfaceVersion+5)
+	}
+	if ie.StampDir != projDir {
+		t.Errorf("StampDir = %q, want %q", ie.StampDir, projDir)
+	}
+	if ie.LastWriter != "deadbeef" {
+		t.Errorf("LastWriter = %q, want deadbeef", ie.LastWriter)
+	}
+	// Sanity-check the formatted error message contains the key fields.
+	msg := err.Error()
+	if !strings.Contains(msg, "deadbeef") || !strings.Contains(msg, projDir) {
+		t.Errorf("Error() missing fields: %q", msg)
+	}
+	if !strings.Contains(msg, "VV_SURFACE_GATE=warn") {
+		t.Errorf("Error() missing gate-override hint: %q", msg)
+	}
+}
+
+func TestCheckCompatible_PicksMaxAcrossProjects(t *testing.T) {
+	vault := t.TempDir()
+
+	// Three projects: low, high, mid. Highest should win.
+	low := filepath.Join(vault, "Projects", "alpha", "agentctx")
+	high := filepath.Join(vault, "Projects", "beta", "agentctx")
+	mid := filepath.Join(vault, "Projects", "gamma", "agentctx")
+	for _, d := range []string{low, high, mid} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	if err := WriteStamp(low, MCPSurfaceVersion, "w-low"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := WriteStamp(high, MCPSurfaceVersion+10, "w-high"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := WriteStamp(mid, MCPSurfaceVersion+3, "w-mid"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	err := CheckCompatible(vault)
+	ie, ok := err.(*IncompatibleError)
+	if !ok {
+		t.Fatalf("expected *IncompatibleError, got %T: %v", err, err)
+	}
+	if ie.VaultSurface != MCPSurfaceVersion+10 {
+		t.Errorf("VaultSurface = %d, want highest %d", ie.VaultSurface, MCPSurfaceVersion+10)
+	}
+	if ie.StampDir != high {
+		t.Errorf("StampDir = %q, want highest %q", ie.StampDir, high)
+	}
+	if ie.LastWriter != "w-high" {
+		t.Errorf("LastWriter = %q, want w-high", ie.LastWriter)
+	}
+}
+
+func TestCheckCompatible_KnowledgeAndTemplates(t *testing.T) {
+	t.Run("Knowledge stamp gates", func(t *testing.T) {
+		vault := t.TempDir()
+		know := filepath.Join(vault, "Knowledge")
+		if err := os.MkdirAll(know, 0o755); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		if err := WriteStamp(know, MCPSurfaceVersion+1, "kfp"); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		err := CheckCompatible(vault)
+		ie, ok := err.(*IncompatibleError)
+		if !ok {
+			t.Fatalf("expected *IncompatibleError, got %T: %v", err, err)
+		}
+		if ie.StampDir != know {
+			t.Errorf("StampDir = %q, want %q", ie.StampDir, know)
+		}
+	})
+
+	t.Run("Templates stamp gates", func(t *testing.T) {
+		vault := t.TempDir()
+		tmpl := filepath.Join(vault, "Templates")
+		if err := os.MkdirAll(tmpl, 0o755); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		if err := WriteStamp(tmpl, MCPSurfaceVersion+2, "tfp"); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		err := CheckCompatible(vault)
+		ie, ok := err.(*IncompatibleError)
+		if !ok {
+			t.Fatalf("expected *IncompatibleError, got %T: %v", err, err)
+		}
+		if ie.StampDir != tmpl {
+			t.Errorf("StampDir = %q, want %q", ie.StampDir, tmpl)
+		}
+	})
+}
+
+func TestIncompatibleError_UnknownWriterFallback(t *testing.T) {
+	e := &IncompatibleError{
+		BinarySurface: 11,
+		VaultSurface:  12,
+		StampDir:      "/some/dir",
+		LastWriter:    "",
+	}
+	if !strings.Contains(e.Error(), "unknown") {
+		t.Errorf("expected 'unknown' fallback in error text, got %q", e.Error())
 	}
 }

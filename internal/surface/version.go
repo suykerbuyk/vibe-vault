@@ -234,9 +234,89 @@ func WriterFingerprint(vaultPath string) string {
 	return hex.EncodeToString(sum[:])[:8]
 }
 
-// CheckCompatible is a Phase 1b stub. It returns nil; the actual gate logic
-// lands in Phase 1b.
+// IncompatibleError is returned by CheckCompatible when a vault stamp's
+// surface version exceeds MCPSurfaceVersion. The fields support both
+// callers that want to format their own messages and the standard
+// Error() text used by the entry-point gates.
+type IncompatibleError struct {
+	BinarySurface int
+	VaultSurface  int
+	StampDir      string // worst (highest) stamp's directory
+	LastWriter    string // optional, may be empty
+}
+
+// Error renders the spec's standard message. The "last writer" field falls
+// back to "unknown" when the worst stamp does not record one.
+func (e *IncompatibleError) Error() string {
+	writer := e.LastWriter
+	if writer == "" {
+		writer = "unknown"
+	}
+	return fmt.Sprintf(
+		"vv: this binary supports MCP surface v%d; vault target '%s' is at v%d\n"+
+			"    last writer: %s (best-effort, not enforced)\n"+
+			"    action:    cd ~/code/vibe-vault && git pull && make install\n"+
+			"    if you cannot upgrade right now (deploy host, network outage):\n"+
+			"       VV_SURFACE_GATE=warn <original-command>   (proceed at risk)",
+		e.BinarySurface, e.StampDir, e.VaultSurface, writer,
+	)
+}
+
+// CheckCompatible scans known stamp targets under vaultPath and returns a
+// non-nil error if any stamp's surface > MCPSurfaceVersion (i.e., the vault
+// was written by a newer binary than this one).
+//
+// Vault-unreachable degradation: if vaultPath is empty or os.Stat fails,
+// returns nil (best-effort; gates proceed). Callers may log the unreachable
+// case to stderr but should still proceed.
+//
+// On mismatch, returns *IncompatibleError populated with the worst (highest)
+// stamp's directory, surface version, and last_writer (when available).
 func CheckCompatible(vaultPath string) error {
-	_ = vaultPath
+	if vaultPath == "" {
+		return nil
+	}
+	if _, err := os.Stat(vaultPath); err != nil {
+		return nil
+	}
+
+	patterns := []string{
+		filepath.Join(vaultPath, "Projects", "*", "agentctx", stampFilename),
+		filepath.Join(vaultPath, "Knowledge", stampFilename),
+		filepath.Join(vaultPath, "Templates", stampFilename),
+	}
+
+	maxSurface := 0
+	worstDir := ""
+	worstWriter := ""
+
+	for _, pat := range patterns {
+		matches, err := filepath.Glob(pat)
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			stampDir := filepath.Dir(m)
+			s, err := ReadStamp(stampDir)
+			if err != nil {
+				// Malformed stamps are not gating events; skip silently.
+				continue
+			}
+			if s.Surface > maxSurface {
+				maxSurface = s.Surface
+				worstDir = stampDir
+				worstWriter = s.LastWriter
+			}
+		}
+	}
+
+	if maxSurface > MCPSurfaceVersion {
+		return &IncompatibleError{
+			BinarySurface: MCPSurfaceVersion,
+			VaultSurface:  maxSurface,
+			StampDir:      worstDir,
+			LastWriter:    worstWriter,
+		}
+	}
 	return nil
 }
