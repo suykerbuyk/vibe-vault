@@ -39,6 +39,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/scaffold"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
 	"github.com/suykerbuyk/vibe-vault/internal/stats"
+	"github.com/suykerbuyk/vibe-vault/internal/surface"
 	"github.com/suykerbuyk/vibe-vault/internal/templates"
 	"github.com/suykerbuyk/vibe-vault/internal/trends"
 	"github.com/suykerbuyk/vibe-vault/internal/vaultsync"
@@ -121,6 +122,21 @@ func main() {
 	case "version":
 		if wantsHelp(os.Args[2:]) {
 			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVersion))
+			return
+		}
+		// `vv version --tools` prints structured surface/schema/tools/commit
+		// for diagnostics. No surface gate here — version must work even on
+		// stale-binary states.
+		if hasFlag(os.Args[2:], "--tools") {
+			cfg, _ := config.Load()
+			logger := log.New(io.Discard, "", 0)
+			srv := mcp.NewServer(mcp.ServerInfo{Name: "vibe-vault", Version: help.Version}, logger)
+			mcp.RegisterAllTools(srv, cfg)
+			fmt.Printf("surface=%d schema=%d tools=%d commit=%s\n",
+				surface.MCPSurfaceVersion,
+				vvcontext.LatestSchemaVersion,
+				len(srv.ToolNames()),
+				help.Version)
 			return
 		}
 		fmt.Printf("vv %s (vibe-vault)\n", help.Version)
@@ -234,6 +250,9 @@ func runHook() {
 	}
 
 	cfg := mustLoadConfig()
+	// Warn-only gate (v5.1 C2 fix): a stale binary must not block AI
+	// session capture; we just emit a single stderr line on mismatch.
+	surface.EnforceWarnOnly(cfg.VaultPath)
 	event := flagValue(args, "--event")
 	if err := hook.Handle(cfg, event); err != nil {
 		fatal("%v", err)
@@ -252,6 +271,10 @@ func runContext() {
 				return
 			}
 			cfg := mustLoadConfig()
+			if err := surface.EnforceFailStop(cfg.VaultPath); err != nil {
+				fmt.Fprintln(os.Stderr, err.Error())
+				os.Exit(1)
+			}
 			cwd, err := os.Getwd()
 			if err != nil {
 				fatal("getwd: %v", err)
@@ -288,6 +311,10 @@ func runContext() {
 				return
 			}
 			cfg := mustLoadConfig()
+			if err := surface.EnforceFailStop(cfg.VaultPath); err != nil {
+				fmt.Fprintln(os.Stderr, err.Error())
+				os.Exit(1)
+			}
 			cwd, err := os.Getwd()
 			if err != nil {
 				fatal("getwd: %v", err)
@@ -318,6 +345,10 @@ func runContext() {
 				return
 			}
 			cfg := mustLoadConfig()
+			if err := surface.EnforceFailStop(cfg.VaultPath); err != nil {
+				fmt.Fprintln(os.Stderr, err.Error())
+				os.Exit(1)
+			}
 			cwd, err := os.Getwd()
 			if err != nil {
 				fatal("getwd: %v", err)
@@ -447,6 +478,7 @@ func runStats() {
 	}
 
 	cfg := mustLoadConfig()
+	surface.EnforceWarnOnly(cfg.VaultPath)
 	project := flagValue(os.Args[2:], "--project")
 	source := flagValue(os.Args[2:], "--source")
 
@@ -467,6 +499,7 @@ func runFriction() {
 	}
 
 	cfg := mustLoadConfig()
+	surface.EnforceWarnOnly(cfg.VaultPath)
 	project := flagValue(os.Args[2:], "--project")
 	source := flagValue(os.Args[2:], "--source")
 
@@ -487,6 +520,7 @@ func runTrends() {
 	}
 
 	cfg := mustLoadConfig()
+	surface.EnforceWarnOnly(cfg.VaultPath)
 	project := flagValue(os.Args[2:], "--project")
 	source := flagValue(os.Args[2:], "--source")
 
@@ -517,6 +551,7 @@ func runInject() {
 	}
 
 	cfg := mustLoadConfig()
+	surface.EnforceWarnOnly(cfg.VaultPath)
 
 	project := flagValue(os.Args[2:], "--project")
 	if project == "" {
@@ -586,6 +621,7 @@ func runEffectiveness() {
 	}
 
 	cfg := mustLoadConfig()
+	surface.EnforceWarnOnly(cfg.VaultPath)
 	project := flagValue(os.Args[2:], "--project")
 	format := flagValue(os.Args[2:], "--format")
 
@@ -613,6 +649,7 @@ func runExport() {
 	}
 
 	cfg := mustLoadConfig()
+	surface.EnforceWarnOnly(cfg.VaultPath)
 
 	format := flagValue(os.Args[2:], "--format")
 	if format == "" {
@@ -735,6 +772,9 @@ func runVault() {
 		return
 	}
 
+	// no surface gate: vault sync (pull/push/status) must work even when
+	// binary < vault max — it is the operator's recovery path out of any
+	// surface-version mismatch.
 	cfg := mustLoadConfig()
 
 	switch args[0] {
@@ -1345,6 +1385,15 @@ func runMcp() {
 		}()
 	}
 
+	// MCP startup surface-version gate. Refuses to serve a vault whose
+	// stamps record a higher MCP surface than this binary supports unless
+	// the operator opts into VV_SURFACE_GATE=warn.
+	if err := surface.EnforceFailStop(cfg.VaultPath); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, "[MCP] surface=%d\n", surface.MCPSurfaceVersion)
+
 	if err := srv.Serve(ctx, os.Stdin, os.Stdout); err != nil {
 		logger.Printf("mcp server error: %v", err)
 		os.Exit(1)
@@ -1358,6 +1407,10 @@ func runIndex() {
 	}
 
 	cfg := mustLoadConfig()
+	if err := surface.EnforceFailStop(cfg.VaultPath); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
 
 	idx, count, err := index.Rebuild(cfg.ProjectsDir(), cfg.StateDir())
 	if err != nil {
@@ -1394,6 +1447,10 @@ func runBackfill() {
 	}
 
 	cfg := mustLoadConfig()
+	if err := surface.EnforceFailStop(cfg.VaultPath); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
 
 	basePath := defaultTranscriptDir()
 	args := os.Args[2:]
@@ -1475,6 +1532,10 @@ func runArchive() {
 	}
 
 	cfg := mustLoadConfig()
+	if err := surface.EnforceFailStop(cfg.VaultPath); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
 	archiveDir := filepath.Join(cfg.StateDir(), "archive")
 
 	idx, err := index.Load(cfg.StateDir())
@@ -1538,6 +1599,10 @@ func runReprocess() {
 	}
 
 	cfg := mustLoadConfig()
+	if err := surface.EnforceFailStop(cfg.VaultPath); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
 
 	// --backfill-context: populate ContextAvailable on entries, then exit
 	if hasFlag(os.Args[2:], "--backfill-context") {
