@@ -2,7 +2,7 @@
 
 Extracted from `agentctx/resume.md` for reference.
 
-**1862 tests** across 41 test packages + **1 integration test** (31 subtests) + **21 vault-accessor integration tests**. All passing. (Direction-C iter 168 retired the wrap-bundle / QC / dispatch test inventories — see DESIGN #92; the stamp-file iter anchor adds `tools_stamp_iter_test.go` and reshapes `tools_describe_iter_state_test.go` — see DESIGN #93.)
+**1918 tests** across 41 test packages + **1 integration test** (31 subtests) + **21 vault-accessor integration tests**. All passing. (Direction-C iter 168 retired the wrap-bundle / QC / dispatch test inventories — see DESIGN #92; the stamp-file iter anchor adds `tools_stamp_iter_test.go` and reshapes `tools_describe_iter_state_test.go` — see DESIGN #93. The Phase 1+2 ship of `feat/hook-shape-validation` (DESIGN #96, iter 180) adds `internal/hook/validate_test.go` — the `ValidateHooks` table-driven validator covering the iter-178 regression fixture, all 5 `hookCommand` `anyOf` variants, and strict `additionalProperties: false` enforcement — plus pre-write refusal/coexistence cases across all four `Install*` paths in `internal/hook/setup_test.go`.)
 
 > **Note (iter 121):** The detailed per-file table below is out of date relative to the
 > headline counts above — accumulated drift across many iterations. Treat the table
