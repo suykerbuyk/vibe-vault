@@ -2693,3 +2693,55 @@ Key architectural and design decisions in vibe-vault, with rationale.
     (Phase 1: `internal/hook/validate.go` + `vv check`'s `hook`
     rewire; Phase 2: pre-write validation across all four
     `Install*` paths).
+
+    **Amendment (post-iter-180 dogfooding regression).** The
+    Phase 0 schema-discovery dispatch enumerated each variant's
+    `required` array but did NOT enumerate the schema's full
+    `properties` map. The Phase 1 validator therefore built the
+    allowed-field set as `{"type"} ∪ requiredStrings` and
+    rejected every schema-defined OPTIONAL field as "unknown" via
+    strict `additionalProperties: false`. The operator's first
+    `make install` + `vv check` against a real-world
+    `~/.claude/settings.json` immediately reported `FAIL hook` on
+    a `vp hook` entry with `timeout: 30` — a field Claude Code's
+    schema explicitly permits on the `command` variant. This was
+    a NEW false-Fail class introduced by the iter-180 ship, the
+    inverse of the original false-pass bug, and exactly the
+    diagnostic-honesty inversion this entry warned against.
+
+    The corrected per-variant required+optional contract:
+
+    | variant    | required               | optional                                                            |
+    | ---------- | ---------------------- | ------------------------------------------------------------------- |
+    | `command`  | `command`              | `timeout`, `async`, `asyncRewake`, `shell`, `if`, `statusMessage`   |
+    | `prompt`   | `prompt`               | `model`, `timeout`, `if`, `statusMessage`                           |
+    | `agent`    | `prompt`               | `model`, `timeout`, `if`, `statusMessage`                           |
+    | `http`     | `url`                  | `headers`, `allowedEnvVars`, `timeout`, `if`, `statusMessage`       |
+    | `mcp_tool` | `server`, `tool`       | `input`, `timeout`, `if`, `statusMessage`                           |
+
+    Common to all variants: `timeout` (number, exclusiveMinimum
+    0), `if` (string), `statusMessage` (string).
+    `hookCommandVariants` carries both `requiredStrings` and
+    `optionalFields` per variant; the allowed-field set is
+    `{"type"} ∪ requiredStrings ∪ optionalFields`.
+
+    **v1-vs-v2 type-check trade-off.** The validator enforces
+    optional-field NAMES only — no per-field type-checking in
+    v1. A `timeout: "thirty"` (string instead of number) passes
+    the validator. v2 may add per-field type enforcement; v1
+    closes the immediate false-Fail without expanding the
+    surface area. v2 is a candidate for re-open if a real-world
+    false-pass on a wrong-typed optional field surfaces.
+
+    **Schema-enumeration discipline lesson.** Future schema-
+    pinning subagent dispatches must capture the FULL `properties`
+    map (required + optional + per-field type/format constraints),
+    not just the `required` array. A field's absence from
+    `required` is itself a fact worth recording, not a signal
+    that the field doesn't exist. The Phase 0 brief in any future
+    schema-pinning task should explicitly enumerate "required
+    fields, optional fields, and per-field constraints" as three
+    distinct deliverables.
+
+    Filed as task `hook-validator-optional-fields-fix` (Draft v1,
+    iter 180); shipped on branch `fix/hook-validator-optional-fields`.
