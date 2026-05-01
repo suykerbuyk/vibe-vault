@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/suykerbuyk/vibe-vault/internal/atomicfile"
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
 
@@ -78,14 +79,14 @@ func NewSetCommitMsgTool(cfg config.Config) Tool {
 			data := []byte(args.Content)
 
 			// Step 1: atomic write to vault.
-			writeErr := atomicWriteFile(absVaultDest, data)
+			writeErr := atomicfile.Write(cfg.VaultPath, absVaultDest, data)
 			if writeErr != nil {
 				return "", fmt.Errorf("write vault commit.msg: %w", writeErr)
 			}
 
 			// Step 2: atomic copy to project root.
 			projDest := projectCommitMsgPath(args.ProjectPath)
-			copyErr := atomicWriteFile(projDest, data)
+			copyErr := atomicfile.Write(cfg.VaultPath, projDest, data)
 			if copyErr != nil {
 				return "", fmt.Errorf(
 					"vault commit.msg written to %q but project-root copy failed for %q: %w "+
