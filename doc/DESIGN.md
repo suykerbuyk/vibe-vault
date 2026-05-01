@@ -2585,3 +2585,111 @@ Key architectural and design decisions in vibe-vault, with rationale.
     new helper-side race regresses; or a debounce-bracketing test
     not currently in scope is added and starts flaking — fold the
     same conversion pattern in.
+
+96. **Strict-where-strict, permissive-only-where-strictness-harms
+    contract for Claude Code hook-entry schema validation in
+    `vv check` and the `Install*` writers.** Phase 0 of
+    `vv-hook-install-settings-shape-validation` pins the schema
+    contract that the upcoming `ValidateHooks(value any) []error`
+    helper consumes, before any code lands. Authoritative source:
+    `https://json.schemastore.org/claude-code-settings.json`
+    (JSON Schema draft-07, mirrored at SchemaStore). Hooks
+    documentation reference: `https://code.claude.com/docs/en/hooks`.
+
+    **Validator contract.**
+
+    - `hookMatcher` (each entry under an event array, e.g.
+      `hooks.PostToolUse[N]`): `required: ["hooks"]`, `matcher`
+      optional (string when present), `additionalProperties:
+      false`. The inner `hooks` array is the only mandatory key;
+      a bare `{type, command}` directly under the event array
+      (the iter-178 bug shape) fails because the matcher-wrapper's
+      required `hooks` array is missing.
+    - `hookCommand` (each item inside the inner `hooks` array):
+      5-way `anyOf` discriminated by `type` const, each variant
+      carrying its own required-field set and per-variant
+      `additionalProperties: false`:
+      - `command` → requires `command` (string)
+      - `prompt` → requires `prompt` (string)
+      - `agent` → requires `prompt` (string)
+      - `http` → requires `url` (string)
+      - `mcp_tool` → requires `server` (string), `tool` (string)
+    - Top-level event-name enum: **SKIPPED.** Claude Code's
+      schema closes the event-name set at ~25 names
+      (`PreToolUse`, `PostToolUse`, `SessionEnd`, `Stop`,
+      `PreCompact`, `PostCompact`, `UserPromptSubmit`,
+      `SessionStart`, …). Embedding that enum in `vv` would
+      create an ongoing maintenance burden — every Claude Code
+      release that adds an event would silently turn `vv check`
+      into a false-Fail diagnostic until `vv` ships a refresh.
+      Future event names pass our validator unchanged; staleness
+      is tracked as a carry-forward thread
+      (`hook-schema-staleness-refresh`) for periodic schema diffs.
+
+    **Why this contract, not v2's permissive one.** v2 of the
+    plan leaned permissive on three axes — `type` single-valued
+    (`"command"` only), unknown fields permitted "for forward
+    compatibility", and event names not validated. Schema
+    discovery (Phase 0 dispatch) showed the schema reality on
+    the first two was strict-rejection. Permissive validation in
+    those positions would create a NEW diagnostic-honesty
+    failure: `vv check` reporting `pass` on files Claude Code
+    rejects — exactly the bug class this task is fixing, just
+    inverted. The third axis (event-name enum) was deliberately
+    loosened from the schema to avoid a vv-vs-Claude-Code
+    staleness drag where `vv` lags the platform's event roster.
+
+    **Diagnostic-honesty principle.** A check that reports
+    `pass` on a state Claude Code rejects is worse than no
+    check at all — it actively misleads the operator running
+    `vv check` to diagnose "vibe-vault doesn't work." This
+    entry's strictness decisions follow the principle in BOTH
+    directions: strict where the schema is strict (so `vv` does
+    not lie about files Claude Code rejects), permissive ONLY
+    where the strictness creates more harm than benefit (the
+    event-name enum, where strictness embeds a maintenance drag
+    that itself produces false-Fail diagnostics on legitimate
+    future events).
+
+    **Related-but-out-of-scope: JSONC comment round-trip data
+    loss.** `internal/hook/setup.go:338` parses JSONC comments
+    and trailing commas via `stripJSONC`, but `writeSettings`
+    (line 409) writes via `json.MarshalIndent` — strict JSON,
+    no comment preservation. Operators who hand-edit
+    `~/.claude/settings.json` as JSONC (Claude Code's documented
+    superset) lose every comment on the first `vv`-touched
+    write. This is a pre-existing bug, orthogonal to schema
+    validation, documented here so future readers do not
+    conflate a "comments disappeared after `vv hook install`"
+    report with the schema-validation work that lands under
+    this task.
+
+    **Related-but-out-of-scope: `mcpServers` schema/reality
+    gap.** Per the pinned schema, `mcpServers` belongs in
+    `.mcp.json`, not `~/.claude/settings.json`. But `vv`'s
+    `addMCP` (`internal/hook/setup.go:288`) writes the block to
+    `~/.claude/settings.json`, and Claude Code accepts the
+    misplacement in practice — has accepted it for the entire
+    history of `vv mcp install`. Filed as a separate task
+    `mcp-servers-settings-schema-gap` for root-cause analysis
+    (decide whether `vv` migrates to `.mcp.json` or whether the
+    gap is documented as Claude Code's own
+    schema/implementation drift). Not addressed by this work;
+    documented here so future readers do not conflate it with
+    the hook-shape contract.
+
+    **Out of scope (this task).** Validation of `mcpServers`,
+    `extraKnownMarketplaces`, and `enabledPlugins` blocks.
+    `extraKnownMarketplaces` in particular has a strict 7-shape
+    `anyOf` discriminated by `source` const that v2's
+    "map-shape only" approximation would fail to catch — deeper
+    validation of those blocks is deferred to a separate task
+    `settings-json-shape-validation-mcp-blocks`, to be filed
+    after this work ships and the validator infrastructure is
+    in place to extend.
+
+    See task `vv-hook-install-settings-shape-validation` for
+    the validator implementation that consumes this contract
+    (Phase 1: `internal/hook/validate.go` + `vv check`'s `hook`
+    rewire; Phase 2: pre-write validation across all four
+    `Install*` paths).
