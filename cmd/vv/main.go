@@ -445,6 +445,8 @@ func runCheck() {
 		return
 	}
 
+	jsonOut := hasFlag(os.Args[2:], "--json")
+
 	cfg := mustLoadConfig()
 	report := check.Run(cfg)
 
@@ -463,6 +465,35 @@ func runCheck() {
 				report.Results = append(report.Results, *result)
 			}
 		}
+	}
+
+	// Surface gate is the last check — placed after project-scoped checks so
+	// the binary-vs-vault verdict reads as the closing line of the report.
+	report.Results = append(report.Results, check.CheckSurface(cfg))
+
+	if jsonOut {
+		// Build binary metadata: spin up an MCP server purely to count tools
+		// (same trick `vv version --tools` uses). No tools execute; we just
+		// read the registered names.
+		logger := log.New(io.Discard, "", 0)
+		srv := mcp.NewServer(mcp.ServerInfo{Name: "vibe-vault", Version: help.Version}, logger)
+		mcp.RegisterAllTools(srv, cfg)
+		binary := check.JSONBinaryInfo{
+			Surface: surface.MCPSurfaceVersion,
+			Schema:  vvcontext.LatestSchemaVersion,
+			Tools:   len(srv.ToolNames()),
+			Commit:  help.Version,
+		}
+		jr := report.ToJSON(binary)
+		out, err := json.MarshalIndent(jr, "", "  ")
+		if err != nil {
+			fatal("marshal json: %v", err)
+		}
+		fmt.Println(string(out))
+		if jr.ExitCode != 0 {
+			os.Exit(jr.ExitCode)
+		}
+		return
 	}
 
 	fmt.Print(report.Format())
