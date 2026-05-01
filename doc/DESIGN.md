@@ -2745,3 +2745,152 @@ Key architectural and design decisions in vibe-vault, with rationale.
 
     Filed as task `hook-validator-optional-fields-fix` (Draft v1,
     iter 180); shipped on branch `fix/hook-validator-optional-fields`.
+
+97. **MCP-surface-version handshake — single integer detects
+    binary/vault/template incompatibility across the fleet.** Four
+    asynchronous moving pieces (`vv` binary, MCP tool surface,
+    context/template files, vault state on disk written by N binaries
+    across M workstations over time) drift independently. Iter 182
+    surfaced the failure mode in the wild: a host with a stale `vv`
+    binary wrote vault content the modern binary on another host
+    didn't recognize, and the only signal was a silent corruption of
+    iter narratives. v5.1 of `mcp-tool-surface-versioning` lands a
+    single-integer handshake that turns silent drift into a loud,
+    actionable error at six well-defined detection points.
+
+    **Mechanism — every vault write is a claim, every binary read is
+    verification.** A monotonic integer `MCPSurfaceVersion`
+    (`internal/surface/version.go`, baseline `11` for the iter-173
+    `vv_stamp_iter` introduction) is the handshake token. It bumps
+    when the MCP tool surface changes in a way that affects vault
+    writes (tool added, tool removed, tool's required-input set
+    changed, or tool's vault-landing output shape changes by operator
+    judgment per v3 C1 — output-schema declaration is explicitly
+    deferred). Vault-touching writes stamp `.surface` files at three
+    fixed locations: `Projects/<p>/agentctx/.surface`,
+    `Knowledge/.surface`, `Templates/.surface`. The stamp records
+    `surface = N`, `last_writer = sha256(hostname + vault_path)[:8]`
+    (8-character privacy hash, raw-hostname opt-in via
+    `[stamp].verbose_writer = true` deferred to a config-plumbing
+    follow-up), and `last_write_at` (RFC3339).
+
+    **Stamping at write primitives, not at tool handlers.** v5
+    architectural correction: stamp at the few shared write primitives,
+    not at the 12-15 MCP tool handlers. v5.1 consolidates further by
+    relocating `atomicWriteFile` from `internal/mcp/atomic_write.go`
+    (Phase 0a) to a shared `internal/atomicfile/` package, then
+    routing `internal/vaultfs/{Write,Edit}`, `internal/session/capture`
+    (`os.WriteFile` at line 408), and 10+ `internal/context/sync`
+    callsites through the same helper. After Phase 1a there are
+    exactly two atomic-write primitives in the codebase
+    (`atomicfile.Write` and the small twin inside `surface.WriteStamp`
+    that exists only to break the would-be `atomicfile → surface →
+    atomicfile` import cycle). Stamping is universal at this single
+    layer; the `vaultPath` parameter on `atomicfile.Write` is the
+    trigger (empty string = host-local write, no stamp).
+
+    **Six detection points, one error class.**
+
+    | Layer | Behavior on mismatch (binary < vault) | Fires at |
+    |-------|---------------------------------------|----------|
+    | MCP server startup | Refuse to start (fail-stop); `VV_SURFACE_GATE=warn` overrides | Every `vv mcp` spawn (between `RegisterAllTools` and `srv.Serve`) |
+    | CLI vault-write entry points | Refuse with standard error (fail-stop); `VV_SURFACE_GATE=warn` overrides | `vv context {init,migrate,sync}`, `vv index`, `vv backfill`, `vv archive`, `vv reprocess` |
+    | `vv hook` subprocess | **Warn-only** (capture proceeds; v5.1 C2 fix) | Every Stop / PreCompact event |
+    | Read-only CLI | Warn-only (output proceeds); `VV_SURFACE_QUIET=1` suppresses | `vv inject`, `vv stats`, `vv friction`, `vv trends`, `vv effectiveness`, `vv export` |
+    | `vv check [--json]` | Same comparison, structured output | `/restart`, `/wrap`, CI, debug |
+    | Build pre-commit | Always strict (ignores `VV_SURFACE_GATE`) | `make pre-commit`, CI |
+
+    The `runHook` warn-only carve-out (v5.1 C2) is the most subtle.
+    Gating the hook subprocess fail-stop would surface as a hook error
+    mid-AI-session on every Stop event, breaking the workflow visibly
+    on every stale-binary host. Warn-only preserves capture; if the
+    binary is genuinely too old to write valid content, the next
+    write-primitive stamp comparison fires there with a clearer
+    message pointing at the actual write target. Read-only CLI gates
+    are warn-only by symmetry — `vv inject` should not refuse to
+    bootstrap context just because the vault was last touched by a
+    newer binary.
+
+    **`VV_SURFACE_GATE=warn` and `VV_SURFACE_QUIET=1`.** Two
+    environment variables, two separate concerns.
+    `VV_SURFACE_GATE=warn` degrades fail-stop entry points to
+    warn-only — the deploy-host escape hatch when a workstation is
+    blocked from upgrading. `VV_SURFACE_QUIET=1` suppresses
+    read-warning stderr lines without changing semantics — the
+    cron/script ergonomics knob. The build-time verifier explicitly
+    ignores both; surface drift in the source tree must be acted on,
+    not silenced.
+
+    **Build-time golden manifest invariant.**
+    `internal/mcp/tool_surface.golden.json` (40-tool baseline at
+    `surface_version: 11`) is the authoritative contract — name +
+    top-level `required` array per tool. `vv internal
+    verify-tool-surface` reads the live manifest via
+    `(*mcp.Server).ToolDefs()` (mirrors `ToolNames()`), diffs against
+    the golden, and refuses both `make pre-commit` and
+    `--update-golden` when `MCPSurfaceVersion` has not advanced past
+    `golden.surface_version`. The worked-example error names each
+    diff (added / removed / required-changed) and prescribes the
+    bump-then-rebuild-then-update-golden sequence.
+
+    **Multi-host stamp conflict resolution via `vv vault
+    merge-driver`.** `.surface` files are vault-tracked (every
+    workstation gets fleet-wide visibility), so two hosts writing the
+    same project's stamp produce a git conflict on push/pull. A custom
+    git merge driver registered in vault `.gitattributes`
+    (`*.surface merge=vv-surface`) and operator's `~/.gitconfig`
+    (`[merge "vv-surface"] driver = vv vault merge-driver %O %A %B`)
+    invokes `vv vault merge-driver <ancestor> <ours> <theirs>`, picks
+    `max(ours.surface, theirs.surface)`, and writes the resolution.
+    Auxiliary fields (`last_writer`, `last_write_at`) are not
+    preserved across merge — the resolution is integer-only by
+    design; the auxiliary fields get re-stamped on the next vault
+    write. `vv vault status` and `vv vault pull` auto-install both
+    `.gitattributes` and `~/.gitconfig` entries idempotently with a
+    one-line stderr notice on first install; `--no-install-merge-driver`
+    opts out for shared hosts. **Operator accepts `~/.gitconfig` write
+    as pragmatic** (M4) — the alternative is a per-vault git config
+    that operators must remember to enable per host, which defeats
+    the auto-resolution goal.
+
+    **Host-local route considered and rejected.** Host-local
+    `<UserCacheDir>/vibe-vault/<project>/.surface` would eliminate git
+    conflicts entirely but loses fleet visibility — exactly what the
+    iter-182 incident exposed as the problem. Host B would say "I
+    last wrote at N, all good" while host A had already advanced past
+    that. The merge driver is the right mechanism: vault-tracked
+    stamps for fleet visibility plus automated conflict resolution.
+
+    **Why this collapses the prior tasks.**
+    `vv-binary-freshness-guard` (Mechanisms C/D) ≡ v5.1 read tripwire
+    + `vv check`. v3's Mechanism A (template-vs-binary scan at
+    `vv context sync`) ≡ v5.1 startup gate plus the call-time
+    "unknown tool" error from `server.go`'s dispatch path — both fire
+    on the new-template-old-binary scenario. v3's Mechanism B
+    (build-time golden) ≡ Phase 3's verifier. The single integer
+    plus primitive-layer stamping plus merge driver plus unified
+    `vv check --json` covers all three drift axes in one mechanism.
+
+    **What v5.1 explicitly does NOT do.** Per-tool semver (single
+    integer covers it). Output-schema declaration (deferred from v3
+    C1; file `mcp-tool-output-schema-declaration` if cross-host
+    output drift causes a real failure). Templates with
+    dynamically-constructed tool names (must use literal `vv_*`
+    references). MCP subcommand explosion (`vv check surface`,
+    `vv check schema`, etc. — H1 rejected; one verb with `--json`).
+    Cron-based workstation sync (operational hygiene, not project
+    code). Schema-axis migrations (already shipped iter 130).
+    `IntroducedIn` per-tool annotation (the global integer + golden
+    manifest cover detection without it). Host-local cache route
+    (rejected above). Hard-fail at `runHook` (v5.1 C2).
+
+    **Filed as task `mcp-tool-surface-versioning` (Draft v5.1,
+    iters 171 → 178 → 183 → 184); shipped on branch
+    `feat/mcp-surface-handshake` across Phases 0a, 1a, 1b, 1c, 2,
+    3a, 3b, 4. Five major reframes (v1 → v2 → v3 → v4 → v5 → v5.1),
+    each surfacing architectural redundancy that was only visible
+    after the prior version's design was concrete enough to compare
+    against. The Phase 0 runtime-trace requirement — walk all four
+    failure scenarios against current source paths before dispatch —
+    remains the institutional hedge against another reframe at
+    execution time.**

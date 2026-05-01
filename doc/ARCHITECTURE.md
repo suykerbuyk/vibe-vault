@@ -412,6 +412,48 @@ Tier 1: Embedded binary            Tier 2: Vault Templates/       Tier 3: Projec
 
 Source of truth: Tier 1 (Go embeds). See DESIGN.md decisions #41 and #46.
 
+### MCP Surface Handshake (DESIGN #97)
+
+```
+Vault writes always stamp:                         Binary reads always verify:
+                                                   
+internal/atomicfile.Write(vaultPath, ...)         vv mcp startup ──┐
+   │                                                              │
+   ▼                                              vv context ─────┤
+surface.ResolveStampDir(vaultPath, path)          vv index ───────┤
+   │                                              vv backfill ────┤  → surface.EnforceFailStop
+   ▼                                              vv archive ─────┤    (refuse if vault > binary)
+{Projects/<p>/agentctx/.surface,                  vv reprocess ───┘    VV_SURFACE_GATE=warn overrides
+ Knowledge/.surface,
+ Templates/.surface}                              vv hook ────────┐
+   │                                                              │  → surface.EnforceWarnOnly
+   ▼                                              vv inject ──────┤    (single stderr line, proceed)
+surface.WriteStamp(stampDir, MCPSurfaceVersion,   vv stats ───────┤    VV_SURFACE_QUIET=1 suppresses
+                   WriterFingerprint(vaultPath))  vv friction ────┤
+                                                  vv trends ──────┤
+.surface (TOML):                                  vv effectiveness┤
+   surface = 11                                   vv export ──────┘
+   last_writer = "a3c1d8f9"   (sha256[:8])
+   last_write_at = "RFC3339"                      vv check [--json]   → surface check in Report
+
+                                                  make pre-commit, CI → vv internal verify-tool-surface
+                                                                        (always strict; ignores VV_SURFACE_GATE)
+```
+
+Multi-host stamp conflicts resolve via `vv vault merge-driver`
+(picks `max(integer)`; auxiliary fields re-stamped on next write).
+Auto-installed in vault `.gitattributes` and `~/.gitconfig` by
+`vv vault status`/`pull`.
+
+Build-time invariant: `internal/mcp/tool_surface.golden.json`
+records `{surface_version, tools[{name, required_inputs}]}`. The
+verifier diffs live `(*Server).ToolDefs()` against the golden;
+`make pre-commit` and CI fail when surface drift is unaccompanied
+by a `MCPSurfaceVersion` bump.
+
+See DESIGN.md #97 for the full design rationale, six-detection-point
+matrix, and merge-driver mechanics.
+
 ## Module Responsibilities
 
 | Package | File | Responsibility |
