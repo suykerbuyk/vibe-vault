@@ -254,7 +254,14 @@ func TestCheckSynthesis_Pass(t *testing.T) {
 func TestCheckHookFile_Pass(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
-	content := `{"hooks":{"SessionEnd":[{"hooks":[{"type":"command","command":"vv hook"}]}]}}`
+	// Updated for DESIGN #96 contract: vv hook must be wired into ALL three
+	// vv-owned events (SessionEnd, Stop, PreCompact) for HasVVHook to return
+	// true (mirrors isInstalled's all-events semantics).
+	content := `{"hooks":{
+		"SessionEnd":[{"hooks":[{"type":"command","command":"vv hook"}]}],
+		"Stop":[{"hooks":[{"type":"command","command":"vv hook"}]}],
+		"PreCompact":[{"hooks":[{"type":"command","command":"vv hook"}]}]
+	}}`
 	os.WriteFile(path, []byte(content), 0o644)
 
 	r := checkHookFile(path)
@@ -278,6 +285,69 @@ func TestCheckHookFile_Fail(t *testing.T) {
 	r := checkHookFile(path)
 	if r.Status != Fail {
 		t.Errorf("expected Fail, got %s: %s", r.Status, r.Detail)
+	}
+}
+
+// TestCheckHookFile_Iter178Regression is THE regression test for the
+// iter-178 bug report (vibe-vault-bug-report.md). A malformed PostToolUse
+// entry (legacy flat shape, no matcher-wrapper) sitting alongside well-formed
+// vv hook entries must make `vv check` Fail with a diagnostic naming
+// PostToolUse[0]. The pre-Phase-1 substring grep would Pass this fixture,
+// causing the diagnostic-honesty failure documented in DESIGN #96.
+func TestCheckHookFile_Iter178Regression(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	content := `{
+		"hooks": {
+			"SessionEnd": [{"hooks":[{"type":"command","command":"vv hook"}]}],
+			"Stop":       [{"hooks":[{"type":"command","command":"vv hook"}]}],
+			"PreCompact": [{"hooks":[{"type":"command","command":"vv hook"}]}],
+			"PostToolUse": [{"command":"vv hook","type":"command"}]
+		}
+	}`
+	os.WriteFile(path, []byte(content), 0o644)
+
+	r := checkHookFile(path)
+	if r.Status != Fail {
+		t.Fatalf("expected Fail (iter-178 regression), got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "PostToolUse[0]") {
+		t.Errorf("expected detail to name PostToolUse[0], got: %s", r.Detail)
+	}
+}
+
+// TestCheckHookFile_InvalidJSON exercises the new Fail mode for
+// syntactically broken settings — a diagnostic-honesty improvement over the
+// pre-Phase-1 substring grep, which would Warn on unreadable files but
+// silently fall through on unparseable ones.
+func TestCheckHookFile_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	os.WriteFile(path, []byte(`{"hooks": [unparseable`), 0o644)
+
+	r := checkHookFile(path)
+	if r.Status != Fail {
+		t.Fatalf("expected Fail, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "invalid JSON") {
+		t.Errorf("expected 'invalid JSON' in detail, got: %s", r.Detail)
+	}
+}
+
+// TestCheckHookFile_MissingVVHook covers the well-formed-but-no-vv-hook
+// branch — preserves the prior Fail message format.
+func TestCheckHookFile_MissingVVHook(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	content := `{"hooks":{"SessionEnd":[{"hooks":[{"type":"command","command":"other-tool"}]}]}}`
+	os.WriteFile(path, []byte(content), 0o644)
+
+	r := checkHookFile(path)
+	if r.Status != Fail {
+		t.Fatalf("expected Fail, got %s: %s", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "vv hook not found") {
+		t.Errorf("expected 'vv hook not found' in detail, got: %s", r.Detail)
 	}
 }
 

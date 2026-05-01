@@ -12,6 +12,7 @@ import (
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 	vvcontext "github.com/suykerbuyk/vibe-vault/internal/context"
+	"github.com/suykerbuyk/vibe-vault/internal/hook"
 	"github.com/suykerbuyk/vibe-vault/internal/meta"
 	"github.com/suykerbuyk/vibe-vault/internal/plugin"
 )
@@ -289,7 +290,20 @@ func checkHookFile(path string) Result {
 	if err != nil {
 		return Result{Name: "hook", Status: Warn, Detail: config.CompressHome(path) + " not found"}
 	}
-	if strings.Contains(string(data), "vv hook") {
+
+	settings, err := hook.ParseSettings(data)
+	if err != nil {
+		return Result{Name: "hook", Status: Fail, Detail: fmt.Sprintf("settings.json: invalid JSON: %v", err)}
+	}
+
+	// Schema-shape validation against DESIGN #96 contract. Pick the first
+	// error in deterministic order — caller surfaces it in Result.Detail.
+	if errs := hook.ValidateHooks(settings["hooks"]); len(errs) > 0 {
+		return Result{Name: "hook", Status: Fail, Detail: errs[0].Error()}
+	}
+
+	// Validation clean. Now confirm vv hook is actually wired in.
+	if hook.HasVVHook(settings) {
 		return Result{Name: "hook", Status: Pass, Detail: "vv hook found in " + config.CompressHome(path)}
 	}
 	return Result{Name: "hook", Status: Fail, Detail: "vv hook not found in " + config.CompressHome(path)}

@@ -332,6 +332,31 @@ func readSettings(path string) (map[string]any, error) {
 	return settings, nil
 }
 
+// ParseSettings parses raw settings.json bytes (JSONC-aware) into a
+// map[string]any. Empty or whitespace-only input yields an empty map. Callers
+// outside this package use this to share the JSONC-stripping pipeline with the
+// internal Install* paths without duplicating stripJSONC.
+func ParseSettings(data []byte) (map[string]any, error) {
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return make(map[string]any), nil
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(stripJSONC(data), &settings); err != nil {
+		return nil, err
+	}
+	if settings == nil {
+		settings = make(map[string]any)
+	}
+	return settings, nil
+}
+
+// HasVVHook returns true when every event in hookEvents has a vv hook
+// matcher-wrapper entry. Mirrors isInstalled's "all events present" semantics
+// so vv check and the installer agree on what "installed" means.
+func HasVVHook(settings map[string]any) bool {
+	return isInstalled(settings)
+}
+
 // stripJSONC removes // line comments, /* block comments */, and trailing
 // commas from JSONC input so it can be parsed by encoding/json. Handles
 // comments inside strings correctly (they are preserved).
