@@ -152,6 +152,9 @@ jobs:
       - name: make check
         if: needs.detect-admin-commit.outputs.is_admin_only != 'true'
         run: make check
+      - name: Verify MCP tool surface
+        if: needs.detect-admin-commit.outputs.is_admin_only != 'true'
+        run: make verify-tool-surface
       - name: Coverage
         if: needs.detect-admin-commit.outputs.is_admin_only != 'true'
         run: go test -coverprofile=coverage.out ./internal/...
