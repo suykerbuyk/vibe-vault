@@ -12,18 +12,41 @@ import (
 // See doc/DESIGN.md #96 for the pinned validator contract.
 
 // hookCommandVariants is the data-driven table of hookCommand `anyOf`
-// variants. Each variant carries its `type` const (the map key) and the
-// additional required string fields beyond `type`. A variant's allowed field
-// set is `{"type"} ∪ requiredStrings`; any other field name fails strict
-// `additionalProperties: false`. Adding a sixth variant is a one-row edit.
+// variants. Each variant carries its `type` const (the map key), the
+// required string fields beyond `type`, and the optional fields drawn from
+// the schema's per-variant `properties` map. A variant's allowed field set
+// is `{"type"} ∪ requiredStrings ∪ optionalFields`; any other field name
+// fails strict `additionalProperties: false`. Adding a sixth variant is a
+// one-row edit.
+//
+// optionalFields is name-only — v1 does NOT type-check optional fields. A
+// `timeout: "thirty"` (string) passes; only the field-NAME set is checked.
+// v2 candidate if a real-world false-pass on a wrong-typed optional field
+// surfaces.
 var hookCommandVariants = map[string]struct {
 	requiredStrings []string
+	optionalFields  []string
 }{
-	"command":  {requiredStrings: []string{"command"}},
-	"prompt":   {requiredStrings: []string{"prompt"}},
-	"agent":    {requiredStrings: []string{"prompt"}},
-	"http":     {requiredStrings: []string{"url"}},
-	"mcp_tool": {requiredStrings: []string{"server", "tool"}},
+	"command": {
+		requiredStrings: []string{"command"},
+		optionalFields:  []string{"timeout", "async", "asyncRewake", "shell", "if", "statusMessage"},
+	},
+	"prompt": {
+		requiredStrings: []string{"prompt"},
+		optionalFields:  []string{"model", "timeout", "if", "statusMessage"},
+	},
+	"agent": {
+		requiredStrings: []string{"prompt"},
+		optionalFields:  []string{"model", "timeout", "if", "statusMessage"},
+	},
+	"http": {
+		requiredStrings: []string{"url"},
+		optionalFields:  []string{"headers", "allowedEnvVars", "timeout", "if", "statusMessage"},
+	},
+	"mcp_tool": {
+		requiredStrings: []string{"server", "tool"},
+		optionalFields:  []string{"input", "timeout", "if", "statusMessage"},
+	},
 }
 
 // ValidateHooks walks a settings.json hooks block and returns
@@ -159,9 +182,13 @@ func validateHookCommand(matcherPath string, index int, item any) []error {
 		return errs
 	}
 
-	// Build the allowed-field set for this variant: {"type"} ∪ requiredStrings.
+	// Build the allowed-field set for this variant:
+	// {"type"} ∪ requiredStrings ∪ optionalFields.
 	allowed := map[string]bool{"type": true}
 	for _, f := range variant.requiredStrings {
+		allowed[f] = true
+	}
+	for _, f := range variant.optionalFields {
 		allowed[f] = true
 	}
 
