@@ -5,37 +5,24 @@ package index
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/suykerbuyk/vibe-vault/internal/lockfile"
 )
 
-func TestLockUnlock(t *testing.T) {
+// TestIndexConcurrentSave is an integration-style test verifying that
+// the lockfile primitive (promoted out of this package in Phase 1a)
+// still serializes Index Load/Add/Save sequences correctly. Each of
+// N goroutines acquires the lock, loads the index, adds a unique entry,
+// and saves; the final entry count must equal N.
+func TestIndexConcurrentSave(t *testing.T) {
 	dir := t.TempDir()
 	indexPath := filepath.Join(dir, "session-index.json")
-
-	fl, err := Lock(indexPath)
-	if err != nil {
-		t.Fatalf("Lock: %v", err)
-	}
-
-	// Lock file should exist
 	lockPath := indexPath + ".lock"
-	if _, err := os.Stat(lockPath); err != nil {
-		t.Errorf("lock file should exist: %v", err)
-	}
 
-	if err := fl.Unlock(); err != nil {
-		t.Fatalf("Unlock: %v", err)
-	}
-}
-
-func TestLockConcurrentAccess(t *testing.T) {
-	dir := t.TempDir()
-	indexPath := filepath.Join(dir, "session-index.json")
-
-	// Write initial index
+	// Write initial index.
 	idx := &Index{
 		path:    indexPath,
 		Entries: make(map[string]SessionEntry),
@@ -53,14 +40,13 @@ func TestLockConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 
-			fl, err := Lock(indexPath)
+			fl, err := lockfile.Acquire(lockPath)
 			if err != nil {
 				errs <- err
 				return
 			}
-			defer fl.Unlock()
+			defer func() { _ = fl.Release() }()
 
-			// Load, modify, save while holding lock
 			loaded, err := Load(dir)
 			if err != nil {
 				errs <- err
@@ -86,7 +72,6 @@ func TestLockConcurrentAccess(t *testing.T) {
 		t.Errorf("goroutine error: %v", err)
 	}
 
-	// Verify all entries were saved
 	final, err := Load(dir)
 	if err != nil {
 		t.Fatalf("final load: %v", err)
@@ -94,25 +79,5 @@ func TestLockConcurrentAccess(t *testing.T) {
 
 	if len(final.Entries) != goroutines {
 		t.Errorf("expected %d entries, got %d", goroutines, len(final.Entries))
-	}
-}
-
-func TestUnlockIdempotent(t *testing.T) {
-	dir := t.TempDir()
-	indexPath := filepath.Join(dir, "session-index.json")
-
-	fl, err := Lock(indexPath)
-	if err != nil {
-		t.Fatalf("Lock: %v", err)
-	}
-
-	// First unlock should succeed
-	if err := fl.Unlock(); err != nil {
-		t.Fatalf("first Unlock: %v", err)
-	}
-
-	// Second unlock should be a no-op (file is nil)
-	if err := fl.Unlock(); err != nil {
-		t.Fatalf("second Unlock should be no-op: %v", err)
 	}
 }

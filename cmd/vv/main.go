@@ -33,6 +33,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/index"
 	"github.com/suykerbuyk/vibe-vault/internal/inject"
 	"github.com/suykerbuyk/vibe-vault/internal/llm"
+	"github.com/suykerbuyk/vibe-vault/internal/lockfile"
 	"github.com/suykerbuyk/vibe-vault/internal/mcp"
 	"github.com/suykerbuyk/vibe-vault/internal/memory"
 	"github.com/suykerbuyk/vibe-vault/internal/meta"
@@ -1655,11 +1656,11 @@ func runReprocess() {
 	if hasFlag(os.Args[2:], "--backfill-context") {
 		overwrite := hasFlag(os.Args[2:], "--force")
 		indexPath := filepath.Join(cfg.StateDir(), "session-index.json")
-		fl, lockErr := index.Lock(indexPath)
+		fl, lockErr := lockfile.Acquire(indexPath + ".lock")
 		if lockErr != nil {
 			fatal("acquire index lock: %v", lockErr)
 		}
-		defer func() { _ = fl.Unlock() }()
+		defer func() { _ = fl.Release() }()
 
 		idx, err := index.Load(cfg.StateDir())
 		if err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 	"github.com/suykerbuyk/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/lockfile"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
 )
 
@@ -45,14 +46,14 @@ func BatchCapture(opts BatchCaptureOpts) BatchResult {
 	if mkdirErr := os.MkdirAll(stateDir, 0o755); mkdirErr != nil {
 		logger.Printf("warning: could not create state dir: %v", mkdirErr)
 	}
-	indexLockPath := filepath.Join(stateDir, "session-index.json")
-	fl, lockErr := index.Lock(indexLockPath)
+	indexLockPath := filepath.Join(stateDir, "session-index.json") + ".lock"
+	fl, lockErr := lockfile.Acquire(indexLockPath)
 	if lockErr != nil {
 		logger.Printf("warning: could not acquire index lock: %v", lockErr)
 	}
 	defer func() {
 		if fl != nil {
-			_ = fl.Unlock()
+			_ = fl.Release()
 		}
 	}()
 
