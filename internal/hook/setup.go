@@ -499,12 +499,19 @@ func isInstalled(settings map[string]any) bool {
 }
 
 // hasAnyVVHook returns true when any event has a vv hook entry.
+//
+// Iterates ALL keys under hooks, not just hookEvents — orphan entries
+// under non-canonical events (e.g., a PostToolUse entry left behind by
+// a prior buggy installer or manual injection) must still be detected
+// so Uninstall does not short-circuit and leave them behind.
+// See doc/DESIGN.md and the session-slot-multihost-disambiguation
+// PR 0b plan for the iter-189 motivating regression.
 func hasAnyVVHook(settings map[string]any) bool {
 	hooksMap, ok := settings["hooks"].(map[string]any)
 	if !ok {
 		return false
 	}
-	for _, event := range hookEvents {
+	for event := range hooksMap {
 		if eventHasVVHook(hooksMap, event) {
 			return true
 		}
@@ -543,15 +550,23 @@ func addHooks(settings map[string]any) {
 	}
 }
 
-// removeHooks removes entries containing "vv hook" from both events.
-// Cleans up empty arrays and empty hooks map.
+// removeHooks removes entries containing "vv hook" from every event in
+// the hooks map. Cleans up empty arrays and an empty hooks map.
+//
+// Iterates ALL keys, not just hookEvents — orphan entries under
+// non-canonical events (e.g., a PostToolUse entry left behind by a
+// prior buggy installer or manual injection) are GC'd here too, so
+// `vv hook uninstall` always leaves a clean slate. Note: addHooks
+// (Install path) deliberately stays canonical-only — only the cleanup
+// path is orphan-aware. See the session-slot-multihost-disambiguation
+// PR 0b plan for the iter-189 motivating regression.
 func removeHooks(settings map[string]any) {
 	hooksMap, ok := settings["hooks"].(map[string]any)
 	if !ok {
 		return
 	}
 
-	for _, event := range hookEvents {
+	for event := range hooksMap {
 		eventArray, ok := hooksMap[event].([]any)
 		if !ok {
 			continue
