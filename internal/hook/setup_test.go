@@ -1762,6 +1762,165 @@ func TestInstall_AcceptsAllFiveHookCommandVariants(t *testing.T) {
 	}
 }
 
+// --- Phase 0b: orphan-aware Uninstall tests ---
+//
+// Iter 189 surfaced a real PostToolUse `vv hook` orphan that survived a
+// clean uninstall+reinstall cycle: removeHooks/hasAnyVVHook iterated
+// only the canonical events (SessionEnd/Stop/PreCompact), so any vv
+// hook entry under another event key was invisible to the uninstaller.
+// Phase 0b widens the cleanup path to GC every event key.
+
+func TestUninstall_RemovesPostToolUseOrphan(t *testing.T) {
+	home := setupHome(t)
+	path := settingsPath(home)
+
+	// Canonical hooks plus a PostToolUse orphan (the iter-189 shape).
+	vvEntry := func() map[string]any {
+		return map[string]any{
+			"matcher": "",
+			"hooks": []any{
+				map[string]any{"type": "command", "command": "vv hook"},
+			},
+		}
+	}
+	writeJSON(t, path, map[string]any{
+		"hooks": map[string]any{
+			"SessionEnd":  []any{vvEntry()},
+			"Stop":        []any{vvEntry()},
+			"PreCompact":  []any{vvEntry()},
+			"PostToolUse": []any{vvEntry()}, // orphan from a prior buggy installer
+		},
+	})
+
+	if err := Uninstall(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	if hooks, ok := settings["hooks"].(map[string]any); ok {
+		for _, ev := range []string{"SessionEnd", "Stop", "PreCompact", "PostToolUse"} {
+			if _, present := hooks[ev]; present {
+				t.Errorf("event %s should have been removed; orphan-aware GC failed", ev)
+			}
+		}
+	}
+	// With no other entries left, the entire hooks block must be gone.
+	if _, ok := settings["hooks"]; ok {
+		t.Error("hooks block should be removed when only vv entries existed")
+	}
+}
+
+func TestUninstall_OrphanOnlySettings(t *testing.T) {
+	home := setupHome(t)
+	path := settingsPath(home)
+
+	// ONLY a PostToolUse orphan — no canonical entries at all.
+	// Pre-fix, hasAnyVVHook would return false and Uninstall would
+	// short-circuit with "not found", leaving the orphan in place.
+	writeJSON(t, path, map[string]any{
+		"hooks": map[string]any{
+			"PostToolUse": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{"type": "command", "command": "vv hook"},
+					},
+				},
+			},
+		},
+	})
+
+	if err := Uninstall(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	if _, ok := settings["hooks"]; ok {
+		t.Error("orphan-only PostToolUse vv hook should have been removed; Uninstall short-circuited")
+	}
+	// Backup must exist — this proves Uninstall ran the cleanup path
+	// rather than short-circuiting on the "not found" branch.
+	if _, err := os.Stat(path + ".vv.bak"); err != nil {
+		t.Errorf("expected backup file (proof Uninstall ran cleanup path), got: %v", err)
+	}
+}
+
+func TestUninstall_PreservesNonVVHooks(t *testing.T) {
+	home := setupHome(t)
+	path := settingsPath(home)
+
+	writeJSON(t, path, map[string]any{
+		"hooks": map[string]any{
+			"SessionEnd": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{"type": "command", "command": "vv hook"},
+					},
+				},
+			},
+			"PostToolUse": []any{
+				map[string]any{
+					"matcher": "Edit",
+					"hooks": []any{
+						map[string]any{"type": "command", "command": "echo other"},
+					},
+				},
+			},
+		},
+	})
+
+	if err := Uninstall(); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := readJSON(t, path)
+	hooks, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		t.Fatal("hooks block should remain (third-party PostToolUse entry must survive)")
+	}
+	if _, ok := hooks["SessionEnd"]; ok {
+		t.Error("SessionEnd vv hook should have been removed")
+	}
+	pt, ok := hooks["PostToolUse"].([]any)
+	if !ok || len(pt) != 1 {
+		t.Fatalf("PostToolUse third-party entry should survive, got: %v", hooks["PostToolUse"])
+	}
+	entry := pt[0].(map[string]any)
+	if entry["matcher"] != "Edit" {
+		t.Errorf("third-party matcher mangled, got: %v", entry["matcher"])
+	}
+	inner := entry["hooks"].([]any)
+	cmd := inner[0].(map[string]any)
+	if cmd["command"] != "echo other" {
+		t.Errorf("third-party command mangled, got: %v", cmd["command"])
+	}
+}
+
+func TestRemoveHooks_OrphanInOtherEvent(t *testing.T) {
+	// Direct unit test of removeHooks (lower-level than Uninstall).
+	// A vv hook entry buried under an event NOT in hookEvents — the
+	// pre-fix code would skip it entirely.
+	settings := map[string]any{
+		"hooks": map[string]any{
+			"Notification": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{"type": "command", "command": "vv hook"},
+					},
+				},
+			},
+		},
+	}
+
+	removeHooks(settings)
+
+	if _, ok := settings["hooks"]; ok {
+		t.Error("orphan vv hook under Notification should have been GC'd")
+	}
+}
+
 func TestInstall_SanityGateOnAddHooks(t *testing.T) {
 	// Smoke test: well-formed empty settings → Install() →
 	// post-write hooks block is shape-valid. Proves the
