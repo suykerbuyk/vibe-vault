@@ -25,7 +25,7 @@ import (
 
 // MCPSurfaceVersion is the current MCP tool-surface schema version. It bumps
 // when the verifier ships in Phase 3.
-const MCPSurfaceVersion int = 11
+const MCPSurfaceVersion int = 12
 
 // Stamp models the on-disk .surface TOML file recording the latest writer.
 type Stamp struct {

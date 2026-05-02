@@ -452,6 +452,18 @@ var expectedTerminal = map[string]string{
 		"Subcommands:\n" +
 		"  vv memory link     Symlink host-local memory into the vault\n" +
 		"  vv memory unlink   Reverse the symlink (vault copy preserved)\n",
+
+	"worktree": "vv worktree \u2014 subagent worktree management\n" +
+		"\n" +
+		"Usage: vv worktree <command>\n" +
+		"\n" +
+		"Manages git worktrees created by AI subagents under\n" +
+		".claude/worktrees/. Subagents lock their worktrees with a marker\n" +
+		"(\"claude agent <id> (pid N)\") so a crash leaves them on disk; this\n" +
+		"command cluster reaps the stale ones safely.\n" +
+		"\n" +
+		"Subcommands:\n" +
+		"  vv worktree gc   Reap stale subagent worktrees with capture verification\n",
 }
 
 func TestFormatTerminal(t *testing.T) {
@@ -493,6 +505,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv vault <command>               Vault git sync (pull, push, status)\n" +
 		"  vv zed <subcommand>              Import Zed agent panel threads into vault\n" +
 		"  vv mcp [install | ...]           Start MCP server (JSON-RPC over stdio)\n" +
+		"  vv worktree [gc | ...]           Manage subagent worktrees (gc)\n" +
 		"  vv config [set-key | ...]        Manage configuration (provider keys, etc.)\n" +
 		"  vv templates [list | ...]        Inspect, compare, and reset vault templates\n" +
 		"  vv version                       Print version\n" +
@@ -513,7 +526,7 @@ func TestFormatUsage(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "context", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "memory", "vault", "zed", "mcp", "config", "templates", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "memory", "vault", "zed", "mcp", "worktree", "config", "templates", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))

@@ -1053,6 +1053,59 @@ var VaultSubcommands = []Command{
 	CmdVaultPush,
 }
 
+var CmdWorktree = Command{
+	Name:       "worktree",
+	Synopsis:   "subagent worktree management",
+	Brief:      "Manage subagent worktrees (gc)",
+	TableUsage: "vv worktree [gc | ...]",
+	Usage:      "vv worktree <command>",
+	Description: `Manages git worktrees created by AI subagents under
+.claude/worktrees/. Subagents lock their worktrees with a marker
+("claude agent <id> (pid N)") so a crash leaves them on disk; this
+command cluster reaps the stale ones safely.
+
+Subcommands:
+  vv worktree gc   Reap stale subagent worktrees with capture verification`,
+	SeeAlso: []string{"vv(1)", "vv-worktree-gc(1)"},
+}
+
+var CmdWorktreeGc = Command{
+	Name:     "worktree gc",
+	Synopsis: "reap stale subagent worktrees",
+	Brief:    "Reap stale subagent worktrees with capture verification",
+	Usage:    "vv worktree gc [--dry-run] [--json] [--candidate-parents <csv>] [--force-uncaptured]",
+	Flags: []Flag{
+		{Name: "--dry-run", Desc: "Report would-reap actions without destructive changes"},
+		{Name: "--json", Desc: "Emit Result as indented JSON to stdout"},
+		{Name: "--candidate-parents <csv>", Desc: "Comma-separated branch list for capture verification (default: resolved at runtime)"},
+		{Name: "--force-uncaptured", Desc: "Reap even when the worktree branch contains commits not in any candidate parent"},
+	},
+	Description: `Scans every locked worktree under the current repository,
+inspects its claude-agent marker, probes the holder PID for liveness,
+and (when the holder is dead) verifies the worktree branch's commits
+are captured by an authoritative parent before destructively removing
+the worktree. Default-branch-aware via git symbolic-ref.
+
+A repo-level lockfile keyed by absolute git-common-dir serializes
+concurrent invocations across linked worktrees of the same repository.
+
+Exit codes:
+  0  success (per-worktree errors are surfaced in the output)
+  2  fatal failure (lock contention, enumeration error)`,
+	Examples: []string{
+		"vv worktree gc --dry-run                          Inspect without destruction",
+		"vv worktree gc                                    Reap stale worktrees",
+		"vv worktree gc --candidate-parents main,develop   Override default parents",
+		"vv worktree gc --force-uncaptured                 Reap even uncaptured branches",
+	},
+	SeeAlso: []string{"vv(1)", "vv-worktree(1)"},
+}
+
+// WorktreeSubcommands is the ordered list of worktree sub-subcommands.
+var WorktreeSubcommands = []Command{
+	CmdWorktreeGc,
+}
+
 // ZedSubcommands is the ordered list of zed sub-subcommands.
 var ZedSubcommands = []Command{
 	CmdZedBackfill,
@@ -1113,6 +1166,7 @@ var Subcommands = []Command{
 	CmdVault,
 	CmdZed,
 	CmdMcp,
+	CmdWorktree,
 	CmdConfig,
 	CmdTemplates,
 	CmdVersion,
