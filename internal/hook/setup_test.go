@@ -1879,7 +1879,7 @@ func TestUninstall_PreservesNonVVHooks(t *testing.T) {
 	if !ok {
 		t.Fatal("hooks block should remain (third-party PostToolUse entry must survive)")
 	}
-	if _, ok := hooks["SessionEnd"]; ok {
+	if _, exists := hooks["SessionEnd"]; exists {
 		t.Error("SessionEnd vv hook should have been removed")
 	}
 	pt, ok := hooks["PostToolUse"].([]any)
