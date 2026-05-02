@@ -423,7 +423,15 @@ func TestGetKnowledgeEmptyProject(t *testing.T) {
 // --- get_session_detail tests ---
 
 func TestGetSessionDetailBasic(t *testing.T) {
-	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+	// Phase 5 / Mechanism 1: handler now resolves filename via index lookup.
+	// Seed the index entry alongside the disk file. Legacy counter filename
+	// preserved as a mixed-format compat exercise.
+	cfg := writeTestVault(t, map[string]index.SessionEntry{
+		"s1": {
+			SessionID: "s1", Project: "myproj", Date: "2027-06-15", Iteration: 1,
+			NotePath: "Projects/myproj/sessions/2027-06-15-01.md",
+		},
+	}, map[string]string{
 		"Projects/myproj/sessions/2027-06-15-01.md": "---\ntitle: Add OAuth\n---\nSession content here.",
 	})
 
@@ -438,7 +446,17 @@ func TestGetSessionDetailBasic(t *testing.T) {
 }
 
 func TestGetSessionDetailIteration(t *testing.T) {
-	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+	// Phase 5 / Mechanism 1: index lookup resolves iteration → NotePath.
+	cfg := writeTestVault(t, map[string]index.SessionEntry{
+		"s1": {
+			SessionID: "s1", Project: "myproj", Date: "2027-06-15", Iteration: 1,
+			NotePath: "Projects/myproj/sessions/2027-06-15-01.md",
+		},
+		"s2": {
+			SessionID: "s2", Project: "myproj", Date: "2027-06-15", Iteration: 2,
+			NotePath: "Projects/myproj/sessions/2027-06-15-02.md",
+		},
+	}, map[string]string{
 		"Projects/myproj/sessions/2027-06-15-01.md": "first",
 		"Projects/myproj/sessions/2027-06-15-02.md": "second",
 	})
@@ -483,6 +501,78 @@ func TestGetSessionDetailBadDate(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid date format") {
 		t.Errorf("error = %v, want 'invalid date format'", err)
+	}
+}
+
+func TestGetSessionDetail_Tiebreaker(t *testing.T) {
+	// Phase 5 / Mechanism 2 § "Tool-surface impact": when multiple entries
+	// share (project, date, iteration) due to a multi-host stale-index race,
+	// the handler returns the lex-earliest NotePath deterministically.
+	cfg := writeTestVault(t, map[string]index.SessionEntry{
+		"legacy": {
+			SessionID: "legacy", Project: "p", Date: "2026-05-02", Iteration: 1,
+			NotePath: "Projects/p/sessions/2026-05-02-01.md",
+		},
+		"timestamp": {
+			SessionID: "timestamp", Project: "p", Date: "2026-05-02", Iteration: 1,
+			NotePath: "Projects/p/sessions/2026-05-02-143025123.md",
+		},
+	}, map[string]string{
+		"Projects/p/sessions/2026-05-02-01.md":        "legacy-content",
+		"Projects/p/sessions/2026-05-02-143025123.md": "timestamp-content",
+	})
+
+	tool := NewGetSessionDetailTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"p","date":"2026-05-02","iteration":1}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	// "2026-05-02-01.md" sorts before "2026-05-02-143025123.md" lex-wise.
+	if result != "legacy-content" {
+		t.Errorf("tiebreaker did not return lex-earliest NotePath; got %q want %q", result, "legacy-content")
+	}
+}
+
+func TestGetSessionDetail_MixedFormats(t *testing.T) {
+	// Phase 5: legacy counter, plain timestamp, and timestamp-with-suffix
+	// formats all resolve via index lookup at distinct iterations.
+	cfg := writeTestVault(t, map[string]index.SessionEntry{
+		"a": {
+			SessionID: "a", Project: "p", Date: "2026-05-02", Iteration: 1,
+			NotePath: "Projects/p/sessions/2026-05-02-01.md",
+		},
+		"b": {
+			SessionID: "b", Project: "p", Date: "2026-05-02", Iteration: 2,
+			NotePath: "Projects/p/sessions/2026-05-02-143025123.md",
+		},
+		"c": {
+			SessionID: "c", Project: "p", Date: "2026-05-02", Iteration: 3,
+			NotePath: "Projects/p/sessions/2026-05-02-143025123-1.md",
+		},
+	}, map[string]string{
+		"Projects/p/sessions/2026-05-02-01.md":          "legacy-counter",
+		"Projects/p/sessions/2026-05-02-143025123.md":   "plain-timestamp",
+		"Projects/p/sessions/2026-05-02-143025123-1.md": "timestamp-suffix",
+	})
+
+	tool := NewGetSessionDetailTool(cfg)
+	cases := []struct {
+		iter int
+		want string
+	}{
+		{1, "legacy-counter"},
+		{2, "plain-timestamp"},
+		{3, "timestamp-suffix"},
+	}
+	for _, tc := range cases {
+		params := fmt.Sprintf(`{"project":"p","date":"2026-05-02","iteration":%d}`, tc.iter)
+		got, err := tool.Handler(json.RawMessage(params))
+		if err != nil {
+			t.Fatalf("iter=%d handler error: %v", tc.iter, err)
+		}
+		if got != tc.want {
+			t.Errorf("iter=%d: got %q, want %q", tc.iter, got, tc.want)
+		}
 	}
 }
 
