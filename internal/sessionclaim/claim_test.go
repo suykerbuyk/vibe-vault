@@ -11,9 +11,27 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/suykerbuyk/vibe-vault/internal/pidlive"
 )
 
+// fixedStarttime is the canonical value tests inject via
+// pidlive.Starttime so token derivation in Read matches the value tests
+// use to plant fixture files. Using a non-zero value keeps tests honest
+// against the Phase 3 wiring that replaced Phase 0a's hardcoded zero.
+const fixedStarttime int64 = 1714683121123
+
+// withFixedStarttime overrides pidlive.Starttime to return
+// fixedStarttime for the duration of t.
+func withFixedStarttime(t *testing.T) {
+	t.Helper()
+	orig := pidlive.Starttime
+	pidlive.Starttime = func(int) (int64, error) { return fixedStarttime, nil }
+	t.Cleanup(func() { pidlive.Starttime = orig })
+}
+
 func TestRead_NoFile(t *testing.T) {
+	withFixedStarttime(t)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	claim, err := Read("/some/project/root")
 	if claim != nil {
@@ -25,15 +43,16 @@ func TestRead_NoFile(t *testing.T) {
 }
 
 func TestRead_RoundTrip(t *testing.T) {
+	withFixedStarttime(t)
 	cacheRoot := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheRoot)
 
 	// Mirror Read's token derivation so we know where to plant the
-	// fixture file. Phase 0a hardcodes starttime=0 in Read; the test
-	// pins to that contract.
+	// fixture file. Phase 3 uses pidlive.Starttime (overridden above to
+	// fixedStarttime) instead of Phase 0a's hardcoded zero.
 	projectRoot := "/home/johns/code/vibe-vault"
 	ppid := os.Getppid()
-	const starttime int64 = 0
+	starttime := fixedStarttime
 	token := tokenFor(projectRoot, ppid, starttime)
 
 	dir, err := cacheDir()
@@ -159,12 +178,13 @@ func TestCacheDir(t *testing.T) {
 }
 
 func TestRead_BadJSON(t *testing.T) {
+	withFixedStarttime(t)
 	cacheRoot := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheRoot)
 
 	projectRoot := "/garbage/case"
 	ppid := os.Getppid()
-	const starttime int64 = 0
+	starttime := fixedStarttime
 	token := tokenFor(projectRoot, ppid, starttime)
 
 	dir, err := cacheDir()
