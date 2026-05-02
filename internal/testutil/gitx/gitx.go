@@ -17,9 +17,25 @@ import (
 // temp directory. Returns the repo path.
 func InitTestRepo(t *testing.T) string {
 	t.Helper()
+	return initTestRepoWithDefault(t, "main")
+}
+
+// InitTestRepoWithDefault creates a non-bare git repo with an initial
+// commit in a temp directory, using the supplied default-branch name
+// (e.g. "master", "trunk"). Returns the repo path.
+func InitTestRepoWithDefault(t *testing.T, defaultBranch string) string {
+	t.Helper()
+	return initTestRepoWithDefault(t, defaultBranch)
+}
+
+// initTestRepoWithDefault is the shared implementation for InitTestRepo
+// and InitTestRepoWithDefault. Mirrors InitTestRepo's prior behavior
+// exactly except the default branch is parameterized.
+func initTestRepoWithDefault(t *testing.T, defaultBranch string) string {
+	t.Helper()
 	dir := t.TempDir()
 
-	GitRun(t, dir, "init", "-b", "main")
+	GitRun(t, dir, "init", "-b", defaultBranch)
 	// Write identity into repo-local config so any git invocation in this
 	// dir — including subprocess ones from production code under test —
 	// finds a committer identity. GitRun's env-var injection only covers
@@ -117,4 +133,65 @@ func GitRun(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v: %s: %v", args, out, err)
 	}
 	return string(out)
+}
+
+// AddWorktree creates a new linked worktree under
+// <repoDir>/.claude/worktrees/<worktreeName> on a fresh branch named
+// <branch>. Mirrors the iter-185 production layout used by
+// Claude-agent worktrees. Returns the absolute worktree path.
+//
+// `git worktree add` auto-creates intermediate parent directories
+// (verified empirically on git 2.x), so no separate os.MkdirAll is
+// required.
+func AddWorktree(t *testing.T, repoDir, worktreeName, branch string) string {
+	t.Helper()
+	wtPath := filepath.Join(repoDir, ".claude", "worktrees", worktreeName)
+	GitRun(t, repoDir, "worktree", "add", wtPath, "-b", branch)
+	return wtPath
+}
+
+// LockWorktree invokes `git worktree lock --reason="<reason>"
+// <worktreePath>`, which causes git to refuse to prune or remove the
+// worktree until it is unlocked. Fatals on error.
+//
+// The git command runs with cwd set to worktreePath so git can resolve
+// the enclosing repository regardless of the test's process cwd.
+func LockWorktree(t *testing.T, worktreePath, reason string) {
+	t.Helper()
+	cmd := exec.Command("git", "worktree", "lock", "--reason="+reason, worktreePath)
+	cmd.Dir = worktreePath
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git worktree lock %s: %s: %v", worktreePath, out, err)
+	}
+}
+
+// WriteWorktreeMarker writes a `locked` marker file directly into
+// <gitCommonDir>/worktrees/<worktreeName>/locked containing the supplied
+// reason text plus a trailing newline (mirroring the empirical
+// claude-agent format, where files end with 0x0a).
+//
+// This helper is intended for tests that need to construct a marker
+// for a worktree that is NOT registered with `git worktree add` —
+// e.g. corrupt-marker or orphan-marker test cases. It does NOT touch
+// any git metadata beyond the locked file itself.
+//
+// Auto-creates the <gitCommonDir>/worktrees/<worktreeName>/ directory
+// chain via os.MkdirAll(..., 0o755) before writing.
+func WriteWorktreeMarker(t *testing.T, gitCommonDir, worktreeName, reason string) {
+	t.Helper()
+	wtMetaDir := filepath.Join(gitCommonDir, "worktrees", worktreeName)
+	if err := os.MkdirAll(wtMetaDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", wtMetaDir, err)
+	}
+	markerPath := filepath.Join(wtMetaDir, "locked")
+	if err := os.WriteFile(markerPath, []byte(reason+"\n"), 0o644); err != nil {
+		t.Fatalf("write %s: %v", markerPath, err)
+	}
 }
