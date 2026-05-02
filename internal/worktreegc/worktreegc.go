@@ -24,9 +24,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/suykerbuyk/vibe-vault/internal/lockfile"
+	"github.com/suykerbuyk/vibe-vault/internal/pidlive"
 )
 
 // Verdict constants. Stable string literals; consumed by CLI output
@@ -97,20 +97,18 @@ const (
 // var so tests can substitute it; this is the only function-pointer
 // test seam in the package.
 //
-// Justified: foreign-UID PIDs (the EPERM branch) cannot be reliably
-// synthesized in single-user CI environments.
+// Implementation delegates to pidlive.IsAlive — the canonical
+// kill(pid, 0)-style probe shared with internal/sessionclaim. Single
+// source of truth for liveness.
+//
+// Justified seam: foreign-UID PIDs (the EPERM branch) cannot be
+// reliably synthesized in single-user CI environments, so tests
+// continue to swap this var.
 var probePID = func(pid int) verdict {
-	err := syscall.Kill(pid, 0)
-	switch {
-	case err == nil:
+	if pidlive.IsAlive(pid) {
 		return verdictAlive
-	case errors.Is(err, syscall.ESRCH):
-		return verdictDead
-	case errors.Is(err, syscall.EPERM):
-		return verdictAlive
-	default:
-		return verdictAlive // unknown error; fail-closed
 	}
+	return verdictDead
 }
 
 // Run scans every locked worktree under repoPath and reaps those whose
