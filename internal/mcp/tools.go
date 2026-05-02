@@ -430,11 +430,36 @@ func NewGetSessionDetailTool(cfg config.Config) Tool {
 				args.Iteration = 1
 			}
 
-			filename := fmt.Sprintf("%s-%02d.md", args.Date, args.Iteration)
-			path := filepath.Join(cfg.VaultPath, "Projects", args.Project, "sessions", filename)
+			// Phase 5 / Mechanism 1: filenames may be legacy counter, plain
+			// timestamp, or timestamp-with-suffix. Look up via the in-memory
+			// session-index instead of constructing a filename. Multi-host
+			// stale-index races may produce more than one entry for the same
+			// (project, date, iteration); deterministic tiebreaker is
+			// lex-earliest NotePath.
+			idx, err := index.Load(cfg.StateDir())
+			if err != nil {
+				return "", fmt.Errorf("load index: %w", err)
+			}
 
-			// Verify path is under vault
-			absPath, err := filepath.Abs(path)
+			var matches []index.SessionEntry
+			for _, e := range idx.Entries {
+				if e.Project == args.Project && e.Date == args.Date && e.Iteration == args.Iteration {
+					matches = append(matches, e)
+				}
+			}
+			if len(matches) == 0 {
+				return "", fmt.Errorf("session note not found: project=%s date=%s iteration=%d",
+					args.Project, args.Date, args.Iteration)
+			}
+			// Sort lex-ascending by NotePath. With timestamp filenames lex order
+			// equals chronological order, so we get the earliest deterministically.
+			sort.Slice(matches, func(i, j int) bool {
+				return matches[i].NotePath < matches[j].NotePath
+			})
+			rel := matches[0].NotePath
+
+			// Verify path is under vault.
+			absPath, err := filepath.Abs(filepath.Join(cfg.VaultPath, rel))
 			if err != nil {
 				return "", fmt.Errorf("resolve path: %w", err)
 			}
@@ -446,7 +471,7 @@ func NewGetSessionDetailTool(cfg config.Config) Tool {
 			data, err := os.ReadFile(absPath)
 			if err != nil {
 				if os.IsNotExist(err) {
-					return "", fmt.Errorf("session note not found: %s", filename)
+					return "", fmt.Errorf("session note not found: %s", rel)
 				}
 				return "", fmt.Errorf("read session: %w", err)
 			}
