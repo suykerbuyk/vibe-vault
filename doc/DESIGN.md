@@ -2894,3 +2894,275 @@ Key architectural and design decisions in vibe-vault, with rationale.
     failure scenarios against current source paths before dispatch —
     remains the institutional hedge against another reframe at
     execution time.**
+
+    **Subsequent surface bump.** `MCPSurfaceVersion` advanced from
+    11 → 12 when `vv_worktree_gc` was added (DESIGN #98); the bump,
+    tool registration, and golden-manifest regeneration landed in a
+    single atomic commit per the build-time invariant.
+
+98. **Host-local PID-liveness reaper for stale subagent
+    worktrees.** Multi-phase `/execute-plan` dispatches with
+    `isolation: "worktree"` accumulate `.git/worktrees/agent-<id>/`
+    directories and `worktree-agent-<id>` branches across sessions;
+    iter 185's seven-phase epic left 7 orphans behind, requiring
+    manual `git worktree unlock && git worktree remove && git
+    branch -D` chains. The harness writes a marker
+    `.git/worktrees/agent-<id>/locked` containing
+    `claude agent agent-<id> (pid <NNN>)\n` on creation; the PID is
+    the **parent Claude Code process**, not the leaf subagent (Phase
+    0 empirical finding). This makes cross-session orphan detection
+    deterministic — when the parent process is gone, no in-flight
+    operation can corrupt a reap — and mid-session detection
+    structurally impossible from PID alone (the parent stays alive
+    for the whole session).
+
+    **Two-tier cleanup strategy.** Tier 1 (mid-session, best-effort)
+    invokes the gc after each `/execute-plan` subagent dispatch;
+    parent PID still alive → all orphans probe `alive` → no actual
+    reaping happens, but the call is cheap and the path stays warm.
+    Tier 2 (cross-session, deterministic) runs as a pre-bootstrap
+    sweep on `/restart`; the prior parent process is gone → PID
+    probes return `dead` → capture-verified branches reap cleanly.
+    Tier 2 is the value-generating path; Tier 1 is incidental.
+
+    **Single-Go-function architecture, parallel front-ends.**
+    `internal/worktreegc.Run(repoPath, opts) (Result, error)` is the
+    single algorithm. `vv worktree gc [--dry-run] [--json]
+    [--candidate-parents] [--force-uncaptured]` and the
+    `vv_worktree_gc` MCP tool are parallel front-ends that both call
+    `Run()` directly; no subprocess delegation between the two
+    surfaces. Slash-command templates call the front-ends; the
+    algorithm lives in one place.
+
+    **Operator policy.** Subagent worktrees under
+    `.claude/worktrees/agent-<id>/` are exclusively LLM/vv-managed.
+    Operators do not check out, edit, or commit in them. The gc's
+    safety guarantees apply to subagent-data preservation only;
+    defense-in-depth against operator-data-loss in subagent worktrees
+    is explicitly out of scope. Off-branch operator work
+    (long-running experiments, parallel checkouts) goes anywhere
+    EXCEPT `.claude/worktrees/agent-*/` and is invisible to the gc by
+    virtue of the marker-file requirement (only `git worktree
+    lock`'d worktrees with a recognizable `locked` reason are gc
+    candidates). This policy collapses the v1 defense-in-depth
+    layers (working-tree dirty check, branch-ref preservation,
+    stash-rescue) that existed only to protect a "human took notes
+    in a subagent worktree" scenario the policy now disallows.
+
+    **Detector interface for cross-LLM portability.** Anthropic
+    Claude Code is the only harness in production today, but Gemini
+    Code Assist, OpenAI's agentic offerings, Grok, and others will
+    eventually ship similar features. Each will write its own marker
+    format. A `Detector` interface (`Name`, `Detect(reason) → pid,
+    ok`, `ExpectedBranch(worktreeName) → branchName`) registered in
+    a package-level slice (first match wins) makes new harness
+    support a one-file addition. Unknown markers fall through to a
+    `unknown-harness` verdict — never reaped (defense in depth) but
+    visible to the operator.
+
+    **claudeDetector regex with TrimSpace + list-of-patterns.** The
+    initial regex is anchored:
+    `^claude agent agent-[a-f0-9]{16,} \(pid (\d+)\)$`. Marker
+    files end with a trailing newline (Phase 0: `hexdump -C`
+    confirmed `0x0a` on all 7 disk markers); `ParseMarker` calls
+    `strings.TrimSpace` once before dispatching to detectors so each
+    `Detect` method receives clean input. Go's `regexp` does not
+    match `$` against pre-final-newline content the way Python's
+    `re.match` does, so the trim is mandatory. Future Claude Code
+    marker format changes prepend new patterns to the
+    `claudeRegexes` slice; older patterns remain at the tail for
+    back-compat with markers written by prior binary versions.
+
+    **Decision H — `syscall.Kill(pid, 0)` directly, NOT
+    `os.Process.Signal`.** Phase 0 trace surfaced a critical bug in
+    earlier draft: Go's `os.Process.Signal` runs through an internal
+    `convertESRCH` helper that rewrites `syscall.ESRCH` to
+    `os.ErrProcessDone` before the caller sees it. A switch using
+    `errors.Is(err, syscall.ESRCH)` against
+    `os.Process.Signal(syscall.Signal(0))` would NEVER match dead
+    PIDs; every dead probe would fall through to fail-closed-alive
+    and **no orphan would ever be reaped**. The fix is to bypass
+    `os.Process` entirely and call `syscall.Kill(pid, 0)`, which
+    returns the underlying `Errno` values cleanly. The four-arm
+    switch:
+
+        err := syscall.Kill(pid, 0)
+        switch {
+        case err == nil:
+            return verdictAlive       // process exists, we have permission
+        case errors.Is(err, syscall.ESRCH):
+            return verdictDead        // process does not exist
+        case errors.Is(err, syscall.EPERM):
+            return verdictAlive       // foreign UID; do not reap
+        default:
+            return verdictAlive       // unknown error; fail-closed
+        }
+
+    `EPERM` typically indicates a foreign-UID process (the captured
+    PID exists but belongs to a different user — e.g., when
+    `sudo vv worktree gc` is invoked against user-owned worktrees).
+    Treating `EPERM` as alive is the safe choice; we don't reap
+    something we can't even confirm is gone. The `default:` arm
+    fail-closes the same way for any future error type or platform
+    variation.
+
+    **Decision D — `git cherry` line-prefix parser, NOT empty-output
+    check.** Phase 0 trace surfaced a second critical bug. The
+    capture-verification check uses `git cherry <parent> <branch>`,
+    which emits **one line per commit on the branch**:
+
+    | Output line | Meaning |
+    |-------------|---------|
+    | `- <sha>` | commit IS upstream-equivalent (captured) |
+    | `+ <sha>` | commit is unique to the branch (uncaptured) |
+    | empty stdout | branch has zero commits ahead of parent |
+
+    A captured branch with N commits produces N lines of `- <sha>`
+    output, **not** empty output. An earlier draft's
+    `strings.TrimSpace(out) == ""` check would tag every
+    cleanly-merged orphan as `uncaptured-work`. Phase 0 verified
+    this against all 7 real iter-185 orphan branches, each emitting
+    1-7 `- <sha>` lines for rebase-merged commits in PR #34. The
+    correct check parses output line-by-line: any `+` prefix flips
+    the verdict to uncaptured; otherwise (all `-` lines or empty)
+    the branch is captured.
+
+    **Squash-merge limitation (explicit).** `git cherry` uses patch
+    IDs (commit content hashes). Rebase-merge and ff-only merges
+    preserve individual patch IDs; `git cherry main feature-branch`
+    against rebase-merged work emits the all-`-` lines that pass
+    capture verification. **Squash-merge does NOT preserve
+    patch-equivalence** — the squashed commit's diff is the union
+    of source commits, producing a NEW patch ID that doesn't match
+    any individual source commit. Consumer projects using
+    squash-merge will see false-positive `uncaptured-work` verdicts
+    on every successfully-merged worktree, accumulating litter that
+    requires `--force-uncaptured` to clear after manual
+    verification. This is a known and accepted limitation; the
+    plan chooses correctness-by-default (never silently destroy
+    work that isn't provably captured) over completeness (handling
+    every merge style transparently). A secondary
+    `git log --pretty=%s | grep -F` check for GitHub squash-merge
+    subject patterns is a possible future enhancement, deferred
+    until a real consumer surfaces the friction.
+
+    **Default-branch resolution via `git symbolic-ref --short
+    refs/remotes/origin/HEAD`.** An earlier draft hardcoded
+    `["main", currentBranch]` as the candidate-parent default,
+    which silently fails on `master`-default repos
+    (`git cherry master <branch>` succeeds but
+    `git cherry main <branch>` errors and falls through to
+    `uncaptured-work`). `resolveDefaultBranch(repoPath)` runs
+    `git -C repoPath symbolic-ref --short refs/remotes/origin/HEAD`,
+    strips the `origin/` prefix, and falls back to `"main"` on
+    error (no origin remote, `origin/HEAD` unset). Consumer
+    projects with `master` defaults — and any future trunk-name
+    convention — work uniformly without per-project configuration.
+
+    **Worktree enumeration via `git worktree list --porcelain`.**
+    An earlier filesystem-globbing approach (read each
+    `.git/worktrees/*/locked`, manually resolve workdir from the
+    sibling `gitdir` metadata file, run a separate
+    `rev-parse --abbrev-ref HEAD` per worktree) collapses to one
+    structured subprocess call. The porcelain block emits
+    `worktree <path>`, `HEAD <sha>`, `branch refs/heads/<name>`,
+    and `locked <reason>` separated by blank lines.
+    `parsePorcelain` is a `bufio.Scanner` state machine that
+    handles four block shapes:
+
+    1. Standard claude-agent block (worktree + HEAD + branch +
+       locked) — the gc candidate.
+    2. Main worktree (no `locked` line) — skipped at `Run()` level.
+    3. Detached-HEAD worktree (`detached` literal, no `branch`
+       line) — skipped via the `Detached` bool field.
+    4. Bare repo's main worktree (`bare` literal, no `HEAD`) —
+       skipped via the `Bare` bool field.
+
+    The default 64 KB scanner buffer accommodates ~200 worktree
+    blocks (~320 bytes each); a code comment in `parsePorcelain`
+    notes that real workloads exceeding that should call
+    `Scanner.Buffer` to raise the limit.
+
+    **Lockfile primitive — promoted from `internal/index/lock.go`
+    to `internal/lockfile/`.** An earlier draft proposed a NEW
+    package using `golang.org/x/sys` — duplicating the existing
+    stdlib-only `syscall.Flock` implementation AND adding a
+    dependency that contradicts the three-direct-deps philosophy
+    (DESIGN #7). v2's review surfaced the duplication; the existing
+    primitive moves to `internal/lockfile/` with three exports
+    (`Acquire`, `AcquireNonBlocking`, `Release`) plus an
+    `ErrLocked` sentinel. Both `Acquire` variants `os.MkdirAll` the
+    parent directory before `os.OpenFile` (without this, fresh
+    hosts fail with "no such file or directory" because
+    `os.UserCacheDir()` returns an extant path but
+    `<…>/vibe-vault/locks/` does not exist). The original
+    `internal/index/lock_test.go` splits between a primitive-test
+    file in the new package (rewritten body — generic counter under
+    Acquire/Release, decoupled from `package index`) and a
+    preserved integration-style test in
+    `internal/index/lock_concurrency_test.go` (`TestIndexConcurrentSave`)
+    that exercises `lockfile.Acquire` against the original Index
+    use case. THREE external call sites migrated:
+    `internal/session/capture.go`, `internal/zed/batch.go`,
+    `cmd/vv/main.go`. (`internal/index/index.go` had zero internal
+    `Lock` callers — earlier-draft fact-check error.)
+
+    **Lock-path keyed by absolutized `<git-common-dir>`, NOT
+    repo path.** The lock-path hash uses
+    `sha256(filepath.Abs(<git-common-dir>))[:8]`. Linked worktrees
+    of the same repo share the same `<git-common-dir>` but have
+    different working-directory paths; an earlier draft's
+    hash-of-`absRepoPath` approach failed to serialize concurrent
+    gc invocations across linked worktrees that operate on the
+    same `.git/worktrees/`. **Critical: `filepath.Abs` is
+    load-bearing** — `git rev-parse --git-common-dir` returns
+    relative `.git` from the main worktree, absolute from a linked
+    worktree; without absolutization the same repo computes
+    different lock-path hashes from different vantage points
+    (Phase 0 verified: post-`Abs`, both vantage points produce
+    sha256[:8] = `2807b615` against this repo). Lock files land at
+    `<UserCacheDir>/vibe-vault/locks/<hash>.lock` with
+    `lockfile.AcquireNonBlocking`; `ErrLocked` propagates as a
+    wrapped error.
+
+    **Worktree removal sequence — unlock-first-then-force.**
+    Removing a locked worktree uses
+    `git worktree unlock <path>` followed by
+    `git worktree remove --force <path>`, then
+    `git branch -D <branch>`. The unlock step is intentional:
+    `git worktree remove --force` does NOT always override
+    claude-agent locks (iter-180 carried thread observed two
+    empirical failures); unlocking first guarantees removal
+    succeeds. A code comment at the call site documents the
+    rationale so a future "simplification" PR doesn't drop the
+    unlock and reintroduce the failure mode.
+
+    **Default uncaptured-work behavior — skip-with-verdict, not
+    reap-and-warn.** When capture verification fails, the gc emits
+    an `uncaptured-work` verdict with the first 5 unreachable
+    commit subjects in `Action.Detail` (via
+    `git log --oneline <parent>..<branch>`) and **does not**
+    destroy the worktree. Operators rerun with
+    `--force-uncaptured` to override after manual verification, or
+    recover via `git reflog`. The chosen default surfaces failures
+    to the orchestrator next session for diagnosis instead of
+    relying on reflog archaeology. Worktree litter persists in the
+    rare uncaptured case until explicitly resolved — that's the
+    cost of "no silent destruction."
+
+    **Cross-host coordination — explicitly deferred.** The
+    promoted `internal/lockfile/` is host-local (the
+    `<git-common-dir>` lock path is a host-local cache directory).
+    Cross-host concurrent-modification races (the W1-vs-W2 wrap
+    race documented in `wrap-anchor-rebase-stamps-swallow-substantive-work`,
+    multi-machine vault freshness) require a different primitive
+    class and a different package. File `vv-coordination-primitives`
+    or `internal/vaultlock/` separately if a third concurrent-host
+    failure mode surfaces.
+
+    **Filed as task `vv-worktree-gc` (Draft v5, iters 185 → 187);
+    shipped on branch `feat/vv-worktree-gc` across Phase 0
+    (runtime trace), Phase 1a (lockfile promotion), Phase 1a'
+    (gitx worktree helpers), Phase 1b (worktreegc package),
+    Phase 2 (CLI + MCP front-ends + surface bump 11→12), Phase 3
+    (templates + workflow policy), Phase 4 (this entry).**
