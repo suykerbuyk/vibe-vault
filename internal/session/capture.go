@@ -19,6 +19,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/friction"
 	"github.com/suykerbuyk/vibe-vault/internal/index"
 	"github.com/suykerbuyk/vibe-vault/internal/llm"
+	"github.com/suykerbuyk/vibe-vault/internal/lockfile"
 	"github.com/suykerbuyk/vibe-vault/internal/meta"
 	"github.com/suykerbuyk/vibe-vault/internal/narrative"
 	"github.com/suykerbuyk/vibe-vault/internal/prose"
@@ -120,7 +121,7 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 
 	// Index management: use shared index if provided, otherwise load/lock per call
 	var idx *index.Index
-	var fl *index.FileLock
+	var fl *lockfile.Lockfile
 	if opts.Index != nil {
 		idx = opts.Index
 	} else {
@@ -129,15 +130,15 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 		if mkdirErr := os.MkdirAll(stateDir, 0o755); mkdirErr != nil {
 			log.Printf("warning: could not create state dir: %v", mkdirErr)
 		}
-		indexLockPath := filepath.Join(stateDir, "session-index.json")
+		indexLockPath := filepath.Join(stateDir, "session-index.json") + ".lock"
 		var lockErr error
-		fl, lockErr = index.Lock(indexLockPath)
+		fl, lockErr = lockfile.Acquire(indexLockPath)
 		if lockErr != nil {
 			log.Printf("warning: could not acquire index lock: %v", lockErr)
 		}
 		defer func() {
 			if fl != nil {
-				_ = fl.Unlock()
+				_ = fl.Release()
 			}
 		}()
 
