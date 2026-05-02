@@ -40,7 +40,7 @@ func TestRead_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cacheDir: %v", err)
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err = os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -63,7 +63,7 @@ func TestRead_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, token+".json"), data, 0o600); err != nil {
+	if err = os.WriteFile(filepath.Join(dir, token+".json"), data, 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -171,10 +171,10 @@ func TestRead_BadJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cacheDir: %v", err)
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err = os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, token+".json"), []byte("{not-json"), 0o600); err != nil {
+	if err = os.WriteFile(filepath.Join(dir, token+".json"), []byte("{not-json"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
