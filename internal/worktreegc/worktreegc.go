@@ -150,7 +150,7 @@ func Run(repoPath string, opts Options) (Result, error) {
 		}
 		return Result{}, fmt.Errorf("worktreegc: acquire lock: %w", err)
 	}
-	defer fl.Release()
+	defer func() { _ = fl.Release() }()
 
 	// 3. Enumerate worktrees.
 	blocks, err := runWorktreeListPorcelain(repoPath)
