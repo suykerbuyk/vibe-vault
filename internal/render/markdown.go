@@ -6,6 +6,7 @@ package render
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -393,14 +394,96 @@ func NoteDataFromTranscript(t *transcript.Transcript, project, domain, branch, s
 	}
 }
 
-// NoteFilename returns the filename for a session note: YYYY-MM-DD-NN.md
+// SlotKind identifies which session-filename format was matched by
+// ParseSessionFilename. Mechanism 1 of session-slot-multihost-disambiguation
+// supports three filename shapes: legacy counter, plain timestamp, and
+// timestamp with sub-millisecond collision-retry suffix.
+type SlotKind int
+
+const (
+	// SlotKindUnknown — filename did not match any known session-note pattern.
+	SlotKindUnknown SlotKind = iota
+	// SlotKindCounter — legacy "YYYY-MM-DD-NN.md" two-digit counter format.
+	SlotKindCounter
+	// SlotKindTimestamp — "YYYY-MM-DD-HHMMSSmmm.md" millisecond timestamp body, no suffix.
+	SlotKindTimestamp
+	// SlotKindTimestampSuffix — "YYYY-MM-DD-HHMMSSmmm-N.md" with collision-retry suffix (N ∈ 1..9).
+	SlotKindTimestampSuffix
+)
+
+var (
+	counterFilenameRE   = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})-(\d{2})\.md$`)
+	timestampFilenameRE = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})-(\d{9})(-\d)?\.md$`)
+)
+
+// BuildTimestampFilename returns the canonical timestamp-format session
+// filename for a given date and timestamp. suffix == 0 produces no trailing
+// suffix; suffix in 1..9 produces "YYYY-MM-DD-HHMMSSmmm-N.md" for the
+// sub-millisecond collision-retry path (Mechanism 1).
+//
+// date MUST be the YYYY-MM-DD string of t (computed via t.Format("2006-01-02"))
+// — caller is responsible for matching date prefix to t. The single clock
+// source in CaptureFromParsed (Phase 4) ensures this.
+//
+// suffix outside [0,9] is treated as 0; callers that exhaust retries fail
+// upstream with an actionable error rather than overflow.
+func BuildTimestampFilename(date string, t time.Time, suffix int) string {
+	// HHMMSSmmm — 2 digits hour + 2 digits minute + 2 digits second + 3 digits millisecond.
+	body := fmt.Sprintf("%02d%02d%02d%03d", t.Hour(), t.Minute(), t.Second(), t.Nanosecond()/1_000_000)
+	if suffix > 0 && suffix <= 9 {
+		return fmt.Sprintf("%s-%s-%d.md", date, body, suffix)
+	}
+	return fmt.Sprintf("%s-%s.md", date, body)
+}
+
+// ParseSessionFilename inspects a session-note filename and returns its
+// kind plus extracted fields. ok == false on malformed input.
+//
+// For SlotKindCounter, value is the two-digit counter (e.g. "01").
+// For SlotKindTimestamp / SlotKindTimestampSuffix, value is the timestamp
+// body including any -N suffix (e.g. "143025123" or "143025123-1").
+//
+// Lex sort order over filenames satisfying ParseSessionFilename(ok=true)
+// equals chronological order (Mechanism 1 invariant), assuming a fixed
+// date prefix.
+func ParseSessionFilename(name string) (date string, kind SlotKind, value string, ok bool) {
+	if m := counterFilenameRE.FindStringSubmatch(name); m != nil {
+		return m[1], SlotKindCounter, m[2], true
+	}
+	if m := timestampFilenameRE.FindStringSubmatch(name); m != nil {
+		body := m[2]
+		if m[3] != "" {
+			// m[3] is "-N"; concatenate body + "-N" for the value.
+			return m[1], SlotKindTimestampSuffix, body + m[3], true
+		}
+		return m[1], SlotKindTimestamp, body, true
+	}
+	return "", SlotKindUnknown, "", false
+}
+
+// NoteFilename returns the filename for a session note: YYYY-MM-DD-NN.md.
+//
+// Deprecated: use BuildTimestampFilename for write paths;
+// ParseSessionFilename for read. Phase 4 of
+// session-slot-multihost-disambiguation removes call sites; the helper is
+// retained during the transition so existing callers continue to compile.
 func NoteFilename(date string, iteration int) string {
 	return fmt.Sprintf("%s-%02d.md", date, iteration)
 }
 
 // NoteRelPath returns the relative path within the vault for a session note.
+//
+// Deprecated: use NoteRelPathTimestamp for write paths. Retained during the
+// Phase 4 transition for compatibility with existing call sites.
 func NoteRelPath(project, date string, iteration int) string {
 	return filepath.Join("Projects", project, "sessions", NoteFilename(date, iteration))
+}
+
+// NoteRelPathTimestamp builds the project-relative session-note path for a
+// timestamp-format filename. Mirrors NoteRelPath but takes (project, date,
+// t time.Time, suffix int) — used by Phase 4 write-path callers.
+func NoteRelPathTimestamp(project, date string, t time.Time, suffix int) string {
+	return filepath.Join("Projects", project, "sessions", BuildTimestampFilename(date, t, suffix))
 }
 
 func titleFromFirstMessage(msg string) string {

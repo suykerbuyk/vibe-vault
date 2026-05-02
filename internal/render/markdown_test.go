@@ -1,6 +1,7 @@
 package render
 
 import (
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -495,6 +496,160 @@ func TestSessionNote_LowFrictionNoSection(t *testing.T) {
 	}
 	if strings.Contains(out, "## Friction Signals") {
 		t.Error("should not have Friction Signals section when score < 15")
+	}
+}
+
+// --- Phase 2: timestamp-filename helpers (session-slot-multihost-disambiguation) ---
+
+func TestBuildTimestampFilename(t *testing.T) {
+	// Use UTC explicitly so the test does not depend on the host TZ.
+	when := time.Date(2026, 5, 2, 14, 30, 25, 123_456_789, time.UTC)
+	tests := []struct {
+		name   string
+		suffix int
+		want   string
+	}{
+		{"no suffix", 0, "2026-05-02-143025123.md"},
+		{"suffix 1", 1, "2026-05-02-143025123-1.md"},
+		{"suffix 9", 9, "2026-05-02-143025123-9.md"},
+		{"suffix out-of-range high treated as 0", 10, "2026-05-02-143025123.md"},
+		{"suffix 99 treated as 0", 99, "2026-05-02-143025123.md"},
+		{"suffix negative treated as 0", -1, "2026-05-02-143025123.md"},
+	}
+	for _, tt := range tests {
+		got := BuildTimestampFilename("2026-05-02", when, tt.suffix)
+		if got != tt.want {
+			t.Errorf("%s: BuildTimestampFilename suffix=%d = %q, want %q",
+				tt.name, tt.suffix, got, tt.want)
+		}
+	}
+}
+
+func TestBuildTimestampFilename_MillisecondTruncation(t *testing.T) {
+	// 999999999 ns rounds DOWN to 999 ms (not up to 1s) — verifies fixed-width formatting.
+	when := time.Date(2026, 1, 1, 0, 0, 0, 999_999_999, time.UTC)
+	got := BuildTimestampFilename("2026-01-01", when, 0)
+	if got != "2026-01-01-000000999.md" {
+		t.Errorf("ms truncation: got %q, want 2026-01-01-000000999.md", got)
+	}
+}
+
+func TestParseSessionFilename(t *testing.T) {
+	tests := []struct {
+		name      string
+		filename  string
+		wantOK    bool
+		wantDate  string
+		wantKind  SlotKind
+		wantValue string
+	}{
+		{"counter 01", "2026-05-02-01.md", true, "2026-05-02", SlotKindCounter, "01"},
+		{"counter 99", "2026-05-02-99.md", true, "2026-05-02", SlotKindCounter, "99"},
+		{"timestamp", "2026-05-02-143025123.md", true, "2026-05-02", SlotKindTimestamp, "143025123"},
+		{"timestamp suffix 1", "2026-05-02-143025123-1.md", true, "2026-05-02", SlotKindTimestampSuffix, "143025123-1"},
+		{"timestamp suffix 9", "2026-05-02-143025123-9.md", true, "2026-05-02", SlotKindTimestampSuffix, "143025123-9"},
+		// Malformed — shape rejection.
+		{"missing .md", "2026-05-02-01", false, "", SlotKindUnknown, ""},
+		{"only 8 timestamp digits", "2026-05-02-99000000.md", false, "", SlotKindUnknown, ""},
+		{"10 timestamp digits", "2026-05-02-9900000000.md", false, "", SlotKindUnknown, ""},
+		{"three-digit counter", "2026-05-02-001.md", false, "", SlotKindUnknown, ""},
+		{"single-digit counter", "2026-05-02-1.md", false, "", SlotKindUnknown, ""},
+		{"date-shape garbage passes regex shape", "2026-13-99-143025123.md", true, "2026-13-99", SlotKindTimestamp, "143025123"},
+		{"empty", "", false, "", SlotKindUnknown, ""},
+		{"non-session", "knowledge.md", false, "", SlotKindUnknown, ""},
+		{"two-digit suffix rejected", "2026-05-02-143025123-10.md", false, "", SlotKindUnknown, ""},
+	}
+	for _, tt := range tests {
+		date, kind, value, ok := ParseSessionFilename(tt.filename)
+		if ok != tt.wantOK {
+			t.Errorf("%s: ok = %v, want %v (filename=%q)", tt.name, ok, tt.wantOK, tt.filename)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		if date != tt.wantDate {
+			t.Errorf("%s: date = %q, want %q", tt.name, date, tt.wantDate)
+		}
+		if kind != tt.wantKind {
+			t.Errorf("%s: kind = %v, want %v", tt.name, kind, tt.wantKind)
+		}
+		if value != tt.wantValue {
+			t.Errorf("%s: value = %q, want %q", tt.name, value, tt.wantValue)
+		}
+	}
+}
+
+func TestParseSessionFilename_RoundTrip(t *testing.T) {
+	when := time.Date(2026, 5, 2, 14, 30, 25, 123_000_000, time.UTC)
+
+	// Plain timestamp.
+	plain := BuildTimestampFilename("2026-05-02", when, 0)
+	date, kind, value, ok := ParseSessionFilename(plain)
+	if !ok || date != "2026-05-02" || kind != SlotKindTimestamp || value != "143025123" {
+		t.Errorf("plain round-trip: %q → (%q,%v,%q,%v)", plain, date, kind, value, ok)
+	}
+
+	// Timestamp with suffix.
+	with := BuildTimestampFilename("2026-05-02", when, 5)
+	date, kind, value, ok = ParseSessionFilename(with)
+	if !ok || date != "2026-05-02" || kind != SlotKindTimestampSuffix || value != "143025123-5" {
+		t.Errorf("suffix round-trip: %q → (%q,%v,%q,%v)", with, date, kind, value, ok)
+	}
+
+	// Counter format (legacy).
+	counter := NoteFilename("2026-05-02", 1)
+	date, kind, value, ok = ParseSessionFilename(counter)
+	if !ok || date != "2026-05-02" || kind != SlotKindCounter || value != "01" {
+		t.Errorf("counter round-trip: %q → (%q,%v,%q,%v)", counter, date, kind, value, ok)
+	}
+}
+
+func TestParseSessionFilename_LexSortIsChronological(t *testing.T) {
+	// Mechanism 1 invariant: lex sort = chronological including suffix.
+	// Counter filenames sort first because "0" < "1" < "9" lex-wise within
+	// the same date prefix, but we still want a stable ordering exercised.
+	names := []string{
+		"2026-05-02-143025123-1.md",
+		"2026-05-02-143025124.md",
+		"2026-05-02-143025123.md",
+		"2026-05-02-143025123-2.md",
+		"2026-05-02-143025122.md",
+	}
+	want := []string{
+		"2026-05-02-143025122.md",
+		"2026-05-02-143025123-1.md",
+		"2026-05-02-143025123-2.md",
+		"2026-05-02-143025123.md",
+		"2026-05-02-143025124.md",
+	}
+	// Sort lexicographically.
+	sorted := make([]string, len(names))
+	copy(sorted, names)
+	sort.Strings(sorted)
+
+	// "143025123-1.md" sorts before "143025123.md" because '-' (0x2D) < '.' (0x2E).
+	// This keeps suffix retries adjacent to and before the unsuffixed form when
+	// they collide on the same millisecond, and the next millisecond
+	// ("143025124") still sorts strictly after the entire 123-* group.
+	for i, n := range sorted {
+		if n != want[i] {
+			t.Errorf("sort[%d] = %q, want %q (full: %v)", i, n, want[i], sorted)
+		}
+	}
+}
+
+func TestNoteRelPathTimestamp(t *testing.T) {
+	when := time.Date(2026, 5, 2, 14, 30, 25, 123_000_000, time.UTC)
+	got := NoteRelPathTimestamp("vibe-vault", "2026-05-02", when, 0)
+	want := "Projects/vibe-vault/sessions/2026-05-02-143025123.md"
+	if got != want {
+		t.Errorf("NoteRelPathTimestamp = %q, want %q", got, want)
+	}
+	gotSuffix := NoteRelPathTimestamp("vibe-vault", "2026-05-02", when, 3)
+	wantSuffix := "Projects/vibe-vault/sessions/2026-05-02-143025123-3.md"
+	if gotSuffix != wantSuffix {
+		t.Errorf("NoteRelPathTimestamp suffix = %q, want %q", gotSuffix, wantSuffix)
 	}
 }
 
