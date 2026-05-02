@@ -114,6 +114,9 @@ func main() {
 	case "vault":
 		runVault()
 
+	case "worktree":
+		runWorktree(os.Args[2:])
+
 	case "templates":
 		runTemplates()
 

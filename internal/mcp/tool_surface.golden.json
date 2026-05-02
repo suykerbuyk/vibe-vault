@@ -1,5 +1,5 @@
 {
-  "surface_version": 11,
+  "surface_version": 12,
   "tools": [
     {
       "name": "vv_append_iteration",
@@ -228,6 +228,12 @@
       "required_inputs": [
         "content",
         "path"
+      ]
+    },
+    {
+      "name": "vv_worktree_gc",
+      "required_inputs": [
+        "project_path"
       ]
     }
   ]
