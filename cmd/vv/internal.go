@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/suykerbuyk/vibe-vault/internal/agentregistry"
+	"github.com/suykerbuyk/vibe-vault/internal/pidlive"
+	"github.com/suykerbuyk/vibe-vault/internal/sessionclaim"
 )
 
 // internalUsage is the help text for the (operator-internal) `vv internal`
@@ -26,6 +28,9 @@ Subcommands:
                         embedded agentregistry catalogue.
   verify-tool-surface   Verify the live MCP tool inventory matches the
                         golden manifest at internal/mcp/tool_surface.golden.json.
+  probe-harness         Print parent-process name + detected harness identity.
+                        Used to validate session-slot-multihost-disambiguation
+                        Mechanism 2 harness detection on a new platform.
 
 Flags for generate-agents:
   --out-dir <dir>       Output directory (default: .claude/agents).
@@ -52,6 +57,8 @@ func runInternal() {
 		runInternalGenerateAgents(args[1:])
 	case "verify-tool-surface":
 		runInternalVerifyToolSurface(args[1:])
+	case "probe-harness":
+		runInternalProbeHarness()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown internal command: %s\n", args[0])
 		fmt.Fprint(os.Stderr, internalUsage)
@@ -159,6 +166,21 @@ func renderFrontmatter(def *agentregistry.AgentDefinition) string {
 	}
 	fmt.Fprintf(&sb, "recommended_model_class: %s\n", def.RecommendedModelClass)
 	return sb.String()
+}
+
+// runInternalProbeHarness prints the parent-process command name and
+// the harness identity sessionclaim would derive from it. Operators
+// run this once per platform to validate harness detection without
+// minting a real claim. No flags, no side effects.
+func runInternalProbeHarness() {
+	ppid := os.Getppid()
+	name, err := pidlive.ParentName(ppid)
+	if err != nil {
+		fmt.Printf("ppid=%d parent_name=<error: %v>\n", ppid, err)
+	} else {
+		fmt.Printf("ppid=%d parent_name=%q\n", ppid, name)
+	}
+	fmt.Printf("harness=%s\n", sessionclaim.DetectHarness(ppid))
 }
 
 // renderInlineList emits a YAML inline list. Items are emitted verbatim;
