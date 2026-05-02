@@ -501,6 +501,60 @@ project: myproject
 	}
 }
 
+func TestRebuildMixedFilenameFormats(t *testing.T) {
+	// Phase 5 / Mechanism 1 read-side compat: rebuild walks legacy counter,
+	// plain timestamp, and timestamp-with-suffix filenames; iteration is
+	// taken from frontmatter regardless of filename shape.
+	projectsDir := filepath.Join(t.TempDir(), "Projects")
+	stateDir := t.TempDir()
+
+	mkNote := func(sid string, iter int) string {
+		return fmt.Sprintf(`---
+date: 2026-05-02
+type: session
+project: myproject
+domain: personal
+session_id: "%s"
+iteration: %d
+tags: [vv-session]
+summary: "Mixed-format compat"
+---
+
+# Mixed-format compat
+`, sid, iter)
+	}
+	writeNote(t, projectsDir, "myproject", "2026-05-02-01.md", mkNote("legacy-01", 1))
+	writeNote(t, projectsDir, "myproject", "2026-05-02-143025123.md", mkNote("ts-plain", 2))
+	writeNote(t, projectsDir, "myproject", "2026-05-02-143025123-1.md", mkNote("ts-suffix", 3))
+	// Should be skipped — not a session-note shape.
+	writeNote(t, projectsDir, "myproject", "README.md", "not a session note\n")
+
+	idx, count, err := Rebuild(projectsDir, stateDir)
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("count = %d, want 3", count)
+	}
+	for _, want := range []struct {
+		sid       string
+		iteration int
+	}{
+		{"legacy-01", 1},
+		{"ts-plain", 2},
+		{"ts-suffix", 3},
+	} {
+		e, ok := idx.Entries[want.sid]
+		if !ok {
+			t.Errorf("entry %q not found", want.sid)
+			continue
+		}
+		if e.Iteration != want.iteration {
+			t.Errorf("entry %q: Iteration = %d, want %d (frontmatter authoritative)", want.sid, e.Iteration, want.iteration)
+		}
+	}
+}
+
 func TestRebuildSkipsNonSessionFiles(t *testing.T) {
 	projectsDir := filepath.Join(t.TempDir(), "Projects")
 	stateDir := t.TempDir()

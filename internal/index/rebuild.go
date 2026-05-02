@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/suykerbuyk/vibe-vault/internal/noteparse"
+	"github.com/suykerbuyk/vibe-vault/internal/render"
 )
 
 // Rebuild walks the Projects directory, parses each note via noteparse,
@@ -48,6 +49,16 @@ func Rebuild(projectsDir, stateDir string) (*Index, int, error) {
 			return nil
 		}
 
+		// Mechanism-1 compat (session-slot-multihost-disambiguation):
+		// recognize all three filename shapes — legacy counter,
+		// plain timestamp, and timestamp-with-retry-suffix. We do not
+		// derive any field from the filename; iteration comes from
+		// frontmatter (frontmatter is authoritative). The match is used
+		// only to skip files that aren't session notes (e.g., README.md).
+		if _, _, _, ok := render.ParseSessionFilename(filepath.Base(path)); !ok {
+			return nil
+		}
+
 		note, parseErr := noteparse.ParseFile(path)
 		if parseErr != nil {
 			log.Printf("rebuild: skip %s: %v", path, parseErr)
@@ -72,6 +83,10 @@ func Rebuild(projectsDir, stateDir string) (*Index, int, error) {
 			project = filepath.Base(filepath.Dir(filepath.Dir(path)))
 		}
 
+		// Frontmatter is authoritative for iteration.
+		// session-slot-multihost-disambiguation v8 / Mechanism 1: with timestamp
+		// filenames there is no counter to recover from the filename; the
+		// frontmatter `iteration:` field is the sole source of truth on rebuild.
 		iteration := 0
 		if note.Iteration != "" {
 			iteration, _ = strconv.Atoi(note.Iteration)
