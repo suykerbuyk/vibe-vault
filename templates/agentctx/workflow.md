@@ -58,3 +58,7 @@ Read resume.md for current state and open threads. Consult doc/ files for stable
 ## MCP surface handshake
 
 Vault-touching writes stamp `.surface` files at `Projects/<p>/agentctx/`, `Knowledge/`, and `Templates/` recording the binary's `MCPSurfaceVersion`; binaries verify the stamps on read at six detection points (MCP startup fail-stop, CLI write fail-stop, `vv hook` warn-only, read-only CLI warn-only, `vv check [--json]`, build-time golden invariant). `/restart` and `/wrap` echo the handshake result via `vv check --json` as a Phase 0 pre-flight; a stale binary halts both flows with `cd ~/code/vibe-vault && git pull && make install` as the standard remediation. Multi-host stamp conflicts auto-resolve via the `vv vault merge-driver` registered in vault `.gitattributes` and `~/.gitconfig`. See DESIGN #97 for the full mechanism.
+
+## Subagent worktree lifecycle
+
+**Subagent worktrees under `.claude/worktrees/agent-<id>/` are exclusively LLM/vv-managed. Do not check out, edit, or commit in them — operator-style off-branch work goes anywhere ELSE.** The `vv worktree gc` reaper applies its safety guarantees to subagent-data preservation only; defense-in-depth against operator-data-loss in subagent worktrees is explicitly out of scope. `/execute-plan` invokes the gc after each phase dispatch, and `/restart` runs a pre-bootstrap sweep so stale orphans from prior sessions reap deterministically. See DESIGN #98 for the two-tier (mid-session best-effort, cross-session deterministic) cleanup strategy.
