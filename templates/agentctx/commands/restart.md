@@ -26,6 +26,14 @@ machines:
 4. If it reports files needing manual review, inform the user before proceeding
 5. If it fails (no remote, network error), warn and proceed — local state is still valid
 
+## Pre-bootstrap orphan sweep (DESIGN #98)
+
+After vault sync, sweep stale subagent worktrees from prior sessions before loading context. Call `vv_worktree_gc` (or `vv worktree gc` via Bash). The previous session's parent Claude process is gone, so PID-liveness probes return `dead` for any orphaned `worktree-agent-<id>` directories; capture-verified branches reap automatically.
+
+Report any reaped orphans inline. If the verdict for any orphan is `uncaptured-work`, surface it to the operator — those branches contain commits not on a candidate parent and need human attention before either rerunning gc with `--force-uncaptured` or recovering the work via `git reflog`.
+
+If the gc is unavailable (older binary, MCP not registered), skip silently — orphans are cosmetic and don't block context loading.
+
 ## Restoring full AI thread context:
 
 Call `vv_bootstrap_context` to load resume, workflow, and active tasks in a
