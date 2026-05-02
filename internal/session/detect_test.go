@@ -244,6 +244,102 @@ func TestDetect_MissingIdentityFallsThrough(t *testing.T) {
 	}
 }
 
+// TestDetectProjectRoot covers the full matrix from the
+// session-slot-multihost-disambiguation Phase 0a contract: bare repo,
+// worktree, no-git-ancestor, symlinked path, empty cwd, nested
+// subdirectory inside the repo.
+func TestDetectProjectRoot_BareRepo(t *testing.T) {
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := DetectProjectRoot(repo)
+	want := filepath.Clean(repo)
+	if got != want {
+		t.Errorf("DetectProjectRoot(%q) = %q, want %q", repo, got, want)
+	}
+}
+
+func TestDetectProjectRoot_WorktreeFileForm(t *testing.T) {
+	// Worktree marker: .git is a FILE, not a directory, containing
+	// "gitdir: <real-gitdir>". DetectProjectRoot should still find it.
+	dir := t.TempDir()
+	wt := filepath.Join(dir, "worktree")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: /tmp/fake-gitdir\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := DetectProjectRoot(wt)
+	want := filepath.Clean(wt)
+	if got != want {
+		t.Errorf("DetectProjectRoot(%q) = %q, want %q", wt, got, want)
+	}
+}
+
+func TestDetectProjectRoot_NoGitAncestor(t *testing.T) {
+	// Tempdir without .git anywhere. The walk eventually hits the
+	// filesystem root (which does not have .git) and returns "".
+	dir := t.TempDir()
+	got := DetectProjectRoot(dir)
+	if got != "" {
+		t.Errorf("DetectProjectRoot(%q) = %q, want empty (no git ancestor)", dir, got)
+	}
+}
+
+func TestDetectProjectRoot_NestedSubdir(t *testing.T) {
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "repo")
+	sub := filepath.Join(repo, "a", "b", "c")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := DetectProjectRoot(sub)
+	want := filepath.Clean(repo)
+	if got != want {
+		t.Errorf("DetectProjectRoot(%q) = %q, want %q", sub, got, want)
+	}
+}
+
+func TestDetectProjectRoot_EmptyCwd(t *testing.T) {
+	if got := DetectProjectRoot(""); got != "" {
+		t.Errorf("DetectProjectRoot(\"\") = %q, want empty", got)
+	}
+}
+
+func TestDetectProjectRoot_SymlinkedPath(t *testing.T) {
+	// cwd is a symlink to a real git repo. DetectProjectRoot uses
+	// filepath.Abs (which does NOT resolve symlinks) and walks upward.
+	// The returned path contains the symlinked form; the .git check at
+	// each ancestor follows symlinks via os.Stat, so the .git entry is
+	// still discovered.
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "real-repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link-repo")
+	if err := os.Symlink(repo, link); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+	got := DetectProjectRoot(link)
+	// The walk-up-via-Abs path policy: we accept either the symlinked
+	// form (filepath.Abs preserves it) OR the resolved form. The
+	// load-bearing property is that some valid project-root path is
+	// returned; documented in the helper's path-resolution-policy
+	// comment.
+	wantSym := filepath.Clean(link)
+	wantReal := filepath.Clean(repo)
+	if got != wantSym && got != wantReal {
+		t.Errorf("DetectProjectRoot(%q) = %q, want %q or %q", link, got, wantSym, wantReal)
+	}
+}
+
 // TestDetectProject_OriginProjectContract pins the behaviors Phase 6.1's
 // write-time provenance stamper relies on for origin_project emission.
 // Breaking any of these cases would corrupt cross-project forensic

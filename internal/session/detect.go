@@ -6,6 +6,7 @@ package session
 import (
 	"context"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -49,6 +50,48 @@ func Detect(cwd, gitBranch, model, sessionID string, cfg config.Config) Info {
 	info.Domain = detectDomain(cwd, cfg)
 
 	return info
+}
+
+// DetectProjectRoot returns the absolute path of the first ancestor of
+// cwd containing a `.git` entry (directory or file form — the file form
+// is a git worktree marker pointing at the real gitdir). Returns "" if
+// cwd is empty or no ancestor has a `.git` entry.
+//
+// Twin to DetectProject (which returns the project NAME). Used wherever
+// the absolute project-root path matters — notably the
+// internal/sessionclaim package's `project_root` field for the
+// session-slot-multihost-disambiguation Mechanism 2 claim file.
+//
+// Path resolution policy: cwd is normalized via filepath.Abs (which
+// makes it absolute and cleans it) but symlinks are NOT resolved. If
+// cwd is itself a symlink into a git repo, the returned path retains
+// the symlinked form — this matches what filepath.Abs + an upward walk
+// produces. Callers needing fully-resolved paths should
+// filepath.EvalSymlinks before calling.
+func DetectProjectRoot(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Clean(abs)
+	for {
+		gitPath := filepath.Join(dir, ".git")
+		if _, err := os.Stat(gitPath); err == nil {
+			// Stat follows the worktree-marker file form transparently
+			// (it returns info on the file itself; we only need to know
+			// the entry exists). Both directory form (regular repo) and
+			// file form (worktree) satisfy the existence check.
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 // DetectProject extracts the project name from the working directory.
