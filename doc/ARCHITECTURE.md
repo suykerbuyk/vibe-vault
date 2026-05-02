@@ -625,3 +625,67 @@ canonical; repo-side files are overwritten on every sync.
 
 Total input tokens = `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens`.
 This is computed in `render.NoteDataFromTranscript()` and written to frontmatter as `tokens_in`.
+
+## Worktree Lifecycle
+
+Multi-phase `/execute-plan` dispatches with `isolation: "worktree"` create
+ephemeral subagent worktrees under `.claude/worktrees/agent-<id>/` that the
+harness lock-tags so cleanup must happen via the lock-aware reaper rather
+than naked `rm -rf`. The reap path lives in `internal/worktreegc/` with
+parallel CLI (`vv worktree gc`) and MCP (`vv_worktree_gc`) front-ends both
+calling `worktreegc.Run()`. See DESIGN #98 for the full rationale.
+
+```
+                                  ┌──────────────────────────────────┐
+   /execute-plan dispatches ─────▶│ harness creates                   │
+                                  │   .claude/worktrees/agent-<id>/   │
+                                  │   .git/worktrees/agent-<id>/locked│
+                                  │     (claude agent agent-<id>      │
+                                  │      (pid <parent-claude-pid>))   │
+                                  │   branch worktree-agent-<id>      │
+                                  └─────────────────┬─────────────────┘
+                                                    │
+                                                    ▼
+   subagent commits to its worktree branch ──▶ orchestrator merges to feature branch
+                                                    │
+                                                    ▼
+                                          ┌─────────────────────┐
+                                          │  worktreegc.Run()    │
+                                          │  (CLI or MCP entry)  │
+                                          └─────────┬───────────┘
+                                                    │
+                  ┌─────────────────────────────────┼────────────────────────────────────────┐
+                  ▼                                 ▼                                        ▼
+        1. lockfile.AcquireNonBlocking      2. git worktree list                  3. for each locked block:
+           sha256(absGitCommonDir)[:8]         --porcelain                            a. detector.Detect(reason)
+           in <UserCacheDir>/vibe-vault/       (parsed: worktree, HEAD,                  → harness, pid
+           locks/<hash>.lock                   branch, locked, Bare,                  b. probePID(pid)
+                                               Detached)                                 = syscall.Kill(pid, 0)
+                                                                                       c. branch-name guard
+                                                                                          == ExpectedBranch(name)
+                                                                                       d. git cherry <parent> <branch>
+                                                                                          (any '+' line ⇒ uncaptured)
+                                                                                       e. unlock → remove --force
+                                                                                          → branch -D
+```
+
+**Tier 1 (mid-session, best-effort)** — `/execute-plan` invokes the gc after
+each subagent dispatch returns. The parent Claude process is still alive,
+so `probePID` reports `alive` and no destructive action runs. Cheap and
+keeps the path warm.
+
+**Tier 2 (cross-session, deterministic)** — `/restart` invokes the gc as a
+pre-bootstrap sweep. The prior session's parent process is gone, so dead
+PIDs are reapable; capture-verified branches reap cleanly without operator
+intervention.
+
+**Operator policy** — subagent worktrees are LLM/vv-managed; operators do
+not check out, edit, or commit in them. Off-branch operator work goes
+anywhere ELSE and is invisible to the gc by virtue of the marker-file
+requirement.
+
+**Detector interface** — `internal/worktreegc/detect.go` defines a
+pluggable `Detector` interface with `claudeDetector` registered; future
+harnesses (Gemini, OpenAI agentic, Grok) add a single `detect_<name>.go`
+file plus a slice append. Unknown markers fall through to
+`unknown-harness` and are never reaped.
