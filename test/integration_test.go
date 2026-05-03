@@ -210,40 +210,6 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// findSessionNote scans <vault>/Projects/<project>/sessions for a single
-// session note whose filename starts with datePrefix (e.g.
-// "2027-06-15"). Phase 4 of session-slot-multihost-disambiguation
-// switched session filenames from legacy "YYYY-MM-DD-NN.md" to
-// "YYYY-MM-DD-HHMMSSmmm[-N].md", so integration tests can no longer
-// hardcode the trailing two-digit counter. Returns absolute path.
-//
-// Fails the test if zero or more-than-one match is found.
-func findSessionNote(t *testing.T, vaultPath, project, datePrefix string) string {
-	t.Helper()
-	dir := filepath.Join(vaultPath, "Projects", project, "sessions")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read sessions dir %s: %v", dir, err)
-	}
-	var matches []string
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".md") {
-			continue
-		}
-		if strings.HasPrefix(name, datePrefix+"-") {
-			matches = append(matches, filepath.Join(dir, name))
-		}
-	}
-	if len(matches) == 0 {
-		t.Fatalf("no session note found in %s with prefix %s", dir, datePrefix)
-	}
-	if len(matches) > 1 {
-		t.Fatalf("multiple session notes found in %s with prefix %s: %v", dir, datePrefix, matches)
-	}
-	return matches[0]
-}
-
 // findSessionNoteByID returns the absolute path to the session note
 // recorded in session-index.json for the given session_id, joined onto
 // vaultPath. Fails the test if the session is missing.
