@@ -29,6 +29,29 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
 
+// updateHarnessSessionID is the function the Capture wrapper calls to
+// reconcile the harness-supplied session id into the cache file.
+//
+// Wired up by sessionclaim.init() to sessionclaim.UpdateHarnessSessionID
+// — kept as a package-level variable here to break the import cycle
+// (sessionclaim imports session for DetectProjectRoot). Tests may
+// override this seam to assert the call site.
+//
+// Default no-op so that unit tests of the session package that never
+// import sessionclaim still build and run cleanly.
+var updateHarnessSessionID = func(projectRoot, harnessID string) error { return nil }
+
+// SetUpdateHarnessSessionID wires the sessionclaim integration. Called
+// from sessionclaim.init() to register the real implementation. Phase 4
+// of session-slot-multihost-disambiguation.
+func SetUpdateHarnessSessionID(fn func(projectRoot, harnessID string) error) {
+	if fn == nil {
+		updateHarnessSessionID = func(string, string) error { return nil }
+		return
+	}
+	updateHarnessSessionID = fn
+}
+
 // CaptureOpts configures a Capture invocation.
 type CaptureOpts struct {
 	TranscriptPath string
@@ -41,6 +64,12 @@ type CaptureOpts struct {
 	Provider       llm.Provider // LLM provider (nil = heuristic only)
 	Index          *index.Index // shared index for batch operations (nil = load/save per call)
 	AutoCaptured   bool         // mark note as auto-captured (lower confidence)
+	// ProjectRoot is the absolute project-root path; resolved by caller via
+	// session.DetectProjectRoot. Used by CaptureFromParsed for sessionclaim
+	// integration (M8 architectural cleanup, Phase 4 of
+	// session-slot-multihost-disambiguation). Empty falls back to legacy
+	// behavior — no UpdateHarnessSessionID call.
+	ProjectRoot string
 }
 
 // CaptureResult holds the output of a capture operation.
@@ -79,8 +108,27 @@ func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
 		sessionID = t.Stats.SessionID
 	}
 
+	// Resolve project root if caller didn't provide one (hook handlers may
+	// have already done this, MCP path always does it before Capture).
+	// Phase 4 / M8 of session-slot-multihost-disambiguation.
+	if opts.ProjectRoot == "" && cwd != "" {
+		opts.ProjectRoot = DetectProjectRoot(cwd)
+	}
+
 	// Detect session metadata
 	info := Detect(cwd, t.Stats.GitBranch, t.Stats.Model, sessionID, cfg)
+
+	// Reconcile harness session id into the cache file (M8 — eliminates the
+	// order dance: callers that provide opts.SessionID from the harness JSON
+	// get their id stamped into the claim regardless of whether MCP fired
+	// first or hook fired first). UpdateHarnessSessionID self-bootstraps via
+	// AcquireOrRefresh (H5), so a fresh hook-only short session still gets
+	// a valid claim file. Errors are logged warnings, never propagated.
+	if opts.ProjectRoot != "" && sessionID != "" {
+		if updateErr := updateHarnessSessionID(opts.ProjectRoot, sessionID); updateErr != nil {
+			log.Printf("warning: sessionclaim.UpdateHarnessSessionID: %v", updateErr)
+		}
+	}
 
 	// Narrative extraction (heuristic enrichment from tool calls)
 	narr := narrative.Extract(t, cwd)
@@ -156,36 +204,42 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 		return &CaptureResult{Skipped: true, Reason: "already processed"}, nil
 	}
 
-	// Determine date and iteration
-	date := t.Stats.StartTime.Format("2006-01-02")
-	if date == "0001-01-01" {
-		date = time.Now().Format("2006-01-02")
+	// Single clock source (Mechanism 1, Phase 4 of
+	// session-slot-multihost-disambiguation): one `now` drives the
+	// filename's date prefix and timestamp body. The frontmatter `date`
+	// field continues to reflect t.Stats.StartTime (the session's
+	// wall-clock identity, not the write moment); only the filename uses
+	// `now`. The two converge except across midnight, where the filename
+	// reflects the write time and the frontmatter the session start.
+	now := time.Now()
+	date := now.Format("2006-01-02")
+	frontmatterDate := t.Stats.StartTime.Format("2006-01-02")
+	if frontmatterDate == "0001-01-01" {
+		frontmatterDate = date
 	}
 
-	// Reuse existing iteration when overwriting to avoid duplicate note files.
-	// Exception: when the project changed (e.g., reprocessing moves a session
-	// from "_unknown" to a detected project), assign a fresh iteration for the
-	// new project to avoid gaps and collisions.
-	var iteration int
-	if opts.Force || exists {
-		if exists {
-			if existing.Project != info.Project {
-				// Project changed — get fresh iteration for the new project
-				iteration = idx.NextIteration(info.Project, date)
-			} else {
-				iteration = existing.Iteration
-			}
-			// Clean up old note if path will change (e.g., project reassignment)
-			oldPath := filepath.Join(cfg.VaultPath, existing.NotePath)
-			newRelPath := render.NoteRelPath(info.Project, date, iteration)
-			newPath := filepath.Join(cfg.VaultPath, newRelPath)
-			if oldPath != newPath {
-				os.Remove(oldPath)
-			}
-		}
+	// Mechanism 3: same-session re-write via existing NotePath field.
+	// If the index already knows this session AND its recorded project
+	// matches, capture its prior NotePath so we can remove the stale
+	// file after we've stat'd the new candidate path. Project changes
+	// (e.g., reprocessing moves a session from "_unknown" to a detected
+	// project) are treated as fresh writes — no removal of the prior
+	// note (it belongs to a different conceptual entry).
+	var prevPath string
+	if exists && existing.Project == info.Project && existing.NotePath != "" {
+		prevPath = filepath.Join(cfg.VaultPath, existing.NotePath)
 	}
-	if iteration == 0 {
-		iteration = idx.NextIteration(info.Project, date)
+
+	// Iteration is now purely a frontmatter field (filenames use
+	// timestamps, not iteration counters). Compute as
+	// "today's entries for this project + 1" so it remains a useful
+	// human-readable ordinal in vault frontmatter. Phase 5's index
+	// rebuild reads this back from frontmatter authoritatively.
+	iteration := countTodayEntries(idx, info.Project, frontmatterDate) + 1
+	if exists && existing.Project == info.Project && existing.Iteration > 0 {
+		// Same-session re-write: preserve the prior iteration ordinal so
+		// the user-visible counter doesn't drift on idempotent recapture.
+		iteration = existing.Iteration
 	}
 
 	// Find previous session for linking
@@ -363,13 +417,39 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 		}
 	}
 
-	// Compute related sessions
-	relPath := render.NoteRelPath(info.Project, date, iteration)
+	// Mechanism 1 (Phase 4): timestamp filename with sub-millisecond
+	// collision-retry suffix. Stat each candidate; on collision (file
+	// exists), bump suffix 1..9; fail loudly after 10 exhausted attempts
+	// rather than silently overwriting a peer note.
+	var (
+		relPath string
+		absPath string
+	)
+	for suffix := 0; suffix <= 9; suffix++ {
+		relPath = render.NoteRelPathTimestamp(info.Project, date, now, suffix)
+		absPath = filepath.Join(cfg.VaultPath, relPath)
+		// Same-session re-write (Mechanism 3): if the prior path is the
+		// same as our candidate (rare, only on identical clock), allow
+		// overwrite — the prevPath removal at the bottom would otherwise
+		// nuke our own freshly-written file.
+		if prevPath != "" && prevPath == absPath {
+			break
+		}
+		if _, statErr := os.Stat(absPath); os.IsNotExist(statErr) {
+			break // path is free
+		} else if statErr != nil {
+			return nil, fmt.Errorf("stat candidate path: %w", statErr)
+		}
+		if suffix == 9 {
+			return nil, fmt.Errorf("session-note slot collision: 10 retries exhausted at %s", relPath)
+		}
+	}
+
 	candidateEntry := index.SessionEntry{
 		SessionID:    sessionID,
 		Project:      info.Project,
 		Domain:       info.Domain,
-		Date:         date,
+		Date:         frontmatterDate,
 		Iteration:    iteration,
 		Title:        noteData.Title,
 		Summary:      noteData.Summary,
@@ -400,8 +480,15 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 	// Render markdown
 	markdown := render.SessionNote(noteData)
 
-	// Write note file
-	absPath := filepath.Join(cfg.VaultPath, relPath)
+	// Mechanism 3: remove prior session note before writing the new one
+	// (only when the prior path differs from the candidate path, which
+	// is the common case — same-clock-tick rewrites of the identical
+	// path fall through to atomicfile.Write's overwrite semantics).
+	if prevPath != "" && prevPath != absPath {
+		if removeErr := os.Remove(prevPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			log.Printf("warning: could not remove prior session note %s: %v", prevPath, removeErr)
+		}
+	}
 
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create session dir: %w", err)
@@ -420,7 +507,7 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 		NotePath:         relPath,
 		Project:          info.Project,
 		Domain:           info.Domain,
-		Date:             date,
+		Date:             frontmatterDate,
 		Iteration:        iteration,
 		Title:            noteData.Title,
 		Model:            info.Model,
@@ -532,6 +619,23 @@ func frictionScore(r *friction.Result) int {
 		return 0
 	}
 	return r.Score
+}
+
+// countTodayEntries returns the number of entries in idx for the given
+// (project, date) pair. Used for the iteration-counter frontmatter
+// field at write time. Mechanism 1 / Phase 4 of session-slot-
+// multihost-disambiguation: filenames no longer encode the iteration
+// counter, but frontmatter still does for backwards compat with read
+// paths that look up via (project, date, iteration). Index rebuild
+// (Phase 5) reads iteration from frontmatter authoritatively.
+func countTodayEntries(idx *index.Index, project, date string) int {
+	count := 0
+	for _, e := range idx.Entries {
+		if e.Project == project && e.Date == date {
+			count++
+		}
+	}
+	return count
 }
 
 func filenameNoExt(path string) string {
