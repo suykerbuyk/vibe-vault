@@ -23,7 +23,7 @@ machines:
    that doesn't exist, pull from discovered remotes directly (e.g.,
    `git -C <vault_path> pull <remote> main` for each remote).
 3. If it reports "regenerated", also run `vv index` to rebuild auto-generated files
-4. If it reports files needing manual review, inform the user before proceeding
+4. If it emits `WARNING: vault rebase kept LOCAL content` (DroppedUpstream surface), inform the user and point them at `vv vault recover` to inspect dropped upstream commits — see `doc/OPERATIONS.md` "Recovering Dropped Vault Narratives"
 5. If it fails (no remote, network error), warn and proceed — local state is still valid
 
 ## Pre-bootstrap orphan sweep (DESIGN #98)
