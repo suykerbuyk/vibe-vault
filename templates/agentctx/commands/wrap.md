@@ -253,6 +253,14 @@ merge patterns, run vault push **after** the project-side push but
 project commit, so the project commit must exist on a pushed branch
 by the time the vault record is published.
 
+`vv vault push --paths <p1> --paths <p2>` is available when the caller
+knows the explicit list of vault files it intends to publish; it
+stages only those paths and leaves any other dirty file in the vault
+working tree untouched. Today's wrap procedure does not yet require
+it — the migration from catch-all to selective staging at wrap time is
+tracked under `vault-two-tier-narrative-vs-sessions-split` (β2) and
+will land when β2 ships.
+
 ## Flags
 
 - `/wrap` — uses `[wrap].default_model` as the tier when present;
