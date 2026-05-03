@@ -1350,6 +1350,74 @@ func TestIntegration(t *testing.T) {
 		}
 	})
 
+	// 10h. check toolchain — vv-check-toolchain Phase 2. Confirms the
+	// CheckToolchain() probe wired into runCheck() emits one
+	// `tool:<bin>` row per spec, regardless of whether the cwd is a
+	// detectable project. Two cases: a non-project temp dir (DetectProject
+	// returns "_unknown" so the project-scoped checks are skipped, and the
+	// toolchain probe is the only project-independent addition) and the
+	// JSON path.
+	t.Run("check_toolchain_non_project_cwd", func(t *testing.T) {
+		nonProject := t.TempDir()
+		stdout, stderr, err := runVVInDir(t, env, nonProject, "check")
+		if err != nil {
+			t.Fatalf("vv check (non-project cwd) returned non-zero: %v\nstdout: %s\nstderr: %s",
+				err, stdout, stderr)
+		}
+		// Each toolchainSpec must show up as a `tool:<bin>` row in the
+		// human-readable Format() output. The probe runs unconditionally,
+		// so even a non-project cwd must surface every entry.
+		for _, bin := range []string{"go", "golangci-lint", "gh", "make", "git"} {
+			needle := "tool:" + bin
+			if !strings.Contains(stdout, needle) {
+				t.Errorf("non-project cwd: expected %q row in `vv check` output\nstdout: %s",
+					needle, stdout)
+			}
+		}
+	})
+
+	t.Run("check_toolchain_json_emits_entries", func(t *testing.T) {
+		nonProject := t.TempDir()
+		stdout, stderr, err := runVVInDir(t, env, nonProject, "check", "--json")
+		if err != nil {
+			t.Fatalf("vv check --json returned non-zero: %v\nstdout: %s\nstderr: %s",
+				err, stdout, stderr)
+		}
+		// Decode and project: collect every check whose Name has the
+		// "tool:" prefix. The status of each is host-dependent (pass when
+		// the binary is installed, warn when missing), but the entries
+		// themselves must be present.
+		var report struct {
+			Checks []struct {
+				Name   string `json:"name"`
+				Status string `json:"status"`
+				Detail string `json:"detail"`
+			} `json:"checks"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+			t.Fatalf("invalid JSON from `vv check --json`: %v\nstdout: %s", err, stdout)
+		}
+		toolEntries := map[string]string{}
+		for _, c := range report.Checks {
+			if strings.HasPrefix(c.Name, "tool:") {
+				toolEntries[c.Name] = c.Status
+			}
+		}
+		for _, bin := range []string{"go", "golangci-lint", "gh", "make", "git"} {
+			name := "tool:" + bin
+			status, ok := toolEntries[name]
+			if !ok {
+				t.Errorf("--json: missing entry for %q\nentries seen: %v", name, toolEntries)
+				continue
+			}
+			// Host-dependent verdict: only assert that the value is one
+			// of the documented set. fail is not produced by the probe.
+			if status != "pass" && status != "warn" {
+				t.Errorf("--json: %q status %q not in {pass, warn}", name, status)
+			}
+		}
+	})
+
 	// 10g. export
 	t.Run("export", func(t *testing.T) {
 		// JSON export (all sessions)
