@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/suykerbuyk/vibe-vault/internal/check"
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 	"github.com/suykerbuyk/vibe-vault/internal/index"
 	"github.com/suykerbuyk/vibe-vault/internal/inject"
@@ -499,12 +500,25 @@ func NewBootstrapContextTool(cfg config.Config) Tool {
 				ActiveTasks                 []taskEntry             `json:"active_tasks"`
 				Context                     string                  `json:"context"`
 				KnowledgeLearningsAvailable *learningsAvailableHint `json:"knowledge_learnings_available,omitempty"`
+				Warnings                    []string                `json:"warnings,omitempty"`
 			}{
 				Project:     project,
 				Workflow:    workflow,
 				Resume:      resume,
 				ActiveTasks: tasks,
 				Context:     contextOutput,
+			}
+
+			// Phase 4 of session-slot-multihost-disambiguation:
+			// surface wrap-iter drift in the bootstrap response so
+			// agents see "your repo's last-iter is behind the vault"
+			// at session start. Gated on default-branch identity (the
+			// check itself returns a non-Warn Result on feature
+			// branches), and on having a resolvable cwd.
+			if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+				if driftResult := check.CheckWrapIterDrift(cwd, cfg.VaultPath, project); driftResult != nil && driftResult.Status == check.Warn {
+					response.Warnings = append(response.Warnings, driftResult.Detail)
+				}
 			}
 
 			// 6. Cross-project learnings hint: emit only when the
