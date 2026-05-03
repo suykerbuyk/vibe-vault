@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -871,5 +873,136 @@ func TestEndToEndDropFileAndList(t *testing.T) {
 	}
 	if !strings.Contains(bootRes, "knowledge_learnings_available") {
 		t.Errorf("bootstrap should emit learnings field once a file exists, got: %s", bootRes)
+	}
+}
+
+// ----------------------------------------------------------------------
+// Phase 4 (session-slot-multihost-disambiguation) — vv_bootstrap_context
+// surfaces wrap-iter drift in response.Warnings on default branch;
+// emits no warning on feature branch.
+// ----------------------------------------------------------------------
+
+// initBootstrapDriftRepo seeds a real git repo at <dir> with default
+// branch `main` and a single empty commit so check.CheckWrapIterDrift
+// can resolve current/default branch. Returns the repo path.
+func initBootstrapDriftRepo(t *testing.T, dir string) {
+	t.Helper()
+	envs := []string{
+		"HOME=" + dir,
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=t@t",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=t@t",
+		"PATH=" + os.Getenv("PATH"),
+	}
+	cmds := [][]string{
+		{"git", "init", "-q", "-b", "main"},
+		{"git", "config", "user.email", "t@t"},
+		{"git", "config", "user.name", "Test"},
+		{"git", "commit", "-q", "--allow-empty", "-m", "init"},
+	}
+	for _, c := range cmds {
+		cmd := exec.Command(c[0], c[1:]...)
+		cmd.Dir = dir
+		cmd.Env = envs
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", c, string(out))
+		}
+	}
+}
+
+// chdirT changes cwd to dir for the duration of the test, restoring on
+// cleanup.
+func chdirT(t *testing.T, dir string) {
+	t.Helper()
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if chErr := os.Chdir(dir); chErr != nil {
+		t.Fatalf("chdir(%q): %v", dir, chErr)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+}
+
+func TestBootstrapContext_DriftWarning(t *testing.T) {
+	repo := t.TempDir()
+	initBootstrapDriftRepo(t, repo)
+	// Local stamp says iter 5; vault iterations.md has up to iter 8 → behind.
+	if err := os.MkdirAll(filepath.Join(repo, ".vibe-vault"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".vibe-vault", "last-iter"), []byte("5\n"), 0o644); err != nil {
+		t.Fatalf("write last-iter: %v", err)
+	}
+
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/workflow.md":   "# Workflow",
+		"Projects/testproj/agentctx/iterations.md": "### Iteration 6\n### Iteration 7\n### Iteration 8\n",
+	})
+	chdirT(t, repo)
+
+	tool := NewBootstrapContextTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var parsed struct {
+		Warnings []string `json:"warnings"`
+	}
+	if jsonErr := json.Unmarshal([]byte(result), &parsed); jsonErr != nil {
+		t.Fatalf("invalid JSON: %v\nresult: %s", jsonErr, result)
+	}
+	if len(parsed.Warnings) == 0 {
+		t.Fatalf("expected at least one warning, got 0; result:\n%s", result)
+	}
+	joined := strings.Join(parsed.Warnings, " ")
+	if !strings.Contains(joined, "behind") {
+		t.Errorf("warnings should contain 'behind', got %q", parsed.Warnings)
+	}
+}
+
+func TestBootstrapContext_NoWarning_FeatureBranch(t *testing.T) {
+	repo := t.TempDir()
+	initBootstrapDriftRepo(t, repo)
+	// Switch to a feature branch — drift check should SKIP (Pass with
+	// "skipped" detail), so the warnings field stays empty.
+	co := exec.Command("git", "-C", repo, "checkout", "-q", "-b", "feature/foo")
+	if out, coErr := co.CombinedOutput(); coErr != nil {
+		t.Fatalf("checkout: %s", out)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".vibe-vault"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".vibe-vault", "last-iter"), []byte("5\n"), 0o644); err != nil {
+		t.Fatalf("write last-iter: %v", err)
+	}
+
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/workflow.md":   "# Workflow",
+		"Projects/testproj/agentctx/iterations.md": "### Iteration 6\n### Iteration 7\n### Iteration 8\n",
+	})
+	chdirT(t, repo)
+
+	tool := NewBootstrapContextTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	var parsed struct {
+		Warnings []string `json:"warnings"`
+	}
+	if jsonErr := json.Unmarshal([]byte(result), &parsed); jsonErr != nil {
+		t.Fatalf("invalid JSON: %v", jsonErr)
+	}
+	if len(parsed.Warnings) != 0 {
+		t.Errorf("expected no warnings on feature branch, got %v", parsed.Warnings)
+	}
+	// Confirm omitempty kept the field out of the wire payload entirely
+	// when no warnings present.
+	if strings.Contains(result, `"warnings":`) {
+		t.Errorf("warnings field should be omitted (omitempty) on feature branch, got: %s", result)
 	}
 }

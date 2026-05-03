@@ -5,6 +5,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,21 @@ import (
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 	"github.com/suykerbuyk/vibe-vault/internal/index"
+	"github.com/suykerbuyk/vibe-vault/internal/sessionclaim"
 )
+
+// withNilClaim swaps the package-level sessionclaimAcquireOrRefresh
+// seam to return (nil, err) for the duration of the test. Exercises
+// the H6 legacy-fallback path in vv_capture_session: synthesized
+// crypto/rand session id with hardcoded source: "zed".
+func withNilClaim(t *testing.T) {
+	t.Helper()
+	orig := sessionclaimAcquireOrRefresh
+	sessionclaimAcquireOrRefresh = func(string) (*sessionclaim.Claim, error) {
+		return nil, errors.New("test: forced nil claim")
+	}
+	t.Cleanup(func() { sessionclaimAcquireOrRefresh = orig })
+}
 
 // writeTestVault creates a vault directory with a session-index.json and optional
 // vault files (e.g., "Projects/myproj/knowledge.md" → content).
@@ -701,6 +716,11 @@ func TestGetEffectivenessEmpty(t *testing.T) {
 func TestCaptureSessionTool_Success(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
 
+	// Force the H6 legacy fallback (claim==nil) so this test deterministically
+	// produces source: zed regardless of the host harness detection. The
+	// claim-aware paths are covered by TestCaptureSessionTool_SourceFlip.
+	withNilClaim(t)
+
 	tool := NewCaptureSessionTool(cfg)
 	result, err := tool.Handler(json.RawMessage(`{
 		"summary": "Implemented OAuth login flow with Google provider.",
@@ -830,5 +850,113 @@ func TestValidateProjectName(t *testing.T) {
 		if (err != nil) != tt.wantErr {
 			t.Errorf("validateProjectName(%q) err=%v, wantErr=%v", tt.name, err, tt.wantErr)
 		}
+	}
+}
+
+// ----------------------------------------------------------------------
+// Phase 4 (session-slot-multihost-disambiguation) — vv_capture_session
+// source-flip end-to-end (C3) + defensive nil-claim path (H6).
+// ----------------------------------------------------------------------
+
+// setSessionclaimSeam swaps the package-level test seam to a fixture
+// that returns the supplied claim+err, restoring on test cleanup.
+func setSessionclaimSeam(t *testing.T, claim *sessionclaim.Claim, err error) {
+	t.Helper()
+	orig := sessionclaimAcquireOrRefresh
+	sessionclaimAcquireOrRefresh = func(string) (*sessionclaim.Claim, error) {
+		return claim, err
+	}
+	t.Cleanup(func() { sessionclaimAcquireOrRefresh = orig })
+}
+
+// TestCaptureSessionTool_SourceFlip_ClaudeCode — claim.harness ==
+// HarnessClaudeCode produces a frontmatter without `source:` (the
+// default Claude Code emit shape). Verifies the C3 contract.
+func TestCaptureSessionTool_SourceFlip_ClaudeCode(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	setSessionclaimSeam(t, &sessionclaim.Claim{
+		DerivedSessionID: "derived:claude-1",
+		Harness:          sessionclaim.HarnessClaudeCode,
+	}, nil)
+
+	tool := NewCaptureSessionTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"summary": "test claude-code source flip"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	var resp map[string]any
+	if jsonErr := json.Unmarshal([]byte(result), &resp); jsonErr != nil {
+		t.Fatalf("json parse: %v", jsonErr)
+	}
+	notePath := resp["note_path"].(string)
+	data, readErr := os.ReadFile(filepath.Join(cfg.VaultPath, notePath))
+	if readErr != nil {
+		t.Fatalf("read note: %v", readErr)
+	}
+	content := string(data)
+	if strings.Contains(content, "source:") {
+		t.Errorf("note should NOT contain a source: field for claude-code claim, got:\n%s", content)
+	}
+}
+
+// TestCaptureSessionTool_SourceFlip_ZedMCP — claim.harness ==
+// HarnessZedMCP produces `source: zed` in frontmatter.
+func TestCaptureSessionTool_SourceFlip_ZedMCP(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	setSessionclaimSeam(t, &sessionclaim.Claim{
+		DerivedSessionID: "derived:zed-1",
+		Harness:          sessionclaim.HarnessZedMCP,
+	}, nil)
+
+	tool := NewCaptureSessionTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"summary": "test zed-mcp source flip"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	var resp map[string]any
+	if jsonErr := json.Unmarshal([]byte(result), &resp); jsonErr != nil {
+		t.Fatalf("json parse: %v", jsonErr)
+	}
+	notePath := resp["note_path"].(string)
+	data, readErr := os.ReadFile(filepath.Join(cfg.VaultPath, notePath))
+	if readErr != nil {
+		t.Fatalf("read note: %v", readErr)
+	}
+	if !strings.Contains(string(data), "source: zed") {
+		t.Errorf("note should contain `source: zed` for zed-mcp claim, got:\n%s", string(data))
+	}
+}
+
+// TestCaptureSessionTool_NilClaimFallback — H6 contract: when
+// AcquireOrRefresh returns (nil, err), the handler succeeds with the
+// legacy crypto/rand session id and `source: zed`.
+func TestCaptureSessionTool_NilClaimFallback(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	setSessionclaimSeam(t, nil, errors.New("simulated I/O failure"))
+
+	tool := NewCaptureSessionTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"summary": "test H6 fallback"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	var resp map[string]any
+	if jsonErr := json.Unmarshal([]byte(result), &resp); jsonErr != nil {
+		t.Fatalf("json parse: %v", jsonErr)
+	}
+	if resp["status"] != "captured" {
+		t.Errorf("status = %v, want captured", resp["status"])
+	}
+	notePath := resp["note_path"].(string)
+	data, readErr := os.ReadFile(filepath.Join(cfg.VaultPath, notePath))
+	if readErr != nil {
+		t.Fatalf("read note: %v", readErr)
+	}
+	content := string(data)
+	if !strings.Contains(content, "source: zed") {
+		t.Errorf("note should contain `source: zed` on H6 fallback, got:\n%s", content)
+	}
+	// Legacy fallback session_id has the "zed-mcp:" prefix.
+	if !strings.Contains(content, "session_id: \"zed-mcp:") {
+		t.Errorf("note should contain `session_id: \"zed-mcp:...\"` on H6 fallback, got:\n%s", content)
 	}
 }
