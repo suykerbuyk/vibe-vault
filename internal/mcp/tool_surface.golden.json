@@ -1,5 +1,5 @@
 {
-  "surface_version": 12,
+  "surface_version": 13,
   "tools": [
     {
       "name": "vv_append_iteration",
@@ -37,6 +37,10 @@
       "required_inputs": [
         "slug"
       ]
+    },
+    {
+      "name": "vv_check_toolchain",
+      "required_inputs": null
     },
     {
       "name": "vv_describe_iter_state",
