@@ -340,6 +340,24 @@ var expectedTerminal = map[string]string{
 		"  vv vault push      Commit all changes and push\n" +
 		"  vv vault recover   List upstream commits whose content was dropped on rebase\n",
 
+	"staging": "vv staging \u2014 host-local session-capture staging dir\n" +
+		"\n" +
+		"Usage: vv staging <command>\n" +
+		"\n" +
+		"Manages the host-local staging dir for the two-tier vault layout.\n" +
+		"The staging dir lives outside the shared Obsidian vault \u2014 by default at\n" +
+		"$XDG_STATE_HOME/vibe-vault/<project>/ (or ~/.local/state/vibe-vault/<project>/).\n" +
+		"Hooks write session notes into the staging dir; a wrap-time mirror\n" +
+		"projects them into <vault>/Projects/<p>/sessions/<host>/ for cross-host\n" +
+		"browse.\n" +
+		"\n" +
+		"Subcommands:\n" +
+		"  vv staging init <p>      Initialize the staging dir for a project (idempotent)\n" +
+		"  vv staging status <p>    Report staging dir presence and worktree state\n" +
+		"  vv staging path <p>      Print the resolved staging dir path\n" +
+		"  vv staging gc <p>        Run git gc --auto on the staging repo\n" +
+		"  vv staging migrate ...   Archive flat-layout sessions into _pre-staging-archive/\n",
+
 	"zed": "vv zed \u2014 import Zed agent panel threads\n" +
 		"\n" +
 		"Usage: vv zed <subcommand>\n" +
@@ -504,6 +522,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv effectiveness [--project X]   Analyze context effectiveness on outcomes\n" +
 		"  vv memory [link | ...]           Link Claude Code auto-memory into vault\n" +
 		"  vv vault <command>               Vault git sync (pull, push, status, recover)\n" +
+		"  vv staging [init | ...]          Manage host-local staging dir (init, status, gc, migrate)\n" +
 		"  vv zed <subcommand>              Import Zed agent panel threads into vault\n" +
 		"  vv mcp [install | ...]           Start MCP server (JSON-RPC over stdio)\n" +
 		"  vv worktree [gc | ...]           Manage subagent worktrees (gc)\n" +
@@ -527,7 +546,7 @@ func TestFormatUsage(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "context", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "memory", "vault", "zed", "mcp", "worktree", "config", "templates", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "memory", "vault", "staging", "zed", "mcp", "worktree", "config", "templates", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))

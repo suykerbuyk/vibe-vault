@@ -749,6 +749,18 @@ func gitCmd(dir string, timeout time.Duration, args ...string) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
+// GitCommand is the public sibling-package entry point to vaultsync's
+// canonical git invocation. It delegates verbatim to the package-private
+// gitCmd so callers in internal/staging (and any future sibling package)
+// can run git operations through the same hardened wrapper without
+// duplicating fork-exec, timeout, env, and trim logic.
+//
+// Output is whitespace-trimmed; use the private gitCmdRaw inside the
+// vaultsync package when leading/trailing whitespace is significant.
+func GitCommand(dir string, timeout time.Duration, args ...string) (string, error) {
+	return gitCmd(dir, timeout, args...)
+}
+
 // gitCmdRaw is the byte-faithful variant of gitCmd: identical
 // invocation but the returned output is NOT whitespace-trimmed.
 // Required for `git status --porcelain -z` and any other parser that

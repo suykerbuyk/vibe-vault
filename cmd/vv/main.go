@@ -114,6 +114,9 @@ func main() {
 	case "vault":
 		runVault()
 
+	case "staging":
+		runStaging()
+
 	case "worktree":
 		runWorktree(os.Args[2:])
 

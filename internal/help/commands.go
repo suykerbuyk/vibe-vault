@@ -1095,6 +1095,103 @@ var VaultSubcommands = []Command{
 	CmdVaultRecover,
 }
 
+var CmdStaging = Command{
+	Name:       "staging",
+	Synopsis:   "host-local session-capture staging dir",
+	Brief:      "Manage host-local staging dir (init, status, gc, migrate)",
+	TableUsage: "vv staging [init | ...]",
+	Usage:      "vv staging <command>",
+	Description: `Manages the host-local staging dir for the two-tier vault layout.
+The staging dir lives outside the shared Obsidian vault — by default at
+$XDG_STATE_HOME/vibe-vault/<project>/ (or ~/.local/state/vibe-vault/<project>/).
+Hooks write session notes into the staging dir; a wrap-time mirror
+projects them into <vault>/Projects/<p>/sessions/<host>/ for cross-host
+browse.
+
+Subcommands:
+  vv staging init <p>      Initialize the staging dir for a project (idempotent)
+  vv staging status <p>    Report staging dir presence and worktree state
+  vv staging path <p>      Print the resolved staging dir path
+  vv staging gc <p>        Run git gc --auto on the staging repo
+  vv staging migrate ...   Archive flat-layout sessions into _pre-staging-archive/`,
+	SeeAlso: []string{"vv(1)"},
+}
+
+var CmdStagingInit = Command{
+	Name:     "staging init",
+	Synopsis: "initialize a project's staging dir",
+	Brief:    "Initialize the host-local staging dir for a project",
+	Usage:    "vv staging init <project>",
+	Args: []Arg{
+		{Name: "project", Desc: "Project slug (matches Projects/<p>/ in the vault)"},
+	},
+	Description: `Creates <staging-root>/<project>/ as a fresh git repo,
+writes repo-local user.email = vibe-vault@<sanitized-host> and
+user.name = vibe-vault, and drops a .init-done sentinel file.
+Idempotent: re-running on an already-initialized project is a no-op.
+
+The repo-local identity means session-capture hooks never depend on a
+global git config — works cleanly on hosts where 'git config --global
+user.email' was never run.`,
+}
+
+var CmdStagingStatus = Command{
+	Name:     "staging status",
+	Synopsis: "report staging dir state",
+	Brief:    "Report staging dir presence, worktree state, last commit",
+	Usage:    "vv staging status <project>",
+	Args: []Arg{
+		{Name: "project", Desc: "Project slug"},
+	},
+}
+
+var CmdStagingPath = Command{
+	Name:     "staging path",
+	Synopsis: "print resolved staging dir path",
+	Brief:    "Print the resolved staging dir path",
+	Usage:    "vv staging path <project>",
+	Args: []Arg{
+		{Name: "project", Desc: "Project slug"},
+	},
+}
+
+var CmdStagingGc = Command{
+	Name:     "staging gc",
+	Synopsis: "git gc --auto on the staging repo",
+	Brief:    "Run git gc --auto on the staging repo",
+	Usage:    "vv staging gc <project>",
+	Args: []Arg{
+		{Name: "project", Desc: "Project slug"},
+	},
+}
+
+var CmdStagingMigrate = Command{
+	Name:     "staging migrate",
+	Synopsis: "archive flat-layout sessions into _pre-staging-archive/",
+	Brief:    "Migrate legacy flat-layout sessions to _pre-staging-archive/",
+	Usage:    "vv staging migrate [--all-projects | --project <p>]",
+	Flags: []Flag{
+		{Name: "--all-projects", Desc: "Migrate every project under <vault>/Projects/"},
+		{Name: "--project <p>", Desc: "Migrate a single named project"},
+	},
+	Description: `Detects projects with committed sessions under
+<vault>/Projects/<p>/sessions/*.md (flat layout) and moves them in-place
+to <vault>/Projects/<p>/sessions/_pre-staging-archive/ via 'git mv'.
+Produces ONE commit per project (not one giant commit) for diffability
+and per-project revert. After the moves land, rewrites
+.vibe-vault/session-index.json note_path entries in-place so MCP tools
+and 'vv inject' keep working.`,
+}
+
+// StagingSubcommands is the ordered list of staging sub-subcommands.
+var StagingSubcommands = []Command{
+	CmdStagingInit,
+	CmdStagingStatus,
+	CmdStagingPath,
+	CmdStagingGc,
+	CmdStagingMigrate,
+}
+
 var CmdWorktree = Command{
 	Name:       "worktree",
 	Synopsis:   "subagent worktree management",
@@ -1206,6 +1303,7 @@ var Subcommands = []Command{
 	CmdEffectiveness,
 	CmdMemory,
 	CmdVault,
+	CmdStaging,
 	CmdZed,
 	CmdMcp,
 	CmdWorktree,

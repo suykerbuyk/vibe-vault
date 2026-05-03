@@ -54,6 +54,25 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+// TestGitCommand_DelegatesToGitCmd locks the v4-C1 export contract:
+// the public GitCommand wrapper must produce semantically identical
+// output to the package-private gitCmd, so sibling packages
+// (internal/staging) get a stable contract without re-implementing
+// the fork-exec, timeout, env-clean, and trim plumbing.
+//
+// `git --version` is the cheapest invocation that exercises the full
+// pipeline and produces a recognizable, stable output prefix.
+func TestGitCommand_DelegatesToGitCmd(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	out, err := GitCommand(dir, 5*time.Second, "--version")
+	if err != nil {
+		t.Fatalf("GitCommand: %v", err)
+	}
+	if !strings.HasPrefix(out, "git version") {
+		t.Errorf("GitCommand output prefix = %q, want \"git version\"", out)
+	}
+}
+
 func TestGetStatus_CleanRepo(t *testing.T) {
 	dir := gitx.InitTestRepo(t)
 

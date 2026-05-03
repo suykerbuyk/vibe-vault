@@ -34,6 +34,16 @@ type Config struct {
 	Synthesis  SynthesisConfig  `toml:"synthesis"`
 	Wrap       WrapConfig       `toml:"wrap"`
 	Providers  ProvidersConfig  `toml:"providers"`
+	Staging    StagingConfig    `toml:"staging"`
+}
+
+// StagingConfig controls the host-local staging dir used by the
+// two-tier vault layout (β2). Root, when non-empty, overrides the
+// XDG-state-dir default — useful for ramdisks, encrypted volumes,
+// or test isolation. When empty, callers should resolve the path via
+// staging.Root() (XDG_STATE_HOME or ~/.local/state/vibe-vault).
+type StagingConfig struct {
+	Root string `toml:"root"`
 }
 
 // ProvidersConfig holds the per-provider settings block. API keys default to
@@ -429,6 +439,9 @@ func (c Config) Overlay(projectConfigPath string) Config {
 	}
 	if md.IsDefined("zed", "auto_capture") {
 		c.Zed.AutoCapture = overlay.Zed.AutoCapture
+	}
+	if md.IsDefined("staging", "root") {
+		c.Staging.Root = overlay.Staging.Root
 	}
 	if md.IsDefined("synthesis", "enabled") {
 		c.Synthesis.Enabled = overlay.Synthesis.Enabled
