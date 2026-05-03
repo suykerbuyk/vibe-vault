@@ -3166,3 +3166,143 @@ Key architectural and design decisions in vibe-vault, with rationale.
     (gitx worktree helpers), Phase 1b (worktreegc package),
     Phase 2 (CLI + MCP front-ends + surface bump 11→12), Phase 3
     (templates + workflow policy), Phase 4 (this entry).**
+
+99. **Session-note slot allocation: timestamp filenames + cache-dir
+    claim file with per-token lock.** The pre-Phase-4 slot allocator
+    (`internal/index/index.go`'s `NextIteration`) computed the next
+    slot purely from `idx.Entries` (the in-memory `session-index.json`),
+    never the filesystem. When the index was stale relative to disk
+    (multi-host vault, recent `git pull`, manual restore), the
+    allocator returned an `N` whose `YYYY-MM-DD-NN.md` already existed
+    on disk with a *different* `session_id`; the atomic write at
+    `internal/session/capture.go` then clobbered it. Both `vv hook`
+    and `vv_capture_session` converged at `CaptureFromParsed`, so it
+    was a single shared bug — fix once, both paths benefit.
+
+    Three combined mechanisms ship together as one redesign:
+
+    **Mechanism 1: Timestamp filenames** (`YYYY-MM-DD-HHMMSSmmm.md`).
+    The counter is replaced with a millisecond-granularity timestamp
+    body. Lex sort = chronological sort. Sub-millisecond same-process
+    collisions resolve via `-N` suffix retry (1..9, fail at 10).
+    `internal/render/markdown.go` adds `BuildTimestampFilename`,
+    `ParseSessionFilename`, and `NoteRelPathTimestamp`; the legacy
+    `NoteFilename`/`NoteRelPath` helpers are removed at all write
+    sites in Phase 4 but read-side compatibility for legacy `-NN.md`
+    is permanent (no migration tool, zero vault churn).
+
+    **Single clock source.** `CaptureFromParsed` takes ONE
+    `now := time.Now()` at the top of the write phase. The filename's
+    date prefix uses `now.Format("2006-01-02")`; the timestamp body
+    uses the same `now`. Never split. The frontmatter `date:` field
+    and the index entry's `Date` continue to use `t.Stats.StartTime`
+    (the session's wall-clock identity, distinct from the write
+    moment). This guarantees filename internal consistency across
+    midnight boundaries: a Stop → SessionEnd that crosses midnight
+    produces two files whose date prefix matches each filename's
+    timestamp body exactly.
+
+    **Mechanism 2: Cache-dir claim file with per-token lock.** The
+    MCP server cannot accept a `session_id` from the LLM (Mechanism 2
+    architectural decision 1: no LLM-supplied identity). It mints
+    one and persists to a host-local cache file at
+    `<UserCacheDir>/vibe-vault/session-claims/<token>.json` where
+    `<token> = hex.EncodeToString(sha256(project_root || \x00 ||
+    ppid || \x00 || ppid_starttime)[:16])` (32 hex chars). Each
+    process computes its own token and reads/writes only its own
+    file — multi-instance safe by construction (kills the v6 thrash
+    bug where two Claude Code processes on the same project
+    corrupted each other's project-scoped claim).
+
+    **The triple `(ppid, ppid_starttime, project_root)` is the
+    LIVENESS PREDICATE and the TOKEN-DERIVATION KEY, not the identity
+    source.** `derived_session_id` is generated as
+    `"derived:" + hex.EncodeToString(crypto/rand 16 bytes)` exactly
+    once on first claim acquisition, persisted, never re-derived.
+    The triple selects WHICH claim file to read AND validates that
+    the parent process is still alive (`pidlive.Validate`); stale
+    claims (PID dead OR start-time mismatch) trigger a fresh mint.
+
+    **Per-token lockfile (H4 — concurrent acquire safety).**
+    `AcquireOrRefresh`, `UpdateHarnessSessionID`, `ReleaseSession`
+    all acquire `<cacheDir>/<token>.lock` (via existing
+    `internal/lockfile`) BEFORE reading the claim file, releasing
+    on return. This serializes concurrent goroutines within a single
+    MCP server process AND the MCP server racing with its sibling
+    `vv hook` subprocess (which share the token per architectural
+    decision 7). **Lock-ordering invariant:** the per-token lock is
+    acquired and released entirely within sessionclaim functions,
+    BEFORE Capture's index lock (`<stateDir>/session-index.json.lock`).
+    No nesting; call sites preserve claim-then-capture order, never
+    capture-then-claim.
+
+    **`atomicfile.Write` requires a vault-path arg** (verified at
+    `internal/atomicfile/atomicfile.go:25` for stamp-on-vault path
+    validation). Sessionclaim implements its own ~58-line atomic-write
+    helper (`internal/sessionclaim/atomicwrite.go`) — temp+fsync+rename
+    with mode 0o600 enforcement — rather than weakening atomicfile's
+    validation.
+
+    **Architectural decision 7 (load-bearing invariant).** Hook
+    subprocess and MCP server subprocess share `(ppid,
+    ppid_starttime)` because both are direct children of the same
+    Claude Code instance — they compute the SAME token and read/write
+    the SAME claim file. **If a future change inserts a wrapper
+    process between Claude Code and the MCP server (or between
+    Claude Code and `vv hook`), the invariant breaks silently and
+    hook events stop reconciling with their MCP-minted derived ids.**
+    Detection in code review only — runtime detection would require
+    an explicit handshake protocol (deferred).
+
+    **Architectural decision 8 (subagent worktree separation).**
+    When Claude Code spawns an `isolation: "worktree"` subagent, the
+    subagent has its own MCP server child with its own ppid → its
+    own token → its own claim file → its own `derived_session_id`.
+    Subagent session notes are independent from the parent's. This
+    is correct (subagents really ARE separate sessions for note-
+    taking) and emerges naturally from the token derivation.
+
+    **Mechanism 3: Same-session re-write via existing `NotePath`
+    field.** `SessionEntry.NotePath` already existed at
+    `internal/index/index.go:18`; no schema change required. First
+    write for a session stamps `now()`, writes timestamp file, sets
+    `idx.Entries[effectiveSessionID].NotePath`. Subsequent same-
+    session writes look up the prior path, `os.Remove` it, then
+    write fresh — Mechanism 1 retry handles sub-millisecond
+    collisions during the new write. Iteration is computed at write
+    time as `countTodayEntries(idx, project, date) + 1` and stamped
+    into frontmatter (read back authoritatively on rebuild — no
+    derived-on-rebuild path).
+
+    **Tool-surface: `vv_get_session_detail` deterministic
+    tiebreaker.** When `(project, date, iteration)` resolves to
+    multiple entries (multi-host stale-index race), the tool now
+    sorts by `NotePath` lexicographically and returns the first.
+    Schema unchanged for callers; `mcp_surface` unchanged.
+
+    **Tool-surface: `vv_bootstrap_context.warnings`.** Additive
+    `Warnings []string \`json:"warnings,omitempty"\`` field. The
+    handler runs `check.CheckWrapIterDrift(cwd, vault, project)`
+    (gated on default branch) and appends the warning detail when
+    drift is detected. Pre-v8 callers see absent or empty array.
+    `mcp_surface` unchanged.
+
+    **Backward compatibility — read-path only, no vault rewrite.**
+    `ParseSessionFilename` accepts all three formats (legacy counter,
+    plain timestamp, timestamp-with-suffix). Write path always emits
+    the new timestamp format. Mixed-vault tolerance is indefinite;
+    no migration tool, no schema bump, no operator action. Vault
+    repository churn: zero.
+
+    **`gopsutil/v3` is the only new dep added.** Pure-Go on macOS
+    (upstream confirms); no CGo introduced. Used for cross-platform
+    parent-process metadata (`Process.CreateTime()` for starttime,
+    `Process.Name()` for harness detection on macOS); Linux uses
+    `/proc/<ppid>/comm` directly.
+
+    **Filed as task `session-slot-multihost-disambiguation`
+    (Draft v8 — five review passes, iters 189 → 192); shipped on
+    branch `session-slot-multihost-disambiguation` across PR 0a
+    (drift check + sessionclaim skeleton + DetectProjectRoot,
+    PR #40), PR 0b (orphan-aware hook uninstall, PR #41), and
+    PR 3 (Phases 1–6 redesign — this entry).**
