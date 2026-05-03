@@ -155,7 +155,7 @@ Mitigations operationally:
 
 1. Always `vv vault pull` before `/wrap`. If you forget, the vault's `vv vault merge-driver` (registered in `~/.gitconfig` and the vault's `.gitattributes`) auto-resolves `.surface` conflicts; non-`.surface` conflicts surface to manual `git mergetool`.
 2. Don't push wrap stamp commits across workstations simultaneously.
-3. If a stamp push is rejected by branch protection (the iter-181 chicken-and-egg), pivot to a feature-branch PR for the next batch of work — the iter-stamp will land via the rebase-merge.
+3. Stamp-only wrap commits direct-push to main (DESIGN #102; see "Direct-pushing wrap commits to main" below). If a direct push is unexpectedly rejected, a hidden Ruleset, organization-level rule, or pre-receive hook is gating; capture the rejection message and pivot to a feature-branch PR for that wrap while the protection state is investigated.
 
 ## Recovering Dropped Vault Narratives
 
@@ -196,6 +196,54 @@ The race is two-machine same-iter wrap. Machine A wraps iter N and pushes; machi
 ### Cross-machine
 
 The recovery walks **reachable history from HEAD**, not the local reflog. This is load-bearing: after B's rebase pushes to the remote, A's commits remain reachable from `main`, so recovery works identically on either machine. There is no multi-machine reflog asymmetry to worry about; whichever host runs `vv vault recover` after a `vv vault pull` will see the same candidate set, regardless of which host originally produced the dropped commit.
+
+## Direct-pushing wrap commits to main
+
+After iter 197 the `required_status_checks` subresource was deleted from `main` branch protection (DESIGN #102). Stamp-only wrap commits — those whose entire diff is `.vibe-vault/last-iter` — direct-push to main without a PR cycle. Substantive commits continue to ship through PRs with an operator-visual CI check.
+
+The wrap.md template's Stage 5 carries the pre-push gate; this section colocates the procedure with the four operator commitments for ongoing reference.
+
+### Pre-push gate (mandatory on every wrap)
+
+After `git commit -F commit.msg` and BEFORE `git push`, run:
+
+```bash
+git diff --name-only HEAD~1 HEAD
+```
+
+The output dictates the push path:
+
+- **Output is exactly `.vibe-vault/last-iter`** → safe to direct-push: `git push github main`. The `detect-admin-commit` workflow short-circuits Lint+Test to ~20s green post-push, leaving main green.
+- **Output contains ANYTHING else** → DO NOT direct-push. Open a PR via the standard feature-branch flow. The operator visually confirms green Lint+Test on the PR before merging.
+
+This pre-flight check is the single point where operator discipline gates main against substantive direct-push regression. There is no server-side `required_status_checks` gate to catch a missed check.
+
+Iter-shape examples observed in this project's history:
+
+- Iter 196 wrap: diff is `.vibe-vault/last-iter` only → direct-push eligible.
+- Iter 197 wrap: diff is `.vibe-vault/last-iter` only → direct-push eligible.
+- Iter 195 wrap: diff is `.vibe-vault/last-iter` + `doc/DESIGN.md` + `doc/TESTING.md` + test files → PR required.
+
+Stamp-only wraps are common but not universal; planning iters that file new tasks, DESIGN entries, or doc updates often land mixed content alongside the stamp.
+
+### Operator commitments (verbatim from DESIGN #102)
+
+Server-side enforcement of "main is always green" is replaced by operator discipline. The operator explicitly accepts:
+
+1. **Substantive commits go through PRs.** Direct push is reserved for stamp-only wrap commits and operator-judgment-call administrative diffs (e.g., emergency hotfixes documented inline). Discipline, not enforcement.
+2. **PR merge requires a visual CI check.** GitHub will enable the merge button regardless of CI status. The operator visually confirms green Lint+Test on the PR before merging. Same information as before, no longer blocking.
+3. **Red main is recoverable.** If a buggy substantive direct push slips operator discipline, the post-push workflow surfaces red on main; revert via a normal PR (or an operator-direct push under the same model) returns main to green. `enforce_admins: true` continues to block force-push so revert is the only path.
+4. **No CI alarms exist by default.** If sustained red main becomes a real concern, file a follow-up task to add a workflow that fails loudly when main has unreverted red commits. Out of scope here.
+
+### `vv stamp_iter` is an MCP tool, not a CLI subcommand
+
+The stamp file `.vibe-vault/last-iter` is written via the MCP tool `vv_stamp_iter` from inside `/wrap` Stage 4 — **not** by an operator-invoked CLI command. There is no `vv stamp_iter` CLI subcommand to run by hand. Stage 5 of `/wrap` stages the stamp file alongside the iter narrative + agentctx files, runs `git commit -F commit.msg`, applies the pre-push gate above, and pushes. The operator never invokes `stamp_iter` directly.
+
+If you find yourself reaching for "let me just stamp the iter manually" outside `/wrap`, stop — the stamp is part of the wrap commit's atomicity contract and lives behind the Stage 4 sequence (append iteration → resume update → thread mutations → commit msg → stamp → session capture). Out-of-band stamping breaks DESIGN #93's mechanical anchor.
+
+### Cross-reference
+
+- DESIGN #102 — protection-relaxation rationale, the v1/v2 alternatives explored, and the trade-off framing.
 
 ## Automation: cron-based freshness (carried thread, not yet deployed)
 
@@ -245,6 +293,7 @@ When a workstation joins the fleet:
 - DESIGN #97 — MCPSurfaceVersion handshake + merge-driver.
 - DESIGN #98 — worktree gc lifecycle.
 - DESIGN #101 — vault rebase resolver policy + reachable-history recovery contract.
+- DESIGN #102 — drop `required_status_checks` on `main`; operator-discipline-gated direct push for stamp-only wrap commits.
 - README §"Schema migrations" and §"`vv context sync`".
 - Carried-forward thread `cross-project-template-propagation` (in resume.md): the per-project sweep is mechanical via `vv context sync` once Phase 2 is done.
 - Carried-forward thread `freshness-guard-cron-deployment-pending`: the cron deployment in §Automation hardens this.
