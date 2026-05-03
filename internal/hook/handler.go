@@ -18,6 +18,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/index"
 	"github.com/suykerbuyk/vibe-vault/internal/llm"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
+	"github.com/suykerbuyk/vibe-vault/internal/sessionclaim"
 	"github.com/suykerbuyk/vibe-vault/internal/synthesis"
 )
 
@@ -130,10 +131,16 @@ func handleStop(input *Input, cfg config.Config) error {
 		return nil
 	}
 
+	// Resolve project root for sessionclaim integration (Phase 4 / M8 of
+	// session-slot-multihost-disambiguation). Empty input.CWD falls back
+	// inside session.Capture once it parses the transcript.
+	projectRoot := session.DetectProjectRoot(input.CWD)
+
 	result, err := session.Capture(session.CaptureOpts{
 		TranscriptPath: input.TranscriptPath,
 		CWD:            input.CWD,
 		SessionID:      input.SessionID,
+		ProjectRoot:    projectRoot,
 		Checkpoint:     true,
 		SkipEnrichment: true,
 	}, cfg)
@@ -162,14 +169,30 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 		log.Printf("warning: LLM provider init failed: %v", providerErr)
 	}
 
+	// Resolve project root for sessionclaim integration (Phase 4 / M8).
+	projectRoot := session.DetectProjectRoot(input.CWD)
+
 	result, err := session.Capture(session.CaptureOpts{
 		TranscriptPath: input.TranscriptPath,
 		CWD:            input.CWD,
 		SessionID:      input.SessionID,
+		ProjectRoot:    projectRoot,
 		Provider:       provider,
 	}, cfg)
 	if err != nil {
+		// On error, do NOT release the claim — keep it alive so retry/
+		// recovery works on the next event.
 		return fmt.Errorf("capture session: %w", err)
+	}
+
+	// Release the session claim after a successful Stop-to-SessionEnd
+	// lifecycle (Phase 4 of session-slot-multihost-disambiguation).
+	// Errors are logged warnings, not propagated — release failures are
+	// non-fatal for the user-visible capture pipeline.
+	if projectRoot != "" {
+		if releaseErr := sessionclaim.ReleaseSession(projectRoot); releaseErr != nil {
+			log.Printf("warning: sessionclaim.ReleaseSession: %v", releaseErr)
+		}
 	}
 
 	if result.Skipped {
