@@ -221,8 +221,8 @@ func TestWrite_StampsOnVaultPath(t *testing.T) {
 		t.Fatalf("read .surface: %v", err)
 	}
 	body := string(got)
-	if !bytes.Contains(got, []byte("surface = 12")) {
-		t.Errorf(".surface missing surface=12; got %q", body)
+	if !bytes.Contains(got, []byte("surface = 13")) {
+		t.Errorf(".surface missing surface=13; got %q", body)
 	}
 	if !bytes.Contains(got, []byte("last_writer")) {
 		t.Errorf(".surface missing last_writer; got %q", body)
