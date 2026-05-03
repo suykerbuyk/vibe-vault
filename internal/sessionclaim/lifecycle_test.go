@@ -194,7 +194,7 @@ func TestUpdateHarnessSessionID_Idempotent(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 
-	if err := UpdateHarnessSessionID("/proj/Idem", "id-Y"); err != nil {
+	if err = UpdateHarnessSessionID("/proj/Idem", "id-Y"); err != nil {
 		t.Fatalf("second Update: %v", err)
 	}
 	after, err := os.ReadFile(path)
