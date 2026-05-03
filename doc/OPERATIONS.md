@@ -245,6 +245,63 @@ If you find yourself reaching for "let me just stamp the iter manually" outside 
 
 - DESIGN #102 — protection-relaxation rationale, the v1/v2 alternatives explored, and the trade-off framing.
 
+## Selective vault push (`--paths`)
+
+`vv vault push` accepts an opt-in `--paths <pathspec>` flag (repeatable) that stages only the listed paths via `git add -- <paths>...` instead of the default catch-all `git add -A`. The default behaviour with no flag is unchanged: every dirty path in the vault working tree is swept into the commit, preserving today's ad-hoc-cleanup ergonomics. The flag is opt-in for callers that know exactly which files belong to the work unit they are publishing.
+
+### The contamination scenario it closes
+
+Two Claude Code sessions run on the same workstation against the same vault. Session A is wrapping `Projects/foo`; session B is mid-flight editing `Projects/bar/iterations.md` and has an unsaved scratch note in `Projects/bar/agentctx/notes.md`. Both sessions share the same `~/obsidian/VibeVault/` working tree. Without `--paths`, A's wrap-time `vv vault push` runs `git add -A` and sweeps B's dirty `Projects/bar/*` files into A's commit — B's in-flight scratch is now published under A's commit subject, attributed to A's iter narrative. With `--paths`, A names only its own `Projects/foo/...` files; B's working-tree edits stay dirty and untouched, ready for B to commit on its own schedule.
+
+### CLI examples
+
+Single-path push — narrative-only update:
+
+```bash
+vv vault push --paths Projects/foo/agentctx/iterations.md
+```
+
+Commits exactly `Projects/foo/agentctx/iterations.md`. Any other dirty file in the vault working tree (in `Projects/foo/` or anywhere else) stays dirty.
+
+Multi-path push — wrap-shape commit covering iter + resume from one project:
+
+```bash
+vv vault push --paths Projects/foo/agentctx/iterations.md \
+              --paths Projects/foo/agentctx/resume.md
+```
+
+Commits exactly those two files. Concurrent dirty files in `Projects/bar/` (or any other project the operator has not named) remain in the working tree.
+
+### Catch-all is still the default
+
+`vv vault push` with no `--paths` flag preserves today's behaviour — `git add -A` of every dirty path. This is the right semantics for the operator-runs-cli case (sweeping miscellaneous notes after a writing session, recovering after a power-cycle, etc.) where naming each file would be tedious. The new flag is opt-in for callers that want contamination safety.
+
+### Recovery if a contaminated commit slipped through
+
+If `vv vault push` (catch-all form) published an unintended file alongside the intended set, recover with the standard git workflow. If the contaminated commit has not yet been pushed to a shared remote, soft-reset and re-stage selectively:
+
+```bash
+cd ~/obsidian/VibeVault
+git reset --soft HEAD~1                # uncommit, keep the index + working tree
+git reset HEAD -- <unintended-paths>   # unstage the contaminated subset
+vv vault push --paths <intended-path-1> --paths <intended-path-2>
+# Then commit the unintended subset on its own — typically from the other session that owns it.
+```
+
+If the contaminated commit has already been pushed, revert and re-publish the intended subset:
+
+```bash
+cd ~/obsidian/VibeVault
+git revert <sha>                       # produces a revert commit
+git push                               # publish the revert
+vv vault push --paths <intended-path-1> --paths <intended-path-2>
+# Re-stage and push the unintended subset separately.
+```
+
+### Forward note
+
+Under the planned `vault-two-tier-narrative-vs-sessions-split` (β2) work, the wrap-time vault push will use `--paths` mandatorily — the wrap orchestrator already knows the explicit narrative-file list it intends to publish. Today the flag remains opt-in for operators and any caller that wants contamination safety; β2 makes it load-bearing for the narrative-repo sync path.
+
 ## Automation: cron-based freshness (carried thread, not yet deployed)
 
 Two cron lines per workstation deploy `vv-binary-freshness-guard` Mechanism F (DESIGN reference: the freshness-guard task in `tasks/done/`):

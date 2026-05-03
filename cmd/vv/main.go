@@ -918,7 +918,21 @@ func runVault() {
 		if msg == "" {
 			msg = fmt.Sprintf("vault sync %s", time.Now().Format("2006-01-02 15:04"))
 		}
-		result, err := vaultsync.CommitAndPush(cfg.VaultPath, msg)
+		// --paths is a repeated flag: --paths foo.md --paths bar.md.
+		// When supplied, route to the selective-staging entry point so
+		// only the named paths are committed. Unset means catch-all
+		// (all dirty paths) — preserves the operator's ad-hoc cleanup
+		// semantics of `vv vault push` with no flag.
+		paths := flagValues(args[1:], "--paths")
+		var (
+			result *vaultsync.PushResult
+			err    error
+		)
+		if len(paths) > 0 {
+			result, err = vaultsync.CommitAndPushPaths(cfg.VaultPath, msg, paths)
+		} else {
+			result, err = vaultsync.CommitAndPush(cfg.VaultPath, msg)
+		}
 		if err != nil {
 			fatal("vault push: %v", err)
 		}
@@ -1979,6 +1993,21 @@ func flagValue(args []string, flag string) string {
 		}
 	}
 	return ""
+}
+
+// flagValues collects every value that follows a repeated flag occurrence,
+// e.g. --paths foo.md --paths bar.md → ["foo.md", "bar.md"]. Empty values
+// (the flag with no following token, or with an empty next token) are
+// skipped so the caller's downstream "no paths specified" guards see a
+// truly empty slice rather than a slice of empty strings.
+func flagValues(args []string, flag string) []string {
+	var out []string
+	for i, a := range args {
+		if a == flag && i+1 < len(args) && args[i+1] != "" {
+			out = append(out, args[i+1])
+		}
+	}
+	return out
 }
 
 func hasFlag(args []string, flag string) bool {

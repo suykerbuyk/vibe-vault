@@ -308,8 +308,56 @@ func Pull(vaultPath string) (*PullResult, error) {
 	return result, nil
 }
 
-// CommitAndPush stages all vault changes, commits with a machine-stamped
-// message, and pushes to all configured remotes.
+// CommitAndPush stages all dirty vault paths, commits with a
+// machine-stamped message, and pushes to all configured remotes. It is
+// a thin wrapper over CommitAndPushPaths: it enumerates the dirty
+// working-tree paths via `git status --porcelain -z` and forwards them
+// to the selective-staging entry point. Behaviour is identical to the
+// pre-refactor catch-all `git add -A` for any working-tree state — the
+// regression-locked test
+// TestCommitAndPush_CatchAllParity_PreservesOriginalBehavior
+// keeps that contract enforced.
+//
+// If the working tree is clean, returns (&PushResult{}, nil) without
+// invoking CommitAndPushPaths so the caller does not see the
+// "no paths specified" error from the explicit-intent guard.
+//
+// See CommitAndPushPaths for the full push / rebase / convergence
+// contract.
+func CommitAndPush(vaultPath, message string) (*PushResult, error) {
+	if err := checkIdentity(vaultPath); err != nil {
+		return nil, err
+	}
+
+	paths, err := dirtyPaths(vaultPath)
+	if err != nil {
+		return nil, fmt.Errorf("git status: %w", err)
+	}
+	if len(paths) == 0 {
+		// Nothing to commit — preserve the historical "empty result, no
+		// error" semantics. Short-circuit BEFORE CommitAndPushPaths so
+		// the explicit-intent empty-paths guard does not trigger.
+		return &PushResult{}, nil
+	}
+
+	return CommitAndPushPaths(vaultPath, message, paths)
+}
+
+// CommitAndPushPaths stages only the supplied paths, commits with a
+// machine-stamped message, and pushes to all configured remotes. Unlike
+// CommitAndPush, dirty paths NOT in the supplied list are left dirty in
+// the working tree — this is the contamination-safe entry point used by
+// callers that know which files belong to their work unit.
+//
+// Empty or nil paths returns (nil, error) — explicit caller intent is
+// required. Use CommitAndPush for the catch-all behaviour.
+//
+// Staging uses `git add -- <paths>...` with the `--` separator so paths
+// beginning with `-` are treated as paths, not flags. Long path lists
+// are batched under a conservative ~64 KB argv-byte budget per
+// invocation to stay well clear of the Linux ~128 KB and macOS ~64 KB
+// MAX_ARG_LEN ceilings; all batches must succeed before the commit
+// step.
 //
 // Happy path is sequential push, unchanged. On a non-fast-forward
 // rejection, the rejected remote is fetched and the local branch is
@@ -332,7 +380,11 @@ func Pull(vaultPath string) (*PullResult, error) {
 // `PushResult.CommitSHA` is refreshed to the post-loop HEAD if any
 // rebase happened, so the printed SHA always exists at the converged
 // remotes.
-func CommitAndPush(vaultPath, message string) (*PushResult, error) {
+func CommitAndPushPaths(vaultPath, message string, paths []string) (*PushResult, error) {
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("no paths specified")
+	}
+
 	result := &PushResult{}
 
 	if err := checkIdentity(vaultPath); err != nil {
@@ -347,8 +399,9 @@ func CommitAndPush(vaultPath, message string) (*PushResult, error) {
 		return nil, fmt.Errorf("no git remotes configured in vault %s", vaultPath)
 	}
 
-	// Stage all changes (safe — vv owns the vault)
-	if _, err := gitCmd(vaultPath, 10*time.Second, "add", "-A"); err != nil {
+	// Stage only the supplied paths. Chunk under a conservative argv
+	// byte budget to stay clear of MAX_ARG_LEN ceilings.
+	if err := stageInBatches(vaultPath, paths); err != nil {
 		return nil, fmt.Errorf("git add: %w", err)
 	}
 
@@ -450,6 +503,95 @@ func CommitAndPush(vaultPath, message string) (*PushResult, error) {
 	}
 
 	return result, nil
+}
+
+// stageBatchByteBudget caps the per-`git add` argv path-byte budget at
+// ~64 KB. Linux MAX_ARG_LEN is ~128 KB and macOS is ~64 KB; the lower
+// figure governs. Each path costs len(path)+1 bytes (NUL terminator)
+// when measured against the kernel argv ceiling.
+const stageBatchByteBudget = 64 * 1024
+
+// stageInBatches runs `git add -- <chunk>...` over `paths`, splitting
+// into chunks whose combined argv-path bytes stay under
+// stageBatchByteBudget. Always emits the `--` separator so paths
+// beginning with `-` are treated as paths, not flags.
+func stageInBatches(vaultPath string, paths []string) error {
+	batch := make([]string, 0, len(paths))
+	bytes := 0
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		args := make([]string, 0, len(batch)+2)
+		args = append(args, "add", "--")
+		args = append(args, batch...)
+		if _, err := gitCmd(vaultPath, 30*time.Second, args...); err != nil {
+			return err
+		}
+		batch = batch[:0]
+		bytes = 0
+		return nil
+	}
+	for _, p := range paths {
+		cost := len(p) + 1
+		if len(batch) > 0 && bytes+cost > stageBatchByteBudget {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		batch = append(batch, p)
+		bytes += cost
+	}
+	return flush()
+}
+
+// dirtyPaths enumerates the working-tree paths that differ from HEAD,
+// using `git status --porcelain -z` to handle paths containing spaces,
+// quotes, or shell-metacharacters correctly. The NUL-separated v1
+// porcelain format encodes each entry as `XY <path>\0`. Renames /
+// copies (status `R` / `C`) emit two records — `XY <new>\0<old>\0` —
+// and we stage only `<new>` since the catch-all path always ends up
+// with the new name in the index after `git add -A`.
+func dirtyPaths(vaultPath string) ([]string, error) {
+	// gitCmdRaw — porcelain output's leading space (e.g. " M file") is
+	// part of the XY status field; gitCmd's strings.TrimSpace would
+	// shift each entry left by one byte and corrupt the parse.
+	out, err := gitCmdRaw(vaultPath, 10*time.Second, "status", "--porcelain", "-z")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	fields := strings.Split(out, "\x00")
+	paths := make([]string, 0, len(fields))
+	i := 0
+	for i < len(fields) {
+		entry := fields[i]
+		if entry == "" {
+			i++
+			continue
+		}
+		// Each XY status is exactly 2 bytes; entries shorter than
+		// `XY <c>` (4 bytes) are malformed — skip defensively.
+		if len(entry) < 4 {
+			i++
+			continue
+		}
+		statusXY := entry[:2]
+		path := entry[3:]
+		paths = append(paths, path)
+		// Renames/copies emit a follow-up record holding the OLD path.
+		// `R` and `C` may appear in either index (X) or worktree (Y)
+		// position, though git in practice only reports renames in the
+		// index. Skip the follow-up old-path field either way.
+		if statusXY[0] == 'R' || statusXY[0] == 'C' || statusXY[1] == 'R' || statusXY[1] == 'C' {
+			i += 2
+			continue
+		}
+		i++
+	}
+	return paths, nil
 }
 
 // forceWithLease pushes branch to remote with a lease keyed to
@@ -599,7 +741,19 @@ func checkIdentity(vaultPath string) error {
 }
 
 // gitCmd runs a git command in the vault directory with a timeout.
+// Output is whitespace-trimmed — convenient for SHA / branch-name
+// parsing but unsafe for `--porcelain -z` style streams whose leading
+// space is part of the status field. Use gitCmdRaw for those.
 func gitCmd(dir string, timeout time.Duration, args ...string) (string, error) {
+	out, err := gitCmdRaw(dir, timeout, args...)
+	return strings.TrimSpace(out), err
+}
+
+// gitCmdRaw is the byte-faithful variant of gitCmd: identical
+// invocation but the returned output is NOT whitespace-trimmed.
+// Required for `git status --porcelain -z` and any other parser that
+// treats leading/trailing whitespace as significant.
+func gitCmdRaw(dir string, timeout time.Duration, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -609,5 +763,5 @@ func gitCmd(dir string, timeout time.Duration, args ...string) (string, error) {
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 
 	out, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(out)), err
+	return string(out), err
 }

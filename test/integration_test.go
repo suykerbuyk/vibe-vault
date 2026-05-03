@@ -3726,3 +3726,113 @@ func TestIntegration_AutoMemoryWrite_VisibleViaHostSymlink(t *testing.T) {
 	}
 }
 
+// vaultPushTestSetup builds an isolated vault + bare-remote pair suitable
+// for exercising `vv vault push`. Returns the env slice (HOME/XDG sandboxed,
+// git identity injected), the vault working copy path, and the bare remote
+// path. Mirrors the inline setup in TestIntegration/vault_push_multi_remote
+// but factored out so the --paths variants can share it.
+func vaultPushTestSetup(t *testing.T) (env []string, vaultDir, remoteDir string) {
+	t.Helper()
+	vaultDir = t.TempDir()
+	xdg := t.TempDir()
+	home := t.TempDir()
+	env = buildEnvWithHome(xdg, home)
+	// vaultsync.CommitAndPush{,Paths} shells out to `git commit`, which
+	// needs an identity. The sandboxed HOME has no .gitconfig, so inject
+	// identity via process env.
+	env = append(env,
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	mustRunVV(t, env, "init", vaultDir)
+
+	// Make the vault directory a git repo with an initial commit so
+	// CommitAndPush has a clean history to push.
+	gitx.GitRun(t, vaultDir, "init", "-b", "main")
+	gitx.GitRun(t, vaultDir, "add", ".")
+	gitx.GitRun(t, vaultDir, "commit", "-m", "initial vault commit")
+
+	remoteDir = gitx.InitBareRemote(t)
+	gitx.AddRemote(t, vaultDir, "origin", remoteDir)
+	return env, vaultDir, remoteDir
+}
+
+// TestIntegration_VaultPush_PathsFlag_Selective verifies that
+// `vv vault push --paths foo.md` stages and commits ONLY foo.md, leaving
+// bar.md dirty in the working tree. Locks the Phase 2 selective-staging
+// CLI surface.
+func TestIntegration_VaultPush_PathsFlag_Selective(t *testing.T) {
+	env, vaultDir, remoteDir := vaultPushTestSetup(t)
+
+	// Two dirty files.
+	writeFixture(t, vaultDir, "foo.md", "foo content\n")
+	writeFixture(t, vaultDir, "bar.md", "bar content\n")
+
+	stdout := mustRunVV(t, env, "vault", "push", "--message", "selective", "--paths", "foo.md")
+	assertContains(t, stdout, "committed and pushed", "selective push reports commit")
+
+	// (a) Commit at HEAD on the remote contains exactly foo.md.
+	headSHA := strings.TrimSpace(gitx.GitRun(t, remoteDir, "rev-parse", "refs/heads/main"))
+	files := strings.TrimSpace(gitx.GitRun(t, remoteDir,
+		"diff-tree", "--no-commit-id", "--name-only", "-r", headSHA))
+	got := strings.Split(files, "\n")
+	sort.Strings(got)
+	want := []string{"foo.md"}
+	if !equalStringSlices(got, want) {
+		t.Errorf("commit files = %v, want %v", got, want)
+	}
+
+	// (b) bar.md remains dirty in the working tree.
+	status := strings.TrimSpace(gitx.GitRun(t, vaultDir, "status", "--porcelain"))
+	if !strings.Contains(status, "bar.md") {
+		t.Errorf("bar.md not dirty after selective push; status=%q", status)
+	}
+	if strings.Contains(status, "foo.md") {
+		t.Errorf("foo.md still appears dirty after selective push; status=%q", status)
+	}
+}
+
+// TestIntegration_VaultPush_NoFlag_CatchAll verifies that the legacy
+// `vv vault push` (no --paths) still stages every dirty path. Regression-
+// locks Phase 2 against accidentally routing the catch-all entry through
+// the new function with a wrong default.
+func TestIntegration_VaultPush_NoFlag_CatchAll(t *testing.T) {
+	env, vaultDir, remoteDir := vaultPushTestSetup(t)
+
+	writeFixture(t, vaultDir, "foo.md", "foo content\n")
+	writeFixture(t, vaultDir, "bar.md", "bar content\n")
+
+	stdout := mustRunVV(t, env, "vault", "push", "--message", "catch-all")
+	assertContains(t, stdout, "committed and pushed", "catch-all push reports commit")
+
+	// Both files in the commit at HEAD on the remote.
+	headSHA := strings.TrimSpace(gitx.GitRun(t, remoteDir, "rev-parse", "refs/heads/main"))
+	files := strings.TrimSpace(gitx.GitRun(t, remoteDir,
+		"diff-tree", "--no-commit-id", "--name-only", "-r", headSHA))
+	got := strings.Split(files, "\n")
+	sort.Strings(got)
+	want := []string{"bar.md", "foo.md"}
+	if !equalStringSlices(got, want) {
+		t.Errorf("commit files = %v, want %v", got, want)
+	}
+
+	// Working tree is now clean.
+	status := strings.TrimSpace(gitx.GitRun(t, vaultDir, "status", "--porcelain"))
+	if status != "" {
+		t.Errorf("working tree dirty after catch-all push; status=%q", status)
+	}
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
