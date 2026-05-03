@@ -3673,3 +3673,45 @@ Key architectural and design decisions in vibe-vault, with rationale.
      pre-push gate + OPERATIONS.md "Direct-pushing wrap commits
      to main" section). Retires carried thread
      `branch-protection-bypass-chicken-and-egg` (iter 181-197+).**
+
+103. **Two-tier vault + pluggable session source (β2 + γ
+     decision, iter 201).** The shared vault is doing two jobs
+     with incompatible correctness models: long-lived narrative
+     content (low write rate, must be cross-host coherent) and
+     hot session telemetry (high write rate, per-host
+     source-of-truth). ~95% of vault churn comes from Job 2,
+     and every observed multi-host coherence failure (iter 196
+     race, iter 198 untracked-precondition gap, iter 199 6-day
+     divergence with 60+ silently-dropped commits) traces back
+     to Job-2 churn polluting Job-1 coherence. Architectural
+     direction agreed iter 201: split storage into a
+     wrap-paced narrative repo (the existing shared vault,
+     unchanged location, write rate drops to ~3 commits/day)
+     plus a host-local staging repo at
+     `<vault>/Projects/<p>/.staging/.git/` that absorbs hook
+     fired session churn and never has a remote. Wrap-time
+     `vv vault sync-sessions` rsyncs the staging working tree
+     into the shared vault under per-host paths
+     (`Projects/<p>/sessions/<host>/...`) so cross-host
+     browse-ability via Obsidian is preserved while merge
+     surface overlap on session content becomes structurally
+     impossible. Long-running play layered on top: `SessionSource`
+     interface in `internal/sessionsource/` with specialized
+     implementations per coding environment (Claude Code JSONL
+     hook, Zed ACP track, future MCP-side direct JSONL scrape,
+     future Gemini-CLI / OpenClaude / Cursor adapters).
+     Decision rationale, options weighed (α host-local-only,
+     β1 staging-no-sync, β2 staging-with-per-host-sync, γ
+     pluggable source), operator constraints (cross-host
+     session browse-ability is non-negotiable), and the
+     anti-patterns this decision blocks live in the
+     standalone document `doc/SESSION-CAPTURE-ARCHITECTURE.md`,
+     intended as a long-running architectural reminder until
+     β2 + γ Phase 1 both ship and the surviving content folds
+     into ARCHITECTURE.md. Filed as three sequenced tasks:
+     `vault-push-selective-staging-cli` (immediate, closes
+     `git add -A` contamination at CLI boundary regardless of
+     β2 progress), `vault-two-tier-narrative-vs-sessions-split`
+     (β2 implementation, supersedes Draft v4
+     `mcp-driven-vault-sync`), `session-source-interface`
+     (γ implementation, deferred until β2 in flight).**
