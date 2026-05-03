@@ -3369,3 +3369,129 @@ Key architectural and design decisions in vibe-vault, with rationale.
      shipped on branch `vv-check-toolchain` across Phase 1
      (probe + tests), Phase 2 (CLI wire-in + Phase-1 cleanup),
      Phase 3 (MCP tool + surface bump + golden regen), this entry.**
+
+101. **Vault rebase resolver — uniform keep-local with reachable-history
+     recovery.** `internal/vaultsync/vaultsync.go:resolveConflicts`
+     carried a comment-vs-code contradiction since the auto-resolver
+     landed: the comment claimed "Accept upstream for all classes"
+     but the code ran `git checkout --theirs <file>`, which during a
+     `git rebase` references the commit being replayed (= local work),
+     not the rebase target (= upstream). Result: the resolver kept
+     LOCAL content while the docstring promised UPSTREAM. Today's fire
+     rate was low (~2-3 `Pull`s per machine per day, concurrent
+     same-iter wraps rare), but the `mcp-driven-vault-sync` lazy
+     freshness gate was about to scale that ~50× by running `Pull`
+     on every cache miss in every active MCP-server session. Filed
+     as a hard prerequisite.
+
+     **Decision: uniform keep-local across all four classes.** Match
+     the code's actual behavior, not the old comment. Per-class
+     rationale:
+     - **Manual** (`iterations.md`, `resume.md`, `tasks/*`,
+       `knowledge.md`): the dangerous case the warning surface exists
+       for. Keep local; record the upstream-side commit that
+       introduced the conflicting file in `DroppedUpstream` so the
+       operator can recover via `vv vault recover`.
+     - **Regenerable** (`history.md`, `.vibe-vault/session-index*`):
+       keep local; set `result.Regenerate=true` so the caller runs
+       `vv index` and overwrites whatever was kept. Bug benign
+       post-rebuild.
+     - **AppendOnly** (session notes): unique millisecond-timestamp
+       filenames (DESIGN #99) make same-path collisions
+       near-impossible. Keep local on the rare collision; no warning.
+     - **ConfigFile** (`Templates/`, `.vibe-vault/config*`): config
+       is host-local-adjacent and not synced; templates change
+       rarely. Keep local; no warning.
+
+     **Why uniform rather than per-class branching.** Simpler
+     invariant ("the most recent operator intent on this machine
+     wins"); the dropped upstream content remains reachable from
+     `main` for after-the-fact recovery, so there is no data-loss
+     case that per-class branching would have prevented. Option 4
+     (per-class custom merge drivers, e.g., concatenation for
+     `iterations.md`) is the structurally correct answer when a
+     real-world iter-N collision warrants the design work; deferred
+     until that lands.
+
+     **Recovery contract — reachable history, not reflog.**
+     `internal/vaultsync/recover.go` walks `git log --since=<N days>`
+     from HEAD and identifies upstream commits whose recorded blob
+     for a Manual-class file differs from HEAD's blob. Reflog is
+     **not** consulted: after B's rebase pushes to the remote, A's
+     prior commits remain reachable from `main`; the "drop" happened
+     to file content during merge resolution, not to commit
+     reachability. This dissolves the v1 plan's "multi-machine reflog
+     asymmetry" risk — recovery works identically on either machine
+     because it reads `main`'s history, not local reflogs. v1 ships
+     listing + `--show <sha>` + `--diff <sha> -- <path>`; no
+     `--apply` (manual integration preserves operator judgment about
+     ordering and merge style for `iterations.md`).
+
+     **Mid-rebase upstream attribution.** `resolveConflicts` runs
+     while `git rebase` is paused with HEAD at the rebase target
+     plus already-replayed commits. Before checkout, the resolver
+     queries `git merge-base ORIG_HEAD <rebaseTarget>` once (stable
+     for the rebase duration; `ORIG_HEAD` is the pre-rebase tip)
+     and then `git log -1 <base>..<rebaseTarget> -- <path>` per
+     conflicted Manual file to identify the upstream commit
+     responsible. Records `{Path, DroppedSHA, DroppedSubject,
+     DroppedCommittedAt}` per file. `rebaseTarget` is captured by
+     `Pull` before rebase and threaded through the resolver
+     signature.
+
+     **`PullResult` schema change.** `ManualReview []string` removed;
+     replaced by:
+
+     ```go
+     type DroppedUpstream struct {
+         Path               string
+         DroppedSHA         string
+         DroppedSubject     string
+         DroppedCommittedAt time.Time
+     }
+
+     type PullResult struct {
+         Updated          bool
+         Regenerate       bool
+         DroppedUpstream  []DroppedUpstream
+         StashPopConflict bool
+     }
+     ```
+
+     The previous in-band sentinel string `"(stash pop conflict —
+     run 'git stash pop' manually in vault)"` smuggled inside
+     `ManualReview` is now an explicit `StashPopConflict bool`. Single
+     internal consumer (`cmd/vv/main.go:892`) migrated atomically in
+     the same patch — no external `vaultsync` consumer existed
+     (verified by grep). Phase 1 (resolver fix + `Recover` API +
+     `vv vault recover` subcommand + warning surface) ships as a
+     single atomic patch so the warning never points at a
+     non-existent subcommand.
+
+     **Scoping locked: auto-resolve fires on `Pull` only.**
+     `CommitAndPush` (which also runs a rebase on non-fast-forward
+     rejection) continues to abort cleanly on conflict and surface
+     the abort via `RemoteResults`. A regression test in
+     `vaultsync_test.go` induces a conflict during `CommitAndPush`'s
+     rebase path and asserts no auto-resolution; this prevents a
+     future "fix everywhere" refactor from quietly extending
+     auto-resolve to the push path. Operator-facing implication:
+     `wrap.md` (which calls `CommitAndPush`) needs no updated
+     warning surface; `restart.md` (which calls `vv vault pull`)
+     does, and gets a one-line note.
+
+     **Operator runbook lives in OPERATIONS.md** under "Recovering
+     Dropped Vault Narratives" — flow, window flag, cross-machine
+     reachability note, and the "no `--apply`" rationale. The CLI
+     warning surface points there indirectly via the
+     `vv vault recover` invitation; the runbook closes the loop.
+
+     **Filed as task `vault-rebase-resolver-policy` (Draft v2 after
+     `/review-plan` revisions on iter 196: Phase 2 reframed around
+     reachable history not reflog walking, per-class behavior made
+     explicit, schema replacement instead of additive, mid-rebase
+     extraction mechanism specified, template update moved from
+     `wrap.md` to `restart.md`); shipped on branch
+     `vault-rebase-resolver-policy` across Phase 1 (atomic resolver
+     + recover API + CLI subcommand + warning surface) and Phase 2
+     (this entry + OPERATIONS.md runbook + restart.md note).**

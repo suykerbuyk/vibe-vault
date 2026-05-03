@@ -58,7 +58,7 @@ If `surface` is `fail`, the host's binary is older than what the vault expects. 
 vv vault pull             # auto-discovers configured remotes
 ```
 
-If `vv vault pull` reports "regenerated", also run `vv index` once to rebuild auto-generated indexes.
+If `vv vault pull` reports "regenerated", also run `vv index` once to rebuild auto-generated indexes. If it emits `WARNING: vault rebase kept LOCAL content`, see "Recovering Dropped Vault Narratives" below.
 
 ### 2d. Health check
 
@@ -157,6 +157,46 @@ Mitigations operationally:
 2. Don't push wrap stamp commits across workstations simultaneously.
 3. If a stamp push is rejected by branch protection (the iter-181 chicken-and-egg), pivot to a feature-branch PR for the next batch of work — the iter-stamp will land via the rebase-merge.
 
+## Recovering Dropped Vault Narratives
+
+When `vv vault pull` rebases local commits onto upstream, file conflicts on Manual-class files (`iterations.md`, `resume.md`, `tasks/*`, `knowledge.md`) are auto-resolved by keeping the LOCAL side. This is the right policy operationally — local work is the most recent operator intent on this machine and the rebase target's content remains reachable from `main` — but the upstream-side file content is dropped from the working tree at that point. `vv vault pull` surfaces the drop on stderr:
+
+```
+WARNING: vault rebase kept LOCAL content; the following upstream commits' file content was dropped:
+  Projects/foo/iterations.md  (from a1b2c3d: "iter-N narrative")
+Inspect with: vv vault recover [--days N]
+```
+
+### Why this happens
+
+The race is two-machine same-iter wrap. Machine A wraps iter N and pushes; machine B (within the race window) wraps iter N independently. B's `vv vault pull` (or its `CommitAndPush` rebase fallback) hits a conflict on `iterations.md` because both sides edited the same file. The resolver keeps B's local content uniformly across all four file classes (Manual, Regenerable, AppendOnly, ConfigFile), per the keep-local-on-Manual policy. A's commit is **not lost** — it's still reachable from `main` after B's push lands; only the file content on B's working copy was dropped during merge resolution.
+
+### Recovery flow
+
+1. **List candidates** with `vv vault recover` (defaults to the past 7 days of reachable history). Output is a table of `{age, sha, subject, files}` rows — one row per upstream commit whose Manual-class blob differs from HEAD's:
+
+   ```
+   AGE  SHA      SUBJECT                                                       FILES
+   2h   a1b2c3d  iter-N narrative                                              Projects/foo/iterations.md
+   ```
+
+2. **Inspect a candidate** two ways:
+
+   - `vv vault recover --show <sha>` runs `git show <sha>` so the operator sees the full commit (message, author, diff against its parent).
+   - `vv vault recover --diff <sha> -- <path>` prints the dropped blob (`git show <sha>:<path>`) and the current HEAD blob (`git show HEAD:<path>`) side-by-side so the operator can see what was kept versus what was dropped.
+
+3. **Manually integrate** the dropped content. There is no `--apply` flag in v1 by design — ordering, renumbering, and merge style for `iterations.md` are operator judgment calls. Open the file in an editor, fold in the dropped narrative as appropriate, save.
+
+4. **Commit and push** as normal: `cd ~/obsidian/VibeVault && git add -A && git commit -m '<message>' && vv vault push` (or let the next `/wrap` cover the commit + push).
+
+### Window
+
+`--days N` extends the walk depth (default 7, no upper cap — the cost is `git log` traversal). If a candidate is older than the default window, pass `--days 30` (or longer) explicitly; there is no silent truncation.
+
+### Cross-machine
+
+The recovery walks **reachable history from HEAD**, not the local reflog. This is load-bearing: after B's rebase pushes to the remote, A's commits remain reachable from `main`, so recovery works identically on either machine. There is no multi-machine reflog asymmetry to worry about; whichever host runs `vv vault recover` after a `vv vault pull` will see the same candidate set, regardless of which host originally produced the dropped commit.
+
 ## Automation: cron-based freshness (carried thread, not yet deployed)
 
 Two cron lines per workstation deploy `vv-binary-freshness-guard` Mechanism F (DESIGN reference: the freshness-guard task in `tasks/done/`):
@@ -204,6 +244,7 @@ When a workstation joins the fleet:
 - DESIGN #48 — auto-memory host-side symlink semantics.
 - DESIGN #97 — MCPSurfaceVersion handshake + merge-driver.
 - DESIGN #98 — worktree gc lifecycle.
+- DESIGN #101 — vault rebase resolver policy + reachable-history recovery contract.
 - README §"Schema migrations" and §"`vv context sync`".
 - Carried-forward thread `cross-project-template-propagation` (in resume.md): the per-project sweep is mechanical via `vv context sync` once Phase 2 is done.
 - Carried-forward thread `freshness-guard-cron-deployment-pending`: the cron deployment in §Automation hardens this.
