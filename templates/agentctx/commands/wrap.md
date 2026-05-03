@@ -211,34 +211,39 @@ session capture.
   or `git add .`.
 - `git commit -F commit.msg` — uses the file written by
   `vv_set_commit_msg`.
-- `git push <remote> <feature-branch>` per the project's
-  branch-protection configuration. Every wrap commit goes through
-  a feature branch + PR; there is no direct-push-to-main path
-  under current branch protection (`required_status_checks: strict:
-  true` runs PRE-push and rejects any commit lacking a prior CI
-  pass).
-
-  CI cost on the resulting PR depends on what the wrap commit
-  touches. Operator predictor:
+- **Pre-push gate (operator-mandatory).** After `git commit -F
+  commit.msg` and BEFORE `git push`, run:
 
       git diff --name-only HEAD~1 HEAD
 
-  - If the diff lists ONLY `.vibe-vault/last-iter` (the
-    `bookkeeping`-shape stamp-only pattern), the PR's CI completes
-    in ~20 seconds — DESIGN #94's `detect-admin-commit` job
-    classifies as `admin=true` and short-circuits `Test` + `Lint`
-    to success.
+  The output dictates the push path:
 
-  - Otherwise (the diff includes ANY non-stamp file), full Lint +
-    Test runs (~9 minutes). Standard PR pattern — operator reviews
-    and merges. Applies to all `fresh-feature` and `planning`
-    wraps by definition (those shapes always have non-stamp
-    changes: code, tasks, docs, etc.).
+  - **Output is exactly `.vibe-vault/last-iter`** → safe to direct-
+    push: `git push github main`. The `detect-admin-commit`
+    workflow short-circuits Lint+Test to ~20s green post-push,
+    leaving main green.
+  - **Output contains ANYTHING else** → DO NOT direct-push. Open
+    a PR via the standard feature-branch flow. The operator
+    visually confirms green Lint+Test on the PR before merging.
 
-  The decision is mechanical: based on `git diff --name-only`
-  output, used only to predict CI duration. The PR-vs-direct
-  distinction the prior wrap.md described was incorrect — see
-  DESIGN #94 "Why a fast PR path, not a no-PR path."
+  This pre-flight check is the single point where operator
+  discipline gates main against substantive direct-push regression.
+  Performing it on every wrap is mandatory under the current model
+  (DESIGN #102) — there is no server-side `required_status_checks`
+  gate to catch a missed check.
+
+  Iter-shape examples observed in this project's history:
+
+  - Iter 196 wrap: diff is `.vibe-vault/last-iter` only → direct-
+    push eligible.
+  - Iter 197 wrap: diff is `.vibe-vault/last-iter` only → direct-
+    push eligible.
+  - Iter 195 wrap: diff is `.vibe-vault/last-iter` + `doc/DESIGN.md`
+    + `doc/TESTING.md` + test files → PR required.
+
+  Stamp-only wraps are common but not universal; planning iters
+  that file new tasks, DESIGN entries, or doc updates often land
+  mixed content alongside the stamp.
 
 ### Stage 6 — Vault sync
 

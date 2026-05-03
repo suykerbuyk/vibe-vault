@@ -3495,3 +3495,181 @@ Key architectural and design decisions in vibe-vault, with rationale.
      `vault-rebase-resolver-policy` across Phase 1 (atomic resolver
      + recover API + CLI subcommand + warning surface) and Phase 2
      (this entry + OPERATIONS.md runbook + restart.md note).**
+
+102. **Drop `required_status_checks` on `main` — operator-discipline-
+     gated direct push for stamp-only wrap commits, superseding
+     DESIGN #94's no-PR scope decision.** DESIGN #94 made the
+     stamp-only PR fast (~20s end-to-end via the `detect-admin-
+     commit` workflow short-circuit) but kept the PR step itself
+     because GitHub branch protection's
+     `required_status_checks: strict: true` runs PRE-push and
+     rejects any commit lacking a prior CI pass. The wrap PR
+     therefore existed only to record that the preceding feature
+     PR landed — pure administrative ceremony with no review
+     surface, no decision content, and a per-cycle wall-clock cost
+     that compounded across hundreds of iters. The
+     `branch-protection-bypass-chicken-and-egg` thread carried
+     since iter 181 was the operator-side recognition of this
+     friction. This decision retires that thread by deleting the
+     `required_status_checks` subresource from `main` branch
+     protection so stamp-only wrap commits can direct-push without
+     a PR cycle.
+
+     **Decision: delete the `required_status_checks` subresource
+     from `main` branch protection.** Smallest server-side change
+     that resolves the chicken-and-egg without a Ruleset migration
+     or host-side hooks. After the change, `main` branch protection
+     retains `enforce_admins: true`, `allow_force_pushes: false`,
+     `allow_deletions: false`; only the server-side gate that
+     "every push lands with green CI on the tip" is gone. The CI
+     workflow continues to run on every push to main; results
+     become informational rather than blocking. DESIGN #94's
+     `detect-admin-commit` short-circuit continues to run and
+     keeps stamp-only post-push CI fast (~20s); for substantive
+     direct-pushes (which the operator commitments below forbid)
+     it would gracefully fall through to full CI.
+
+     **Two-layer model.** Together, DESIGN #94 and this decision
+     compose:
+
+     - DESIGN #94 (workflow-level): `detect-admin-commit` classifies
+       the diff and short-circuits Lint+Test to ~20s green for
+       stamp-only commits, full ~9min for substantive ones.
+     - DESIGN #102 (this entry, protection-level): the relaxed
+       `required_status_checks` lets the direct push of those
+       commits land BEFORE CI runs, removing the wrap-PR cycle
+       entirely.
+
+     The direct-push path is reserved for stamp-only wrap commits
+     by operator discipline, not server-side enforcement; see
+     "Trade-off" below.
+
+     **Why v1's Ruleset path-conditional approach was abandoned.**
+     The v1 plan pursued GitHub Repository Rulesets with
+     `restrict_file_paths` as a path-conditional bypass: the rule
+     would apply only when the diff was contained within
+     `.vibe-vault/last-iter`. `/review-plan` flagged this as a
+     misreading of the GitHub primitive. `restrict_file_paths` is a
+     positive-block predicate ("REJECT pushes that touch these
+     paths"), not an applicability condition ("APPLY this rule
+     only when pushes are contained within these paths"). GitHub
+     Rulesets do not express "diff contained within paths"
+     semantics at all; the inversion the plan needed
+     (apply-rule-when-diff-fully-contained) has no expressible
+     form in the Rulesets schema. Plan canceled before any API
+     call.
+
+     **Why v2 Variant A (`strict: true → false`) was abandoned.**
+     The v2 plan considered relaxing `strict` rather than removing
+     `required_status_checks` outright. `/review-plan` caught the
+     misreading: `strict` governs only the up-to-date-with-base
+     requirement (whether the PR head must be at the tip of base
+     before merge), NOT whether the named status contexts are
+     required at all. With `strict: false`, the named contexts
+     (`Test`, `Lint`) would still be required to pass before push
+     accepted; flipping `strict` would not unblock direct push.
+     Variant A was rejected without testing — the GitHub docs are
+     explicit and a probe commit would have corrupted
+     `.vibe-vault/last-iter` for no information gain.
+
+     **Why v2 Variant C (Ruleset with `bypass_actors`) was
+     deferred.** A Ruleset with the operator's user account in
+     `bypass_actors` would preserve PR-merge gating for
+     non-bypass-actor pushes while letting the operator's direct
+     push land. For a single-operator topology this reduces to
+     Variant B (this decision) plus Ruleset config-migration
+     complexity — same effective behavior, larger blast radius.
+     File as a follow-up if a non-operator pusher (collaborator,
+     automation account, Dependabot direct-merger) joins the repo.
+
+     **Operator commitments under this model.** Server-side
+     enforcement of "main is always green" is replaced by operator
+     discipline. Before applying the protection change, the
+     operator explicitly accepts:
+
+     1. **Substantive commits go through PRs.** Direct push is
+        reserved for stamp-only wrap commits and operator-
+        judgment-call administrative diffs (e.g., emergency
+        hotfixes documented inline). Discipline, not enforcement.
+     2. **PR merge requires a visual CI check.** GitHub will
+        enable the merge button regardless of CI status. The
+        operator visually confirms green Lint+Test on the PR
+        before merging. Same information as before, no longer
+        blocking.
+     3. **Red main is recoverable.** If a buggy substantive direct
+        push slips operator discipline, the post-push workflow
+        surfaces red on main; revert via a normal PR (or an
+        operator-direct push under the same model) returns main
+        to green. `enforce_admins: true` continues to block
+        force-push so revert is the only path.
+     4. **No CI alarms exist by default.** If sustained red main
+        becomes a real concern, file a follow-up task to add a
+        workflow that fails loudly when main has unreverted red
+        commits. Out of scope here.
+
+     The wrap.md template's Stage 5 pre-push gate
+     (`git diff --name-only HEAD~1 HEAD`) is the single
+     operator-facing checkpoint where commitment 1 is enforced in
+     practice; OPERATIONS.md "Direct-pushing wrap commits to main"
+     colocates the procedure with the four commitments verbatim
+     for ongoing reference.
+
+     **Trade-off explicit.** Substantive direct-push is now
+     physically possible (the server no longer rejects it).
+     Red-CI PR merge is now physically possible (GitHub no longer
+     blocks merge on a failing context). Both prior server-side
+     guarantees become operator-discipline properties. The
+     wrap.md pre-push gate and the four operator commitments
+     above are the load-bearing replacement; if discipline drifts
+     in a way that produces a real failure mode, the recovery
+     paths are (a) file the CI-alarm task in commitment 4, or
+     (b) pursue Variant C (Ruleset with `bypass_actors`) which
+     preserves PR-merge-with-green-CI gating for non-bypass
+     pushers.
+
+     **Mechanism (Phase 1, operator-direct).** Snapshot pre-change
+     protection to vault-side `agentctx/notes/protection-snapshot-
+     iter-197.json` for audit; then `gh api -X DELETE
+     /repos/suykerbuyk/vibe-vault/branches/main/protection/
+     required_status_checks`; then verify via `gh api .../
+     branches/main/protection | jq '{required_status_checks,
+     enforce_admins, allow_force_pushes, allow_deletions}'`,
+     expecting `required_status_checks: null` and the other three
+     unchanged. If push still rejects post-DELETE, a hidden
+     Ruleset, organization-level rule, or pre-receive hook is
+     also gating; rollback via PATCH on the
+     `/required_status_checks` subresource (re-creating
+     `strict=true, contexts=[Test, Lint]`), with PUT-on-parent as
+     a secondary fallback if PATCH 404s post-DELETE.
+
+     **Alternatives rejected.** v1 Ruleset path-conditional bypass
+     (GitHub primitive doesn't express the required semantics).
+     v2 Variant A (`strict: true → false`) (`strict` governs only
+     up-to-date, not contexts). v2 Variant C (Ruleset with
+     `bypass_actors`) (deferred — reduces to this decision for
+     single-operator topology while adding Ruleset migration
+     complexity; revisit if a non-operator pusher joins).
+     `enforce_admins: false` + host-side pre-push hook (requires
+     `make hooks` discipline on every workstation; fresh-clone
+     risk silently loses the safety net). Tag-based or
+     git-notes-based wrap-anchor (would eliminate the on-`main`
+     stamp commit entirely, structurally bypassing branch
+     protection for wrap data; loses the project-side audit row
+     the operator finds valuable; deferred until that property
+     becomes negotiable).
+
+     **Filed as task `stamp-only-direct-push-bypass` (Draft v4
+     after four `/review-plan` revisions on iter 197: v1 canceled
+     when the Rulesets primitive misread surfaced; v2 reframed
+     around protection-relaxation but enumerated the wrong
+     variants; v3 collapsed onto Variant B with operator
+     acceptance of the discipline trade-off; v4 fixed
+     command-shape errors in the rollback PATCH URL, vault
+     snapshot path, and consolidated Phase 2 + Phase 3 into a
+     single PR for atomicity); shipped across Phase 1
+     (operator-direct DELETE on iter 197, verified via
+     post-change `gh api` snapshot showing `required_status_
+     checks: null`) and Phase 2+3 bundle (this entry + wrap.md
+     pre-push gate + OPERATIONS.md "Direct-pushing wrap commits
+     to main" section). Retires carried thread
+     `branch-protection-bypass-chicken-and-egg` (iter 181-197+).**
