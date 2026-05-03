@@ -335,9 +335,10 @@ var expectedTerminal = map[string]string{
 		"The vault repo is owned entirely by vv \u2014 all git operations are safe.\n" +
 		"\n" +
 		"Subcommands:\n" +
-		"  vv vault status   Show vault git state (clean/dirty, ahead/behind)\n" +
-		"  vv vault pull     Fetch + rebase with automatic conflict resolution\n" +
-		"  vv vault push     Commit all changes and push\n",
+		"  vv vault status    Show vault git state (clean/dirty, ahead/behind)\n" +
+		"  vv vault pull      Fetch + rebase with automatic conflict resolution\n" +
+		"  vv vault push      Commit all changes and push\n" +
+		"  vv vault recover   List upstream commits whose content was dropped on rebase\n",
 
 	"zed": "vv zed \u2014 import Zed agent panel threads\n" +
 		"\n" +
@@ -502,7 +503,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv export [--format X]           Export session data (JSON or CSV)\n" +
 		"  vv effectiveness [--project X]   Analyze context effectiveness on outcomes\n" +
 		"  vv memory [link | ...]           Link Claude Code auto-memory into vault\n" +
-		"  vv vault <command>               Vault git sync (pull, push, status)\n" +
+		"  vv vault <command>               Vault git sync (pull, push, status, recover)\n" +
 		"  vv zed <subcommand>              Import Zed agent panel threads into vault\n" +
 		"  vv mcp [install | ...]           Start MCP server (JSON-RPC over stdio)\n" +
 		"  vv worktree [gc | ...]           Manage subagent worktrees (gc)\n" +

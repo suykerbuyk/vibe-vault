@@ -889,12 +889,25 @@ func runVault() {
 			}
 			fmt.Printf("vault: regenerated index (%d sessions)\n", count)
 		}
-		if len(result.ManualReview) > 0 {
-			fmt.Println("vault: files accepted from upstream that may need review:")
-			for _, f := range result.ManualReview {
-				fmt.Printf("  %s\n", f)
+		if len(result.DroppedUpstream) > 0 {
+			fmt.Fprintln(os.Stderr, "WARNING: vault rebase kept LOCAL content; the following upstream commits' file content was dropped:")
+			for _, d := range result.DroppedUpstream {
+				fmt.Fprintf(os.Stderr, "  %s  (from %s: %q)\n",
+					d.Path, shortSHA(d.DroppedSHA), d.DroppedSubject)
 			}
+			fmt.Fprintln(os.Stderr, "Inspect with: vv vault recover [--days N]")
 		}
+		if result.StashPopConflict {
+			fmt.Fprintln(os.Stderr,
+				"WARNING: stash pop conflict during vault pull — resolve manually with: git -C <vault> stash pop")
+		}
+
+	case "recover":
+		if wantsHelp(args[1:]) {
+			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVaultRecover))
+			return
+		}
+		runVaultRecover(cfg, args[1:])
 
 	case "push":
 		if wantsHelp(args[1:]) {
