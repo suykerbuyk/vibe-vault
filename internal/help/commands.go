@@ -132,8 +132,10 @@ var CmdIndex = Command{
 	Synopsis: "rebuild session index from notes",
 	Brief:    "Rebuild session index from notes",
 	Usage:    "vv index",
-	Description: `Walks Projects/*/sessions/*.md in the vault, parses frontmatter from each
-note, and rebuilds .vibe-vault/session-index.json. Preserves TranscriptPath
+	Description: `Walks Projects/*/sessions/**/*.md in the vault, parses frontmatter from each
+note, and rebuilds .vibe-vault/session-index.json. The recursive ** glob
+covers the flat layout, the per-host subtree (sessions/<host>/<date>/),
+and the _pre-staging-archive/ migration archive. Preserves TranscriptPath
 values from the existing index. Generates a history.md document for
 each project with timeline, decisions, open threads, and key files.
 

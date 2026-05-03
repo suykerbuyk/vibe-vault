@@ -87,8 +87,10 @@ var expectedTerminal = map[string]string{
 		"\n" +
 		"Usage: vv index\n" +
 		"\n" +
-		"Walks Projects/*/sessions/*.md in the vault, parses frontmatter from each\n" +
-		"note, and rebuilds .vibe-vault/session-index.json. Preserves TranscriptPath\n" +
+		"Walks Projects/*/sessions/**/*.md in the vault, parses frontmatter from each\n" +
+		"note, and rebuilds .vibe-vault/session-index.json. The recursive ** glob\n" +
+		"covers the flat layout, the per-host subtree (sessions/<host>/<date>/),\n" +
+		"and the _pre-staging-archive/ migration archive. Preserves TranscriptPath\n" +
 		"values from the existing index. Generates a history.md document for\n" +
 		"each project with timeline, decisions, open threads, and key files.\n" +
 		"\n" +
@@ -540,6 +542,25 @@ func TestFormatUsage(t *testing.T) {
 	if got != expected {
 		t.Errorf("FormatUsage mismatch.\n--- expected ---\n%s\n--- got ---\n%s\n--- diff ---\n%s",
 			quote(expected), quote(got), diff(expected, got))
+	}
+}
+
+// TestCmdIndex_GlobIsRecursive is the Phase 1.5 regression lock for the
+// help description at internal/help/commands.go:135. The β2 layout puts
+// session notes under `Projects/<p>/sessions/<host>/<date>/<file>.md` and
+// `Projects/<p>/sessions/_pre-staging-archive/<file>.md`; the description
+// must therefore advertise the recursive `**` glob, not the flat `*`
+// form, so operators reading `vv help index` understand the actual
+// walker semantics.
+func TestCmdIndex_GlobIsRecursive(t *testing.T) {
+	if !strings.Contains(CmdIndex.Description, "Projects/*/sessions/**/*.md") {
+		t.Errorf("CmdIndex.Description should advertise recursive glob form Projects/*/sessions/**/*.md; got:\n%s",
+			CmdIndex.Description)
+	}
+	if strings.Contains(CmdIndex.Description, "Projects/*/sessions/*.md\n") ||
+		strings.Contains(CmdIndex.Description, "Projects/*/sessions/*.md ") {
+		t.Errorf("CmdIndex.Description should NOT advertise the flat glob form (would mislead operators about per-host layout); got:\n%s",
+			CmdIndex.Description)
 	}
 }
 

@@ -116,8 +116,20 @@ func Classify(relPath string) FileClass {
 		return Regenerable
 	}
 
-	// AppendOnly: session notes (unique timestamps per machine)
-	if strings.Contains(relPath, "/sessions/") || strings.HasPrefix(relPath, "sessions/") {
+	// AppendOnly: session notes — covers all three layouts under
+	// Projects/<p>/sessions/...:
+	//
+	//   - Flat (legacy):  Projects/<p>/sessions/<file>.md
+	//   - Per-host (β2):  Projects/<p>/sessions/<host>/<date>/<file>.md
+	//   - Archive (β2):   Projects/<p>/sessions/_pre-staging-archive/<file>.md
+	//
+	// We require the leading "Projects/" prefix and an explicit
+	// "/sessions/" segment with at least one path component after it.
+	// The previous substring-only rule incidentally worked but would
+	// also classify a hypothetical "Templates/sessions/foo.md" as
+	// AppendOnly, which is wrong. Phase 1.5 of vault-two-tier locks
+	// the dual case (per-host + _pre-staging-archive/) explicitly.
+	if isSessionPath(relPath) {
 		return AppendOnly
 	}
 
@@ -131,6 +143,35 @@ func Classify(relPath string) FileClass {
 
 	// Everything else: knowledge.md, resume.md, iterations.md, tasks, etc.
 	return Manual
+}
+
+// isSessionPath reports whether relPath names a session note under
+// Projects/<p>/sessions/... (any layout depth). The match requires:
+//
+//  1. A "Projects/" prefix.
+//  2. A "/sessions/" segment after the project name.
+//  3. At least one non-empty path component after "/sessions/".
+//
+// This explicit form replaces a prior incidental substring match
+// (`strings.Contains(relPath, "/sessions/") || HasPrefix("sessions/")`)
+// that would also classify a hypothetical Templates/sessions/foo.md as a
+// session note. Phase 1.5 of vault-two-tier (β2) tightened the rule to
+// lock the dual case: per-host (sessions/<host>/<date>/<file>.md) AND
+// archive (sessions/_pre-staging-archive/<file>.md) both classify
+// AppendOnly, while non-session paths do not slip through.
+func isSessionPath(relPath string) bool {
+	const prefix = "Projects/"
+	const seg = "/sessions/"
+	if !strings.HasPrefix(relPath, prefix) {
+		return false
+	}
+	idx := strings.Index(relPath, seg)
+	if idx < len(prefix) {
+		return false
+	}
+	// Reject "Projects/<p>/sessions/" with no trailing component.
+	tail := relPath[idx+len(seg):]
+	return tail != ""
 }
 
 // listRemotes discovers all configured git remotes.

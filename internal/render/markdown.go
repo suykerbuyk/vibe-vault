@@ -471,19 +471,39 @@ func NoteFilename(date string, iteration int) string {
 	return fmt.Sprintf("%s-%02d.md", date, iteration)
 }
 
-// NoteRelPath returns the relative path within the vault for a session note.
-//
-// Deprecated: use NoteRelPathTimestamp for write paths. Retained during the
-// Phase 4 transition for compatibility with existing call sites.
-func NoteRelPath(project, date string, iteration int) string {
-	return filepath.Join("Projects", project, "sessions", NoteFilename(date, iteration))
-}
-
 // NoteRelPathTimestamp builds the project-relative session-note path for a
-// timestamp-format filename. Mirrors NoteRelPath but takes (project, date,
-// t time.Time, suffix int) — used by Phase 4 write-path callers.
-func NoteRelPathTimestamp(project, date string, t time.Time, suffix int) string {
-	return filepath.Join("Projects", project, "sessions", BuildTimestampFilename(date, t, suffix))
+// timestamp-format filename. Layout depends on host:
+//
+//   - host == ""  → legacy flat layout: Projects/<p>/sessions/<filename>
+//     This branch exists as a Phase 1.5 back-compat shim for the sole
+//     remaining production caller in internal/session/capture.go; Phase 2
+//     replaces that caller and removes the empty-host case.
+//   - host != ""  → per-host layout: Projects/<p>/sessions/<host>/<date>/<filename>
+//     Used by the wrap-time mirror to project staging-dir notes into the
+//     shared vault under a host-isolated subtree.
+//
+// Callers MUST sanitize `host` via staging.SanitizeHostname before calling.
+// The helper rejects unsanitized input defensively: if `host` contains '/'
+// or any '.' run that resolves to '.' or '..' as a path segment, the
+// function returns "" — callers must check for empty and fall back. The
+// rejection rule is intentionally conservative; it does NOT reproduce the
+// full SanitizeHostname allowlist (callers own that), only the path-escape
+// guards.
+func NoteRelPathTimestamp(project, host, date string, t time.Time, suffix int) string {
+	filename := BuildTimestampFilename(date, t, suffix)
+	if host == "" {
+		// Phase 1.5 back-compat: flat layout for the legacy production
+		// caller. Phase 2 will pass a sanitized host and this branch goes
+		// away.
+		return filepath.Join("Projects", project, "sessions", filename)
+	}
+	// Path-escape guard: a host segment containing '/' or resolving to '.'
+	// or '..' would let the path traverse out of sessions/. Sanitization is
+	// the caller's job (staging.SanitizeHostname), but defend anyway.
+	if strings.ContainsRune(host, '/') || host == "." || host == ".." {
+		return ""
+	}
+	return filepath.Join("Projects", project, "sessions", host, date, filename)
 }
 
 func titleFromFirstMessage(msg string) string {

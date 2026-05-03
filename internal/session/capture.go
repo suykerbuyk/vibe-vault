@@ -426,7 +426,10 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 		absPath string
 	)
 	for suffix := 0; suffix <= 9; suffix++ {
-		relPath = render.NoteRelPathTimestamp(info.Project, date, now, suffix)
+		// Phase 1.5: empty host → legacy flat layout. Phase 2 replaces
+		// this with a routing decision in CaptureOpts and passes the
+		// sanitized hostname for the per-host path.
+		relPath = render.NoteRelPathTimestamp(info.Project, "", date, now, suffix)
 		absPath = filepath.Join(cfg.VaultPath, relPath)
 		// Same-session re-write (Mechanism 3): if the prior path is the
 		// same as our candidate (rare, only on identical clock), allow

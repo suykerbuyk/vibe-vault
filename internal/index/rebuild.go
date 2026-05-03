@@ -9,15 +9,31 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/suykerbuyk/vibe-vault/internal/noteparse"
 	"github.com/suykerbuyk/vibe-vault/internal/render"
 )
 
+// sessionsSegment is the path-segment marker the walker uses to detect
+// session notes. We require an exact "/sessions/" segment (slash-bounded)
+// so a project literally named "sessions" or a path fragment like
+// "my-sessions/" never falsely matches. The walker normalizes filepath
+// separators to '/' before checking.
+const sessionsSegment = "/sessions/"
+
 // Rebuild walks the Projects directory, parses each note via noteparse,
-// and builds an enriched index from scratch. It only processes .md files
-// inside sessions/ subdirectories and logs malformed notes.
+// and builds an enriched index from scratch. It processes .md files whose
+// path contains a "/sessions/" segment (relative to the project root); the
+// parser confirms candidacy by reading frontmatter. This generalization
+// (Phase 1.5 of vault-two-tier) covers all three layouts simultaneously:
+//
+//   - Flat (legacy):   Projects/<p>/sessions/<file>.md
+//   - Per-host (β2):   Projects/<p>/sessions/<host>/<date>/<file>.md
+//   - Archive (β2):    Projects/<p>/sessions/_pre-staging-archive/<file>.md
+//
+// Malformed notes are logged and skipped.
 func Rebuild(projectsDir, stateDir string) (*Index, int, error) {
 	// Load existing index to preserve TranscriptPaths (not stored in notes)
 	oldIdx, _ := Load(stateDir)
@@ -44,8 +60,12 @@ func Rebuild(projectsDir, stateDir string) (*Index, int, error) {
 			return nil
 		}
 
-		// Only process files inside sessions/ subdirectories
-		if filepath.Base(filepath.Dir(path)) != "sessions" {
+		// Only process files whose path contains a /sessions/ segment.
+		// Path-containment (vs the legacy parent-name check) covers flat,
+		// per-host, and _pre-staging-archive/ layouts in one rule. We
+		// normalize separators so the same check works on Windows.
+		normalized := filepath.ToSlash(path)
+		if !strings.Contains(normalized, sessionsSegment) {
 			return nil
 		}
 
@@ -76,12 +96,19 @@ func Rebuild(projectsDir, stateDir string) (*Index, int, error) {
 		vaultRoot := filepath.Dir(projectsDir)
 		relPath, _ := filepath.Rel(vaultRoot, path)
 
-		// Detect project from directory structure: Projects/<project>/sessions/file.md
-		project := note.Project
-		if project == "" {
-			// Fall back to grandparent directory name (two levels up from file)
-			project = filepath.Base(filepath.Dir(filepath.Dir(path)))
+		// Frontmatter is the sole source of truth for the project name.
+		// render.SessionNote() writes `project:` unconditionally, so a
+		// missing field signals a corrupt or hand-edited note; treat it
+		// the same way as a missing session_id (skip + log) rather than
+		// falling back to a path-derived guess. The legacy grandparent
+		// fallback was dead under the flat layout AND a foot-gun under
+		// the per-host layout (would resolve to <host> or <date>, not
+		// the project). Removed in Phase 1.5 of vault-two-tier.
+		if note.Project == "" {
+			log.Printf("rebuild: skip %s: no project in frontmatter", path)
+			return nil
 		}
+		project := note.Project
 
 		// Frontmatter is authoritative for iteration.
 		// session-slot-multihost-disambiguation v8 / Mechanism 1: with timestamp

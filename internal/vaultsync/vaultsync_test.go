@@ -26,7 +26,7 @@ func TestClassify(t *testing.T) {
 		{".vibe-vault/session-index.json", Regenerable},
 		{".vibe-vault/session-index.json.bak", Regenerable},
 
-		// AppendOnly
+		// AppendOnly — flat (legacy) layout
 		{"Projects/foo/sessions/2026-03-26/123-session.md", AppendOnly},
 		{"Projects/bar/sessions/note.md", AppendOnly},
 
@@ -49,6 +49,83 @@ func TestClassify(t *testing.T) {
 			got := Classify(tt.path)
 			if got != tt.want {
 				t.Errorf("Classify(%q) = %d, want %d", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestClassify_PerHostLayout is the Phase 1.5 explicit per-host case lock.
+// The β2 mirror writes notes under Projects/<p>/sessions/<host>/<date>/...;
+// the prior Classify substring rule incidentally caught this, but Phase 1.5
+// makes it a tested guarantee so a future cleanup can't regress it.
+func TestClassify_PerHostLayout(t *testing.T) {
+	cases := []string{
+		"Projects/foo/sessions/host1/2026-05-03/note.md",
+		"Projects/foo/sessions/host1/2026-05-03/2026-05-03-143025123.md",
+		"Projects/foo/sessions/host1/2026-05-03/2026-05-03-143025123-2.md",
+		"Projects/foo/sessions/host.local/2026-05-03/note.md",
+		"Projects/foo/sessions/_unknown/2026-05-03/note.md",
+	}
+	for _, p := range cases {
+		t.Run(p, func(t *testing.T) {
+			if got := Classify(p); got != AppendOnly {
+				t.Errorf("Classify(%q) = %d, want AppendOnly (%d)", p, got, AppendOnly)
+			}
+		})
+	}
+}
+
+// TestClassify_FlatArchive is the Phase 1.5 lock for the legacy migration
+// archive: notes that lived under flat sessions/<file>.md before β2 are
+// `git mv`-ed into _pre-staging-archive/ during migration. They must
+// continue to classify AppendOnly so future rebases on the archive subtree
+// resolve correctly.
+func TestClassify_FlatArchive(t *testing.T) {
+	cases := []string{
+		"Projects/foo/sessions/_pre-staging-archive/2026-04-15-01.md",
+		"Projects/foo/sessions/_pre-staging-archive/2026-05-02-143025123.md",
+		"Projects/bar/sessions/_pre-staging-archive/legacy-note.md",
+	}
+	for _, p := range cases {
+		t.Run(p, func(t *testing.T) {
+			if got := Classify(p); got != AppendOnly {
+				t.Errorf("Classify(%q) = %d, want AppendOnly (%d)", p, got, AppendOnly)
+			}
+		})
+	}
+}
+
+// TestClassify_DualCase is the Phase 1.5 v4-H3 dual-case lock: a single
+// fixture asserts BOTH per-host AND _pre-staging-archive/ paths classify
+// AppendOnly, AND that a non-session path that contains the substring
+// "/sessions/" but is rooted somewhere other than Projects/<p>/ does NOT
+// slip through. This is the guard against the prior substring-match
+// accident.
+func TestClassify_DualCase(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want FileClass
+	}{
+		{"per-host", "Projects/foo/sessions/host1/2026-05-03/note.md", AppendOnly},
+		{"archive", "Projects/foo/sessions/_pre-staging-archive/note.md", AppendOnly},
+		{"flat-legacy", "Projects/foo/sessions/note.md", AppendOnly},
+		// A path rooted at Templates/ (not Projects/) must not be
+		// classified AppendOnly by an over-eager substring rule. Under
+		// Templates/ it correctly falls through to ConfigFile via the
+		// `Templates/` prefix arm; the lock here is the negative
+		// assertion (NOT AppendOnly), encoded by the want value.
+		{"non-projects-substring", "Templates/sessions/foo.md", ConfigFile},
+		// Project literally named "sessions" without a /sessions/ child
+		// segment also must not match.
+		{"project-named-sessions", "Projects/sessions/agentctx/resume.md", Manual},
+		// Empty trailing component must not match (defensive).
+		{"trailing-empty", "Projects/foo/sessions/", Manual},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := Classify(c.path); got != c.want {
+				t.Errorf("Classify(%q) = %d, want %d", c.path, got, c.want)
 			}
 		})
 	}
