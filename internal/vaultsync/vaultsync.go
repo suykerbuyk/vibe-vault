@@ -34,7 +34,8 @@ const (
 	AppendOnly
 	// Manual files require human review if conflicted (knowledge.md, resume.md, tasks).
 	Manual
-	// ConfigFile templates and internal config — accept upstream on conflict.
+	// ConfigFile templates and internal config — keep local on conflict
+	// (templates change rarely; config is host-local-adjacent).
 	ConfigFile
 )
 
@@ -55,11 +56,24 @@ type Status struct {
 // HasRemote returns true if at least one remote is configured.
 func (s *Status) HasRemote() bool { return len(s.Remotes) > 0 }
 
+// DroppedUpstream describes an upstream-side commit whose content for a
+// Manual-class file was dropped during rebase conflict resolution. The
+// resolver keeps local across all classes; for Manual class it records
+// the upstream-side commit responsible for the conflicting file so the
+// operator can recover it via `vv vault recover`.
+type DroppedUpstream struct {
+	Path               string    // vault-relative path
+	DroppedSHA         string    // upstream commit that last touched Path between merge-base and rebase target
+	DroppedSubject     string    // commit subject line
+	DroppedCommittedAt time.Time // committer date of the dropped commit
+}
+
 // PullResult reports what happened during a Pull operation.
 type PullResult struct {
-	Updated      bool     // any changes were pulled
-	Regenerate   bool     // caller should run vv index to rebuild auto-generated files
-	ManualReview []string // files that were resolved as upstream but need human review
+	Updated          bool              // any changes were pulled
+	Regenerate       bool              // caller should run vv index to rebuild auto-generated files
+	DroppedUpstream  []DroppedUpstream // Manual-class files whose upstream content was dropped during rebase conflict resolution
+	StashPopConflict bool              // stash pop after rebase produced conflicts; operator must resolve manually
 }
 
 // PushResult reports what happened during a CommitAndPush operation.
@@ -192,12 +206,21 @@ func EnsureRemote(vaultPath string) error {
 }
 
 // Pull fetches from all configured remotes and rebases local commits on top.
-// Conflicts are resolved automatically based on file classification:
-//   - Regenerable/ConfigFile/AppendOnly: accept upstream version
-//   - Manual: accept upstream, but report for human review
+// Conflicts during rebase are auto-resolved by keeping the LOCAL side
+// uniformly across all four file classes — local work is the most recent
+// operator intent on this machine. Per-class side-effects:
+//   - Regenerable: keep local; set Regenerate=true so the caller runs
+//     vv index and overwrites whatever was kept.
+//   - AppendOnly: keep local; unique-timestamp filenames make same-path
+//     collisions near-impossible, so no warning surface is needed.
+//   - ConfigFile: keep local; templates change rarely and config is
+//     host-local-adjacent.
+//   - Manual: keep local; record the upstream-side commit responsible for
+//     the file in DroppedUpstream so the operator can inspect and recover
+//     via `vv vault recover`.
 //
-// If Regenerate is true in the result, the caller should run vv index to
-// rebuild auto-generated files.
+// If a stash pop after rebase conflicts, StashPopConflict is set so the
+// caller can surface a remediation message.
 func Pull(vaultPath string) (*PullResult, error) {
 	result := &PullResult{}
 
@@ -258,7 +281,7 @@ func Pull(vaultPath string) (*PullResult, error) {
 	_, rebaseErr := gitCmd(vaultPath, 60*time.Second, "rebase", rebaseTarget)
 	if rebaseErr != nil {
 		// Resolve conflicts by file classification
-		resolved, err := resolveConflicts(vaultPath, result)
+		resolved, err := resolveConflicts(vaultPath, rebaseTarget, result)
 		if err != nil || !resolved {
 			// Abort rebase — unresolvable
 			_, _ = gitCmd(vaultPath, 10*time.Second, "rebase", "--abort")
@@ -278,7 +301,7 @@ func Pull(vaultPath string) (*PullResult, error) {
 	if stashed {
 		if _, err := gitCmd(vaultPath, 10*time.Second, "stash", "pop"); err != nil {
 			// Stash pop conflict — report but don't fail
-			result.ManualReview = append(result.ManualReview, "(stash pop conflict — run 'git stash pop' manually in vault)")
+			result.StashPopConflict = true
 		}
 	}
 
@@ -450,7 +473,21 @@ func short(sha string) string {
 
 // resolveConflicts attempts to auto-resolve all conflicted files during an
 // active rebase. Returns true if all conflicts were resolved.
-func resolveConflicts(vaultPath string, result *PullResult) (bool, error) {
+//
+// Policy: keep LOCAL across all classes on conflict — local work is the
+// most recent operator intent on this machine. Note that during a
+// `git rebase`, --ours and --theirs are inverted vs merge semantics:
+// `--ours` = the rebase target (upstream branch) and `--theirs` = the
+// commit being replayed (local work). So we use `git checkout --theirs`
+// to keep the local-side content. Upstream-side dropped content for
+// Manual class is recorded in result.DroppedUpstream so the operator
+// can inspect via `vv vault recover`.
+//
+// rebaseTarget is the upstream branch the rebase is replaying onto
+// (resolved by the caller). It is required so we can compute the
+// merge-base against ORIG_HEAD and identify the upstream commit
+// responsible for each conflicted file's upstream-side state.
+func resolveConflicts(vaultPath, rebaseTarget string, result *PullResult) (bool, error) {
 	// List conflicted files
 	out, err := gitCmd(vaultPath, 10*time.Second, "diff", "--name-only", "--diff-filter=U")
 	if err != nil {
@@ -460,6 +497,18 @@ func resolveConflicts(vaultPath string, result *PullResult) (bool, error) {
 		return false, nil
 	}
 
+	// Compute merge-base ORIG_HEAD..rebaseTarget once so we can attribute
+	// each conflicted file to the upstream commit responsible. ORIG_HEAD
+	// is set by `git rebase` to the pre-rebase tip, so this resolves to
+	// the fork point regardless of how many commits the rebase has
+	// already replayed.
+	base, baseErr := gitCmd(vaultPath, 10*time.Second, "merge-base", "ORIG_HEAD", rebaseTarget)
+	if baseErr != nil {
+		// Non-fatal: without a merge-base we cannot record dropped
+		// upstream commits, but we can still resolve the conflicts.
+		base = ""
+	}
+
 	for f := range strings.SplitSeq(out, "\n") {
 		f = strings.TrimSpace(f)
 		if f == "" {
@@ -467,7 +516,17 @@ func resolveConflicts(vaultPath string, result *PullResult) (bool, error) {
 		}
 
 		class := Classify(f)
-		// Accept upstream for all classes
+
+		// For Manual class, attribute the upstream-side content to the
+		// commit that introduced it BEFORE we drop it via checkout.
+		if class == Manual && base != "" {
+			if dropped, ok := lookupDroppedUpstream(vaultPath, base, rebaseTarget, f); ok {
+				result.DroppedUpstream = append(result.DroppedUpstream, dropped)
+			}
+		}
+
+		// Keep LOCAL across all classes. During rebase, --theirs is the
+		// commit being replayed (= local work).
 		if _, coErr := gitCmd(vaultPath, 10*time.Second, "checkout", "--theirs", f); coErr != nil {
 			return false, fmt.Errorf("checkout --theirs %s: %w", f, coErr)
 		}
@@ -475,11 +534,8 @@ func resolveConflicts(vaultPath string, result *PullResult) (bool, error) {
 			return false, fmt.Errorf("add %s: %w", f, addErr)
 		}
 
-		switch class {
-		case Regenerable:
+		if class == Regenerable {
 			result.Regenerate = true
-		case Manual:
-			result.ManualReview = append(result.ManualReview, f)
 		}
 	}
 
@@ -493,6 +549,35 @@ func resolveConflicts(vaultPath string, result *PullResult) (bool, error) {
 	}
 
 	return err == nil, err
+}
+
+// lookupDroppedUpstream queries git for the most recent upstream commit
+// that touched path between base and rebaseTarget. Returns the populated
+// DroppedUpstream record on success and false otherwise.
+func lookupDroppedUpstream(vaultPath, base, rebaseTarget, path string) (DroppedUpstream, bool) {
+	rng := base + ".." + rebaseTarget
+	out, err := gitCmd(vaultPath, 10*time.Second,
+		"log", "-1", "--format=%H%x00%s%x00%cI", rng, "--", path)
+	if err != nil || out == "" {
+		return DroppedUpstream{}, false
+	}
+	parts := strings.SplitN(out, "\x00", 3)
+	if len(parts) != 3 {
+		return DroppedUpstream{}, false
+	}
+	committedAt, parseErr := time.Parse(time.RFC3339, strings.TrimSpace(parts[2]))
+	if parseErr != nil {
+		// Tolerate unexpected formats by recording a zero time rather
+		// than dropping the entry entirely; the SHA + subject still
+		// give the operator a recovery handle.
+		committedAt = time.Time{}
+	}
+	return DroppedUpstream{
+		Path:               path,
+		DroppedSHA:         strings.TrimSpace(parts[0]),
+		DroppedSubject:     parts[1],
+		DroppedCommittedAt: committedAt,
+	}, true
 }
 
 // checkIdentity returns nil if git can resolve a committer identity
