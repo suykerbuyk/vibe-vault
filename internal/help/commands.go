@@ -996,15 +996,16 @@ var MemorySubcommands = []Command{
 var CmdVault = Command{
 	Name:     "vault",
 	Synopsis: "vault git synchronization",
-	Brief:    "Vault git sync (pull, push, status)",
+	Brief:    "Vault git sync (pull, push, status, recover)",
 	Usage:    "vv vault <command>",
 	Description: `Manages git synchronization of the vault repo across machines.
 The vault repo is owned entirely by vv — all git operations are safe.
 
 Subcommands:
-  vv vault status   Show vault git state (clean/dirty, ahead/behind)
-  vv vault pull     Fetch + rebase with automatic conflict resolution
-  vv vault push     Commit all changes and push`,
+  vv vault status    Show vault git state (clean/dirty, ahead/behind)
+  vv vault pull      Fetch + rebase with automatic conflict resolution
+  vv vault push      Commit all changes and push
+  vv vault recover   List upstream commits whose content was dropped on rebase`,
 }
 
 var CmdVaultStatus = Command{
@@ -1022,14 +1023,47 @@ var CmdVaultPull = Command{
 	Brief:    "Fetch + rebase with auto conflict resolution",
 	Usage:    "vv vault pull",
 	Description: `Fetches from all configured remotes and rebases local commits on
-the tracking upstream (falls back to first remote). Conflicts are resolved
-automatically based on file type:
-  - Auto-generated files (history.md): accept upstream, flag for regeneration
-  - Session notes: accept upstream (unique timestamps = near-zero conflict risk)
-  - Manual files (knowledge.md): accept upstream, report for human review
-  - Templates/config: accept upstream
+the tracking upstream (falls back to first remote). Rebase conflicts are
+auto-resolved by KEEPING LOCAL across all four file classes — local work is
+the most recent operator intent on this machine. Per-class side-effects:
+  - Auto-generated files (history.md, session-index): keep local; mark
+    Regenerate so the caller runs 'vv index' to rebuild.
+  - Session notes: keep local; unique timestamp filenames make collisions
+    near-impossible.
+  - Manual files (knowledge.md, resume.md, iterations.md, tasks): keep
+    local; record the upstream commit's SHA and subject for inspection.
+  - Templates/config: keep local; templates change rarely, config is
+    host-local-adjacent.
+
+When upstream Manual-class content is dropped, a WARNING is printed to
+stderr listing the dropped commits. Inspect and recover with:
+  vv vault recover [--days N]
 
 If regeneration is needed, run 'vv index' afterward to rebuild.`,
+}
+
+var CmdVaultRecover = Command{
+	Name:     "recover",
+	Synopsis: "list upstream commits whose content was dropped on rebase",
+	Brief:    "List/inspect dropped upstream content",
+	Usage:    "vv vault recover [--days N] [--show <sha>] [--diff <sha> -- <path>]",
+	Flags: []Flag{
+		{"--days <N>", "Window in days to walk reachable history (default: 7; no upper cap)"},
+		{"--show <sha>", "Run `git show <sha>` for the named commit"},
+		{"--diff <sha> -- <path>", "Print `git show <sha>:<path>` next to `git show HEAD:<path>`"},
+	},
+	Description: `Walks reachable history from HEAD back N days and reports upstream
+commits whose recorded blob for at least one Manual-class file (knowledge.md,
+resume.md, iterations.md, tasks/*) differs from HEAD's current blob — the
+candidates whose content a prior 'vv vault pull' rebase resolution dropped in
+favor of local work.
+
+Reflog is NOT consulted: after a peer machine's rebase pushes to the remote,
+that machine's prior commits remain reachable from main; the "drop" happened
+to file content during merge resolution, not to commit reachability.
+
+There is no --apply flag; manual integration preserves operator judgment about
+ordering and merge style.`,
 }
 
 var CmdVaultPush = Command{
@@ -1051,6 +1085,7 @@ var VaultSubcommands = []Command{
 	CmdVaultStatus,
 	CmdVaultPull,
 	CmdVaultPush,
+	CmdVaultRecover,
 }
 
 var CmdWorktree = Command{
