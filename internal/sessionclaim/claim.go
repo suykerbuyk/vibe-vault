@@ -143,7 +143,7 @@ func AcquireOrRefresh(projectRoot string) (*Claim, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sessionclaim: cache dir: %w", err)
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err = os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("sessionclaim: mkdir %s: %w", dir, err)
 	}
 
@@ -162,8 +162,8 @@ func AcquireOrRefresh(projectRoot string) (*Claim, error) {
 		if mintErr != nil {
 			return nil, mintErr
 		}
-		if err := writeClaim(dir, token, c); err != nil {
-			return nil, err
+		if writeErr := writeClaim(dir, token, c); writeErr != nil {
+			return nil, writeErr
 		}
 		sweepStaleClaims(projectRoot, token)
 		return c, nil
@@ -179,8 +179,8 @@ func AcquireOrRefresh(projectRoot string) (*Claim, error) {
 		if mintErr != nil {
 			return nil, mintErr
 		}
-		if err := writeClaim(dir, token, c); err != nil {
-			return nil, err
+		if writeErr := writeClaim(dir, token, c); writeErr != nil {
+			return nil, writeErr
 		}
 		sweepStaleClaims(projectRoot, token)
 		return c, nil
@@ -189,8 +189,8 @@ func AcquireOrRefresh(projectRoot string) (*Claim, error) {
 	// Live triple — refresh.
 	maybeWarnProjectRootDrift(existing)
 	existing.LastSeenAt = now().UTC()
-	if err := writeClaim(dir, token, existing); err != nil {
-		return nil, err
+	if writeErr := writeClaim(dir, token, existing); writeErr != nil {
+		return nil, writeErr
 	}
 	return existing, nil
 }
@@ -214,7 +214,7 @@ func UpdateHarnessSessionID(projectRoot string, harnessID string) error {
 	if err != nil {
 		return fmt.Errorf("sessionclaim: cache dir: %w", err)
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err = os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("sessionclaim: mkdir %s: %w", dir, err)
 	}
 
@@ -234,8 +234,8 @@ func UpdateHarnessSessionID(projectRoot string, harnessID string) error {
 			return mintErr
 		}
 		c.HarnessSessionID = harnessID
-		if err := writeClaim(dir, token, c); err != nil {
-			return err
+		if writeErr := writeClaim(dir, token, c); writeErr != nil {
+			return writeErr
 		}
 		sweepStaleClaims(projectRoot, token)
 		return nil
