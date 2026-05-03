@@ -3306,3 +3306,66 @@ Key architectural and design decisions in vibe-vault, with rationale.
     (drift check + sessionclaim skeleton + DetectProjectRoot,
     PR #40), PR 0b (orphan-aware hook uninstall, PR #41), and
     PR 3 (Phases 1–6 redesign — this entry).**
+
+100. **`vv check toolchain` — workstation dev-binary drift detection.**
+     Probes go, golangci-lint, gh, make, git via `exec.LookPath` +
+     `--version` with a 2-second per-binary `context.WithTimeout`.
+     Returns one `Result` per binary (Name `tool:<bin>`) rather than
+     one combined Result, so operator-facing hints are surgical
+     ("install gh") instead of opaque ("3 of 5 missing").
+
+     **Per-binary, not combined.** Each spec gets its own Result so
+     `vv check --json` consumers can route per-binary; the human
+     `vv check` table aligns naturally via the existing dynamic
+     `maxName` column-width computation in `internal/check/check.go`.
+
+     **Sequential probes.** Typical happy-path wall-clock ≤ 200 ms —
+     `--version` for these well-known binaries returns in 5–30 ms
+     each, and `LookPath` misses return synchronously. The 10-s
+     theoretical worst case (5 hung binaries) is itself a finding
+     worth surfacing. Concurrency was considered and rejected:
+     index-keyed slice writes without mutex have zero precedent in
+     this codebase, and a wall-clock timing test would flake on
+     loaded CI runners.
+
+     **No DI seam, no bounded-pipe machinery.** Tested via
+     stub-script PATH manipulation in `t.TempDir()` plus
+     `t.Setenv("PATH", ...)` — the same shape used by every other
+     test in `internal/check/`. `cmd.Output()` (not `CombinedOutput`,
+     not `StdoutPipe + Scanner`) suffices because `--version` output
+     for these binaries is bounded by the binary itself (go: 32 B,
+     git: 11 B, gh: ~80 B, make: ~250 B, golangci-lint: ~80 B).
+
+     **All Warn, never Fail.** Toolchain drift breaks operator
+     workflow (`make`, `/wrap`) but does not prevent `vv` itself
+     from running; matches the existing `domain:work` /
+     `memory-link` / `wrap-iter-drift` Pass/Warn convention.
+
+     **Version-floor checking deferred to v2.** v1 install-presence
+     directly closes the `gh-cli-not-installed-on-s76` carried
+     thread but only structurally enables coverage of the
+     `golangci-lint master` (no `forbidigo`) case. v2 (`.toolchain.toml`
+     with version floors) lands when a fourth toolchain-drift
+     instance surfaces — operator rationale: "the longer vibe-vault
+     is deployed, the less likely we'll find incompatible legacy
+     versions of tools."
+
+     **MCP tool: `vv_check_toolchain` (zero-arg).** Constructor
+     takes no `cfg` — toolchain probing is vault-independent.
+     Mirrors `NewGetAgentDefinitionTool()` precedent (the sole
+     cfg-free constructor in the registered tool set). Wire shape:
+     JSON array of `{name, status, detail}` with lowercased
+     `status` matching `internal/check/json.go`'s projection.
+
+     **Surface bump 12 → 13.** New tool registration tripped DESIGN
+     #97's build-time golden invariant; `MCPSurfaceVersion` advanced
+     to 13 in the same commit as the registration plus
+     `tool_surface.golden.json` regeneration via
+     `vv internal verify-tool-surface --update-golden`. Tool count:
+     41 → 42, dynamically derived from `srv.ToolDefs()`.
+
+     **Filed as task `vv-check-toolchain` (Draft v3 → v4 after
+     `/review-plan` trimmed v3's over-corrections; iter 195);
+     shipped on branch `vv-check-toolchain` across Phase 1
+     (probe + tests), Phase 2 (CLI wire-in + Phase-1 cleanup),
+     Phase 3 (MCP tool + surface bump + golden regen), this entry.**
