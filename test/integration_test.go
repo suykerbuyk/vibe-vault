@@ -210,6 +210,64 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
+// findSessionNote scans <vault>/Projects/<project>/sessions for a single
+// session note whose filename starts with datePrefix (e.g.
+// "2027-06-15"). Phase 4 of session-slot-multihost-disambiguation
+// switched session filenames from legacy "YYYY-MM-DD-NN.md" to
+// "YYYY-MM-DD-HHMMSSmmm[-N].md", so integration tests can no longer
+// hardcode the trailing two-digit counter. Returns absolute path.
+//
+// Fails the test if zero or more-than-one match is found.
+func findSessionNote(t *testing.T, vaultPath, project, datePrefix string) string {
+	t.Helper()
+	dir := filepath.Join(vaultPath, "Projects", project, "sessions")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read sessions dir %s: %v", dir, err)
+	}
+	var matches []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		if strings.HasPrefix(name, datePrefix+"-") {
+			matches = append(matches, filepath.Join(dir, name))
+		}
+	}
+	if len(matches) == 0 {
+		t.Fatalf("no session note found in %s with prefix %s", dir, datePrefix)
+	}
+	if len(matches) > 1 {
+		t.Fatalf("multiple session notes found in %s with prefix %s: %v", dir, datePrefix, matches)
+	}
+	return matches[0]
+}
+
+// findSessionNoteByID returns the absolute path to the session note
+// recorded in session-index.json for the given session_id, joined onto
+// vaultPath. Fails the test if the session is missing.
+func findSessionNoteByID(t *testing.T, vaultPath, stateDir, sessionID string) string {
+	t.Helper()
+	idx := readIndex(t, stateDir)
+	entry, ok := idx[sessionID]
+	if !ok {
+		t.Fatalf("session %q not in index", sessionID)
+	}
+	notePath, ok := entry["note_path"].(string)
+	if !ok || notePath == "" {
+		t.Fatalf("session %q has no note_path: %+v", sessionID, entry)
+	}
+	return filepath.Join(vaultPath, notePath)
+}
+
+// stemFromPath returns the filename without .md extension — used to
+// match against the previous: "[[<stem>]]" wikilink format.
+func stemFromPath(path string) string {
+	base := filepath.Base(path)
+	return strings.TrimSuffix(base, ".md")
+}
+
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
@@ -375,11 +433,8 @@ func TestIntegration(t *testing.T) {
 
 		assertContains(t, stdout, "created:", "process stdout")
 
-		// Note file exists
-		notePath := filepath.Join(vaultPath, "Projects", "myproject", "sessions", "2027-06-15-01.md")
-		if !fileExists(notePath) {
-			t.Fatalf("note not created at %s", notePath)
-		}
+		// Note file exists (Phase 4 timestamp filename — find by index session_id).
+		notePath := findSessionNoteByID(t, vaultPath, stateDir, "session-aaa-001")
 
 		note := readFile(t, notePath)
 
@@ -414,15 +469,17 @@ func TestIntegration(t *testing.T) {
 		stdout := mustRunVV(t, env, "process", a2Path)
 		assertContains(t, stdout, "created:", "process stdout")
 
-		notePath := filepath.Join(vaultPath, "Projects", "myproject", "sessions", "2027-06-15-02.md")
-		if !fileExists(notePath) {
-			t.Fatalf("note not created at %s", notePath)
-		}
+		// Phase 4: timestamp filename — find by index session_id, since
+		// findSessionNote-by-prefix would now match two notes.
+		notePath := findSessionNoteByID(t, vaultPath, stateDir, "session-aaa-002")
 
 		note := readFile(t, notePath)
 
 		assertContains(t, note, "iteration: 2", "frontmatter iteration")
-		assertContains(t, note, "previous: \"[[2027-06-15-01]]\"", "previous link")
+		// Previous wikilink uses the actual filename stem of session A1.
+		a1Note := findSessionNoteByID(t, vaultPath, stateDir, "session-aaa-001")
+		a1Stem := stemFromPath(a1Note)
+		assertContains(t, note, "previous: \"[["+a1Stem+"]]\"", "previous link")
 
 		// Index has both sessions
 		idx := readIndex(t, stateDir)
@@ -451,10 +508,7 @@ func TestIntegration(t *testing.T) {
 		stdout := mustRunVV(t, env, "process", bPath)
 		assertContains(t, stdout, "created:", "process stdout")
 
-		notePath := filepath.Join(vaultPath, "Projects", "other-project", "sessions", "2027-06-15-01.md")
-		if !fileExists(notePath) {
-			t.Fatalf("note not created at %s", notePath)
-		}
+		notePath := findSessionNoteByID(t, vaultPath, stateDir, "session-bbb-001")
 
 		note := readFile(t, notePath)
 
@@ -474,10 +528,9 @@ func TestIntegration(t *testing.T) {
 		stdout := mustRunVV(t, env, "process", narrPath)
 		assertContains(t, stdout, "created:", "process stdout")
 
-		notePath := filepath.Join(vaultPath, "Projects", "narr-project", "sessions", "2027-08-10-01.md")
-		if !fileExists(notePath) {
-			t.Fatalf("note not created at %s", notePath)
-		}
+		// Find by index session_id — the narrative testdata uses
+		// session-narr-001 per the fixture.
+		notePath := findSessionNoteByID(t, vaultPath, stateDir, "session-narr-001")
 
 		note := readFile(t, notePath)
 
@@ -683,11 +736,9 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("Stop hook failed: %v\nstderr: %s", err, stopStderr)
 		}
 
-		// Verify checkpoint note exists with status: checkpoint
-		notePath := filepath.Join(vaultPath, "Projects", "myproject", "sessions", "2027-07-01-01.md")
-		if !fileExists(notePath) {
-			t.Fatalf("checkpoint note not created at %s", notePath)
-		}
+		// Verify checkpoint note exists with status: checkpoint.
+		// Phase 4: timestamp filename — find by index session_id.
+		notePath := findSessionNoteByID(t, vaultPath, stateDir, "session-stop-001")
 
 		checkpointNote := readFile(t, notePath)
 		assertContains(t, checkpointNote, "status: checkpoint", "checkpoint status")
@@ -717,8 +768,11 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("SessionEnd hook failed: %v\nstderr: %s", err, endStderr)
 		}
 
-		// Verify note is now finalized
-		finalizedNote := readFile(t, notePath)
+		// Verify note is now finalized. Mechanism 3 (Phase 4) removes
+		// the prior checkpoint and writes a fresh timestamp file —
+		// re-resolve via index to get the post-SessionEnd path.
+		finalNotePath := findSessionNoteByID(t, vaultPath, stateDir, "session-stop-001")
+		finalizedNote := readFile(t, finalNotePath)
 		assertContains(t, finalizedNote, "status: completed", "finalized status")
 		assertNotContains(t, finalizedNote, "status: checkpoint", "no checkpoint in finalized")
 
@@ -732,17 +786,29 @@ func TestIntegration(t *testing.T) {
 			t.Error("checkpoint should be false after SessionEnd finalization")
 		}
 
-		// Verify only one note file for this session (not two)
+		// Verify only one note file remains for this session — Mechanism 3
+		// removes the prior checkpoint before writing the finalized note.
+		// Both notes will share today's date prefix (write-time clock).
+		// Count files referencing session-stop-001 via the post-finalize
+		// index entry's NotePath; assert the prior path is gone.
 		projectDir := filepath.Join(vaultPath, "Projects", "myproject", "sessions")
 		entries, _ := os.ReadDir(projectDir)
 		stopNotes := 0
+		// We can't filter by 2027-07-01 anymore (filename = write time,
+		// not StartTime). Instead we check that exactly one file for
+		// "session-stop-001" survives by reading the file and matching
+		// its session_id frontmatter.
 		for _, e := range entries {
-			if strings.Contains(e.Name(), "2027-07-01") {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			data, _ := os.ReadFile(filepath.Join(projectDir, e.Name()))
+			if strings.Contains(string(data), "session_id: \"session-stop-001\"") {
 				stopNotes++
 			}
 		}
 		if stopNotes != 1 {
-			t.Errorf("expected 1 note file for 2027-07-01, got %d", stopNotes)
+			t.Errorf("expected 1 note file for session-stop-001, got %d", stopNotes)
 		}
 	})
 
@@ -751,10 +817,7 @@ func TestIntegration(t *testing.T) {
 		stdout := mustRunVV(t, env, "process", frictionPath)
 		assertContains(t, stdout, "created:", "process stdout")
 
-		notePath := filepath.Join(vaultPath, "Projects", "friction-project", "sessions", "2027-09-01-01.md")
-		if !fileExists(notePath) {
-			t.Fatalf("note not created at %s", notePath)
-		}
+		notePath := findSessionNoteByID(t, vaultPath, stateDir, "session-friction-001")
 
 		note := readFile(t, notePath)
 
@@ -1363,24 +1426,21 @@ func TestIntegration(t *testing.T) {
 		stdout := mustRunVV(t, env, "reprocess")
 		assertContains(t, stdout, "reprocessed:", "reprocess stdout")
 
-		// Notes still exist with valid content
+		// Notes still exist with valid content. Phase 4 timestamp
+		// filenames mean we resolve via the post-reprocess index
+		// rather than hardcoding -NN.md paths.
 		for _, tc := range []struct {
-			path      string
 			sessionID string
 			project   string
 		}{
-			{"Projects/myproject/sessions/2027-06-15-01.md", "session-aaa-001", "myproject"},
-			{"Projects/myproject/sessions/2027-06-15-02.md", "session-aaa-002", "myproject"},
-			{"Projects/other-project/sessions/2027-06-15-01.md", "session-bbb-001", "other-project"},
+			{"session-aaa-001", "myproject"},
+			{"session-aaa-002", "myproject"},
+			{"session-bbb-001", "other-project"},
 		} {
-			absPath := filepath.Join(vaultPath, tc.path)
-			if !fileExists(absPath) {
-				t.Errorf("note missing after reprocess: %s", tc.path)
-				continue
-			}
+			absPath := findSessionNoteByID(t, vaultPath, stateDir, tc.sessionID)
 			note := readFile(t, absPath)
-			assertContains(t, note, fmt.Sprintf("session_id: \"%s\"", tc.sessionID), tc.path+" session_id")
-			assertContains(t, note, fmt.Sprintf("project: %s", tc.project), tc.path+" project")
+			assertContains(t, note, fmt.Sprintf("session_id: \"%s\"", tc.sessionID), tc.sessionID+" session_id")
+			assertContains(t, note, fmt.Sprintf("project: %s", tc.project), tc.sessionID+" project")
 		}
 
 		// history.md regenerated
