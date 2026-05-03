@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,9 +24,16 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/inject"
 	"github.com/suykerbuyk/vibe-vault/internal/narrative"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
+	"github.com/suykerbuyk/vibe-vault/internal/sessionclaim"
 	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 	"github.com/suykerbuyk/vibe-vault/internal/trends"
 )
+
+// sessionclaimAcquireOrRefresh is a test seam for the
+// vv_capture_session handler's sessionclaim integration. Tests can
+// override to inject (nil, err) and exercise the legacy fallback path
+// (H6 contract). Default forwards to sessionclaim.AcquireOrRefresh.
+var sessionclaimAcquireOrRefresh = sessionclaim.AcquireOrRefresh
 
 var dateRegexp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
@@ -647,12 +655,45 @@ func NewCaptureSessionTool(cfg config.Config) Tool {
 			// Detect git branch (1s timeout, same as detect.go)
 			branch := detectBranch(cwd)
 
-			// Generate unique session ID
-			randBytes := make([]byte, 16)
-			if _, randErr := rand.Read(randBytes); randErr != nil {
-				return "", fmt.Errorf("generate session ID: %w", randErr)
+			// Phase 4 (M9) of session-slot-multihost-disambiguation:
+			// integrate sessionclaim. Resolve project root, acquire or
+			// refresh the host-local claim, derive the session id and
+			// source from it. On failure (H6 contract) fall back to
+			// legacy crypto/rand mint with hardcoded "zed" source so
+			// today's behavior is preserved on read-only filesystems
+			// or transient I/O errors.
+			projectRoot := session.DetectProjectRoot(cwd)
+			claim, claimErr := sessionclaimAcquireOrRefresh(projectRoot)
+			if claimErr != nil {
+				log.Printf("warning: sessionclaim.AcquireOrRefresh: %v", claimErr)
 			}
-			sessionID := "zed-mcp:" + hex.EncodeToString(randBytes)
+
+			var sessionID string
+			if claim != nil {
+				sessionID = sessionclaim.EffectiveSessionID(claim)
+			}
+			if sessionID == "" {
+				// Legacy fallback (H6): synthesize a zed-mcp session id.
+				randBytes := make([]byte, 16)
+				if _, randErr := rand.Read(randBytes); randErr != nil {
+					return "", fmt.Errorf("generate session ID: %w", randErr)
+				}
+				sessionID = "zed-mcp:" + hex.EncodeToString(randBytes)
+			}
+
+			// Source flips on claim.harness:
+			//   claude-code → "" (no source field, default)
+			//   zed-mcp     → "zed"
+			//   unknown     → "unknown"
+			// On nil claim (sessionclaim failure or read-only), use the
+			// pre-Phase-4 hardcoded "zed" so the existing user contract
+			// is preserved on the H6 fallback path.
+			var source string
+			if claim != nil {
+				source = sessionclaim.EffectiveSource(claim)
+			} else {
+				source = "zed"
+			}
 
 			// Detect project and domain
 			info := session.Detect(cwd, branch, args.Model, sessionID, cfg)
@@ -680,7 +721,8 @@ func NewCaptureSessionTool(cfg config.Config) Tool {
 			}
 
 			opts := session.CaptureOpts{
-				Source:         "zed",
+				Source:         source,
+				ProjectRoot:    projectRoot,
 				SkipEnrichment: true,
 				CWD:            cwd,
 				SessionID:      sessionID,
