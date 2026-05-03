@@ -81,10 +81,21 @@ func AddRemote(t *testing.T, repoDir, name, url string) {
 // committer identity configured anywhere — used to test fail-fast
 // identity-probe paths. Pairs with SandboxNoIdentity to fully
 // isolate the test from the operator's git config.
+//
+// Sets `user.useConfigOnly=true` in the repo-local config to defeat
+// git's getpwuid()/hostname synthesis fallback. Without this, hosts
+// whose /etc/passwd has a populated GECOS field AND whose hostname
+// resolves to an FQDN (i.e. contains '@'-eligible content) cause
+// `git var GIT_AUTHOR_IDENT` to succeed with a synthesized identity
+// like `John Doe <user@host.example.com>`, defeating the no-identity
+// sandbox. `user.useConfigOnly` tells git to refuse that synthesis
+// and require an explicit config-file identity, which in turn fails
+// fast in this fixture exactly as the test asserts.
 func InitTestRepoNoIdentity(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	GitRun(t, dir, "init", "-b", "main")
+	GitRun(t, dir, "config", "user.useConfigOnly", "true")
 	return dir
 }
 
