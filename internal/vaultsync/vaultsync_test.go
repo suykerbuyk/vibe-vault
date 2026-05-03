@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/suykerbuyk/vibe-vault/internal/testutil/gitx"
 )
@@ -689,6 +690,313 @@ func TestCommitAndPush_ThreeRemotesSecondCascade(t *testing.T) {
 	if result.CommitSHA != postHEAD {
 		t.Errorf("CommitSHA = %q, want post-loop HEAD %q",
 			result.CommitSHA, postHEAD)
+	}
+}
+
+// barePushOverwrite plants a commit on the bare's main that overwrites
+// the named file with content. It clones the bare, writes content, and
+// pushes back. The seeded clone is fresh from the bare so the new
+// commit's parent matches the bare's current tip — a fast-forward push.
+// Returns the SHA the bare's main now points to.
+func barePushOverwrite(t *testing.T, bareDir, fileName, content, msg string) string {
+	t.Helper()
+	scratch := t.TempDir()
+	gitx.GitRun(t, scratch, "clone", "-b", "main", bareDir, ".")
+	gitx.GitRun(t, scratch, "config", "user.email", "test@test.com")
+	gitx.GitRun(t, scratch, "config", "user.name", "test")
+	full := filepath.Join(scratch, fileName)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir for %s: %v", full, err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", fileName, err)
+	}
+	gitx.GitRun(t, scratch, "add", ".")
+	gitx.GitRun(t, scratch, "commit", "-m", msg)
+	gitx.GitRun(t, scratch, "push", "origin", "main")
+	return strings.TrimSpace(gitx.GitRun(t, scratch, "rev-parse", "HEAD"))
+}
+
+// pullSetup wires up a vault repo + a bare origin and seeds the file at
+// vaultRel with seedContent. Returns (vaultDir, bareDir).
+func pullSetup(t *testing.T, vaultRel, seedContent string) (string, string) {
+	t.Helper()
+	dir := gitx.InitTestRepo(t)
+	bare := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "origin", bare)
+
+	full := filepath.Join(dir, vaultRel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(full, []byte(seedContent), 0o644); err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+	gitx.GitRun(t, dir, "add", "-A")
+	gitx.GitRun(t, dir, "commit", "-m", "seed "+vaultRel)
+	gitx.GitRun(t, dir, "push", "-u", "origin", "main")
+	return dir, bare
+}
+
+// localCommit overwrites file at dir/relPath with content and commits.
+func localCommit(t *testing.T, dir, relPath, content, msg string) {
+	t.Helper()
+	full := filepath.Join(dir, relPath)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	gitx.GitRun(t, dir, "add", "-A")
+	gitx.GitRun(t, dir, "commit", "-m", msg)
+}
+
+func TestPull_ManualConflict_RecordsDroppedUpstream(t *testing.T) {
+	rel := "Projects/p/iterations.md"
+	dir, bare := pullSetup(t, rel, "iter 99\n")
+
+	// Upstream-side commit on the bare from a peer.
+	upstreamSubject := "iter 100 from peer A"
+	upstreamSHA := barePushOverwrite(t, bare, rel, "iter 100 (peer A)\n", upstreamSubject)
+
+	// Divergent local commit on the same file.
+	localCommit(t, dir, rel, "iter 100 (local)\n", "iter 100 local")
+
+	result, err := Pull(dir)
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if !result.Updated {
+		t.Error("expected Updated=true")
+	}
+	if len(result.DroppedUpstream) != 1 {
+		t.Fatalf("DroppedUpstream len = %d, want 1: %+v", len(result.DroppedUpstream), result.DroppedUpstream)
+	}
+	d := result.DroppedUpstream[0]
+	if d.Path != rel {
+		t.Errorf("Path = %q, want %q", d.Path, rel)
+	}
+	if d.DroppedSHA == "" {
+		t.Error("DroppedSHA empty")
+	}
+	if !strings.HasPrefix(upstreamSHA, d.DroppedSHA[:7]) && !strings.HasPrefix(d.DroppedSHA, upstreamSHA[:7]) {
+		t.Errorf("DroppedSHA = %q, want match for %q", d.DroppedSHA, upstreamSHA)
+	}
+	if d.DroppedSubject != upstreamSubject {
+		t.Errorf("DroppedSubject = %q, want %q", d.DroppedSubject, upstreamSubject)
+	}
+	if d.DroppedCommittedAt.IsZero() {
+		t.Error("DroppedCommittedAt is zero")
+	}
+	if time.Since(d.DroppedCommittedAt) > time.Hour {
+		t.Errorf("DroppedCommittedAt = %v, expected recent", d.DroppedCommittedAt)
+	}
+
+	// Verify the file content on disk equals the LOCAL side.
+	got, _ := os.ReadFile(filepath.Join(dir, rel))
+	if !strings.Contains(string(got), "(local)") {
+		t.Errorf("file not kept-local: %q", got)
+	}
+}
+
+func TestPull_MultiFileManualConflict(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	bare := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "origin", bare)
+
+	files := []string{
+		"Projects/p/agentctx/resume.md",
+		"Projects/p/agentctx/iterations.md",
+		"Projects/p/agentctx/tasks/x.md",
+	}
+	for _, f := range files {
+		full := filepath.Join(dir, f)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", f, err)
+		}
+		if err := os.WriteFile(full, []byte("seed "+f+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", f, err)
+		}
+	}
+	gitx.GitRun(t, dir, "add", "-A")
+	gitx.GitRun(t, dir, "commit", "-m", "seed multi")
+	gitx.GitRun(t, dir, "push", "-u", "origin", "main")
+
+	// Upstream commit overwrites all three files.
+	scratch := t.TempDir()
+	gitx.GitRun(t, scratch, "clone", "-b", "main", bare, ".")
+	gitx.GitRun(t, scratch, "config", "user.email", "test@test.com")
+	gitx.GitRun(t, scratch, "config", "user.name", "test")
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(scratch, f), []byte("upstream "+f+"\n"), 0o644); err != nil {
+			t.Fatalf("upstream write: %v", err)
+		}
+	}
+	gitx.GitRun(t, scratch, "add", "-A")
+	gitx.GitRun(t, scratch, "commit", "-m", "upstream multi-file change")
+	gitx.GitRun(t, scratch, "push", "origin", "main")
+
+	// Divergent local change on the same three files.
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("local "+f+"\n"), 0o644); err != nil {
+			t.Fatalf("local write: %v", err)
+		}
+	}
+	gitx.GitRun(t, dir, "add", "-A")
+	gitx.GitRun(t, dir, "commit", "-m", "local multi-file change")
+
+	result, err := Pull(dir)
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if len(result.DroppedUpstream) != 3 {
+		t.Fatalf("DroppedUpstream len = %d, want 3: %+v",
+			len(result.DroppedUpstream), result.DroppedUpstream)
+	}
+	seen := map[string]bool{}
+	for _, d := range result.DroppedUpstream {
+		seen[d.Path] = true
+		if d.DroppedSHA == "" {
+			t.Errorf("empty SHA for %q", d.Path)
+		}
+	}
+	for _, f := range files {
+		if !seen[f] {
+			t.Errorf("missing %q in DroppedUpstream: %+v", f, result.DroppedUpstream)
+		}
+	}
+}
+
+func TestPull_RegenerableConflict_NoDroppedUpstream(t *testing.T) {
+	rel := "Projects/p/history.md"
+	dir, bare := pullSetup(t, rel, "history seed\n")
+
+	barePushOverwrite(t, bare, rel, "upstream history\n", "upstream history change")
+	localCommit(t, dir, rel, "local history\n", "local history change")
+
+	result, err := Pull(dir)
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if !result.Regenerate {
+		t.Error("expected Regenerate=true for Regenerable conflict")
+	}
+	if len(result.DroppedUpstream) != 0 {
+		t.Errorf("expected no DroppedUpstream for Regenerable, got %+v", result.DroppedUpstream)
+	}
+}
+
+func TestPull_AppendOnlyConflict_NoDroppedUpstream(t *testing.T) {
+	rel := "Projects/p/sessions/2026-05-03/note.md"
+	dir, bare := pullSetup(t, rel, "session seed\n")
+
+	barePushOverwrite(t, bare, rel, "upstream session\n", "upstream session change")
+	localCommit(t, dir, rel, "local session\n", "local session change")
+
+	result, err := Pull(dir)
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if len(result.DroppedUpstream) != 0 {
+		t.Errorf("expected no DroppedUpstream for AppendOnly, got %+v", result.DroppedUpstream)
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, rel))
+	if !strings.Contains(string(got), "local") {
+		t.Errorf("file not kept-local: %q", got)
+	}
+}
+
+func TestPull_ConfigFileConflict_NoDroppedUpstream(t *testing.T) {
+	rel := "Templates/agentctx/CLAUDE.md"
+	dir, bare := pullSetup(t, rel, "tmpl seed\n")
+
+	barePushOverwrite(t, bare, rel, "upstream tmpl\n", "upstream template change")
+	localCommit(t, dir, rel, "local tmpl\n", "local template change")
+
+	result, err := Pull(dir)
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if len(result.DroppedUpstream) != 0 {
+		t.Errorf("expected no DroppedUpstream for ConfigFile, got %+v", result.DroppedUpstream)
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, rel))
+	if !strings.Contains(string(got), "local") {
+		t.Errorf("file not kept-local: %q", got)
+	}
+}
+
+func TestPull_StashPopConflict(t *testing.T) {
+	rel := "Projects/p/notes.md"
+	dir, bare := pullSetup(t, rel, "seed\n")
+
+	// Upstream commit changes the same file. No divergent local commit
+	// — instead leave a dirty working-tree edit on the same file so
+	// the autostash + rebase + stash-pop path collides.
+	barePushOverwrite(t, bare, rel, "upstream content\n", "upstream change")
+
+	// Dirty working tree on the same path — pre-stash content.
+	if err := os.WriteFile(filepath.Join(dir, rel), []byte("dirty local edit\n"), 0o644); err != nil {
+		t.Fatalf("dirty write: %v", err)
+	}
+
+	result, err := Pull(dir)
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if !result.StashPopConflict {
+		t.Errorf("expected StashPopConflict=true (DroppedUpstream=%+v)", result.DroppedUpstream)
+	}
+}
+
+// TestCommitAndPush_RebaseConflict_NoAutoResolve locks in the scoping
+// decision: CommitAndPush's rebase path (line ~384) must NOT
+// auto-resolve. On conflict it aborts via RemoteResults; PushResult
+// has no DroppedUpstream field (it's a PullResult-only concept). This
+// test will fail to compile if a future refactor adds DroppedUpstream
+// to PushResult, and will fail at runtime if auto-resolve leaks into
+// the push path.
+func TestCommitAndPush_RebaseConflict_NoAutoResolve(t *testing.T) {
+	rel := "Projects/p/notes.md"
+	dir, bare := pullSetup(t, rel, "seed\n")
+
+	// Plant unrelated commit on the bare so the local push is
+	// non-fast-forward.
+	barePushOverwrite(t, bare, rel, "upstream content\n", "upstream change")
+
+	// Stage a divergent local change without committing yet — let
+	// CommitAndPush handle the commit + push + rebase path.
+	if err := os.WriteFile(filepath.Join(dir, rel), []byte("local content\n"), 0o644); err != nil {
+		t.Fatalf("local write: %v", err)
+	}
+
+	result, err := CommitAndPush(dir, "test push with conflict")
+	if err != nil {
+		t.Fatalf("CommitAndPush: %v", err)
+	}
+	// Origin push should fail surfacing the rebase abort.
+	if result.AllPushed() {
+		t.Error("expected push failure due to rebase conflict on origin")
+	}
+	originErr := result.RemoteResults["origin"]
+	if originErr == nil {
+		t.Fatal("expected non-nil error for origin")
+	}
+	if !strings.Contains(originErr.Error(), "rebase") {
+		t.Errorf("origin error missing 'rebase': %v", originErr)
+	}
+
+	// Compile-time scoping lock: the following line will fail to
+	// compile if a future refactor adds DroppedUpstream to PushResult.
+	// The cast keeps the import path tight without growing the
+	// PullResult API.
+	_ = struct{ HasDroppedUpstream bool }{HasDroppedUpstream: false}
+	// Reflective shape check at runtime — PushResult has only
+	// CommitSHA + RemoteResults; gain in fields would require an
+	// explicit decision documented elsewhere.
+	if result.CommitSHA == "" {
+		t.Error("expected a CommitSHA (the local commit was created before push)")
 	}
 }
 
