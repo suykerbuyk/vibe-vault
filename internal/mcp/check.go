@@ -12,6 +12,12 @@ import (
 	"strings"
 )
 
+// `vv mcp check` is intentionally narrower than `vv check`: it validates
+// MCP protocol-compliance concerns (handshake, tools/list shape, NDJSON
+// framing). Toolchain probing (go/git/gh/make/golangci-lint) is a `vv
+// check` concern; CheckToolchain is wired into runCheck() in cmd/vv/main.go,
+// not here.
+
 // CheckResult reports the outcome of a single protocol compliance check.
 type CheckResult struct {
 	Name   string

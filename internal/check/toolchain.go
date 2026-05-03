@@ -5,7 +5,6 @@ package check
 
 import (
 	"context"
-	"errors"
 	"os/exec"
 	"strings"
 	"time"
@@ -55,10 +54,9 @@ func checkToolchainSpec(spec toolchainSpec) Result {
 
 	path, err := exec.LookPath(spec.Bin)
 	if err != nil {
-		// errors.Is handles exec.ErrNotFound; the broader fallback covers
-		// any other LookPath failure (e.g. PATH entries unreadable). Both
-		// surface as the same operator-facing "not installed" warning.
-		_ = errors.Is(err, exec.ErrNotFound)
+		// Any LookPath failure — exec.ErrNotFound or otherwise (e.g. PATH
+		// entries unreadable) — funnels into the same operator-facing
+		// "not installed" warning.
 		return Result{
 			Name:   name,
 			Status: Warn,

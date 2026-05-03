@@ -474,6 +474,12 @@ func runCheck() {
 		}
 	}
 
+	// Toolchain probe runs on every `vv check` invocation, outside both the
+	// project-detection conditional and the cwd-detection conditional, so
+	// `tool:<bin>` results emit even from non-project directories where
+	// session.DetectProject returns "_unknown" or os.Getwd fails.
+	report.Results = append(report.Results, check.CheckToolchain()...)
+
 	// Surface gate is the last check — placed after project-scoped checks so
 	// the binary-vs-vault verdict reads as the closing line of the report.
 	report.Results = append(report.Results, check.CheckSurface(cfg))
