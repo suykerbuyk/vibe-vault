@@ -1070,14 +1070,21 @@ var CmdVaultPush = Command{
 	Name:     "push",
 	Synopsis: "commit and push vault changes",
 	Brief:    "Commit all changes and push to all remotes",
-	Usage:    "vv vault push [--message <msg>]",
+	Usage:    "vv vault push [--message <msg>] [--paths <p>]...",
 	Flags: []Flag{
 		{"--message <msg>", "Custom commit message (default: auto-generated)"},
+		{"--paths <p>", "Stage only the named vault-relative path (repeatable). When set, only the supplied paths are committed; other dirty paths remain untouched. Default (flag unset): catch-all — every dirty path is staged."},
 	},
-	Description: `Stages all vault changes, commits with a machine-stamped message,
+	Description: `Stages vault changes, commits with a machine-stamped message,
 and pushes to all configured remotes. For each remote, if push is rejected,
 fetches and rebases from that remote and retries once. Reports per-remote
-success or failure.`,
+success or failure.
+
+Without --paths, behaves as a catch-all: every dirty path under the vault is
+staged, mirroring the operator's "clean up everything" intent. Pass --paths
+one or more times to commit only specific files; remaining dirty paths are
+left in the working tree untouched. The selective form is contamination-safe
+for callers (or operators) that know which files belong to a given work unit.`,
 }
 
 // VaultSubcommands is the ordered list of vault sub-subcommands.
