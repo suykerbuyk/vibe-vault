@@ -4,6 +4,7 @@
 package vaultsync
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1008,4 +1009,292 @@ func TestAfterPushHook_DefaultIsNoOp(t *testing.T) {
 	// side effects beyond returning. A no-op is observable only by
 	// not panicking.
 	afterPushHook("any-remote-name")
+}
+
+// commitPaths returns the set of paths touched by the given commit ref
+// (HEAD by default), as reported by `git show --name-only --format=`.
+// Used by selective-staging tests to assert that exactly the requested
+// paths landed in the commit.
+func commitPaths(t *testing.T, dir, ref string) map[string]bool {
+	t.Helper()
+	out := gitx.GitRun(t, dir, "show", "--name-only", "--format=", ref)
+	set := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			set[line] = true
+		}
+	}
+	return set
+}
+
+// dirtyPathSet returns the set of paths reported by `git status
+// --porcelain` (un-`-z`, line-separated). Used by selective-staging
+// tests to assert which files remain in the working tree after a
+// commit.
+func dirtyPathSet(t *testing.T, dir string) map[string]bool {
+	t.Helper()
+	out := gitx.GitRun(t, dir, "status", "--porcelain")
+	set := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		set[line[3:]] = true
+	}
+	return set
+}
+
+// writeFiles writes the given files (relative to dir) with their
+// contents. Mkdirs intermediate directories as needed.
+func writeFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for rel, content := range files {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+}
+
+func TestCommitAndPushPaths_SelectiveStaging_ThreeOfFive(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	bare := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "origin", bare)
+	gitx.GitRun(t, dir, "push", "origin", "main")
+
+	writeFiles(t, dir, map[string]string{
+		"a.md": "alpha",
+		"b.md": "bravo",
+		"c.md": "charlie",
+		"d.md": "delta",
+		"e.md": "echo",
+	})
+
+	result, err := CommitAndPushPaths(dir, "selective stage", []string{"a.md", "c.md", "e.md"})
+	if err != nil {
+		t.Fatalf("CommitAndPushPaths: %v", err)
+	}
+	if result.CommitSHA == "" {
+		t.Fatal("expected non-empty CommitSHA")
+	}
+
+	got := commitPaths(t, dir, "HEAD")
+	want := map[string]bool{"a.md": true, "c.md": true, "e.md": true}
+	if len(got) != len(want) {
+		t.Fatalf("commit paths = %v, want %v", got, want)
+	}
+	for p := range want {
+		if !got[p] {
+			t.Errorf("commit missing %q (got %v)", p, got)
+		}
+	}
+
+	// b.md and d.md must remain dirty in the working tree.
+	dirty := dirtyPathSet(t, dir)
+	if !dirty["b.md"] {
+		t.Errorf("b.md should remain dirty; dirty=%v", dirty)
+	}
+	if !dirty["d.md"] {
+		t.Errorf("d.md should remain dirty; dirty=%v", dirty)
+	}
+	for _, staged := range []string{"a.md", "c.md", "e.md"} {
+		if dirty[staged] {
+			t.Errorf("%s should NOT remain dirty; dirty=%v", staged, dirty)
+		}
+	}
+}
+
+func TestCommitAndPushPaths_EmptyPathsRejected(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	bare := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "origin", bare)
+	gitx.GitRun(t, dir, "push", "origin", "main")
+
+	// Add a dirty file so a hypothetical bug that swept everything in
+	// would produce an observable commit.
+	writeFiles(t, dir, map[string]string{"sentinel.md": "should not be committed"})
+
+	preHEAD := strings.TrimSpace(gitx.GitRun(t, dir, "rev-parse", "HEAD"))
+
+	for _, paths := range [][]string{nil, {}} {
+		result, err := CommitAndPushPaths(dir, "empty", paths)
+		if err == nil {
+			t.Fatalf("CommitAndPushPaths(%v) returned nil error", paths)
+		}
+		if result != nil {
+			t.Errorf("CommitAndPushPaths(%v) returned non-nil result: %+v", paths, result)
+		}
+		if !strings.Contains(err.Error(), "no paths specified") {
+			t.Errorf("CommitAndPushPaths(%v) error = %q, want 'no paths specified'", paths, err)
+		}
+	}
+
+	postHEAD := strings.TrimSpace(gitx.GitRun(t, dir, "rev-parse", "HEAD"))
+	if preHEAD != postHEAD {
+		t.Errorf("HEAD moved despite empty-paths reject: pre=%s post=%s", preHEAD, postHEAD)
+	}
+}
+
+func TestCommitAndPushPaths_SinglePath(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	bare := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "origin", bare)
+	gitx.GitRun(t, dir, "push", "origin", "main")
+
+	writeFiles(t, dir, map[string]string{"foo.md": "foo content"})
+
+	result, err := CommitAndPushPaths(dir, "single path", []string{"foo.md"})
+	if err != nil {
+		t.Fatalf("CommitAndPushPaths: %v", err)
+	}
+	if result.CommitSHA == "" {
+		t.Fatal("expected non-empty CommitSHA")
+	}
+
+	got := commitPaths(t, dir, "HEAD")
+	if len(got) != 1 || !got["foo.md"] {
+		t.Errorf("commit paths = %v, want exactly {foo.md}", got)
+	}
+}
+
+func TestCommitAndPush_CatchAllParity_PreservesOriginalBehavior(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	bare := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "origin", bare)
+	gitx.GitRun(t, dir, "push", "origin", "main")
+
+	// Mix of new files in nested dirs PLUS a modification of a tracked
+	// file — exercises both the porcelain `??` (untracked) and ` M`
+	// (modified) status entries in dirtyPaths(). The README.md edit
+	// confirms that modifications without an enclosing untracked
+	// directory still flow through.
+	writeFiles(t, dir, map[string]string{
+		"README.md":            "modified seed content",
+		"top.md":               "top",
+		"sub/nested.md":        "nested",
+		"deep/a/b/c/leaf.md":   "leaf",
+		"with space/spaced.md": "spaced",
+	})
+
+	// Build a sandbox repo with the same working tree and run the
+	// classic `git add -A` + `git commit` recipe. The post-commit tree
+	// of the sandbox is the regression-locked target — if the wrapper's
+	// porcelain enumeration drifts from `git add -A`, the trees will
+	// diverge.
+	sandbox := gitx.InitTestRepo(t)
+	writeFiles(t, sandbox, map[string]string{
+		"README.md":            "modified seed content",
+		"top.md":               "top",
+		"sub/nested.md":        "nested",
+		"deep/a/b/c/leaf.md":   "leaf",
+		"with space/spaced.md": "spaced",
+	})
+	gitx.GitRun(t, sandbox, "add", "-A")
+	gitx.GitRun(t, sandbox, "commit", "-m", "sandbox baseline")
+	wantTree := strings.TrimSpace(gitx.GitRun(t, sandbox, "rev-parse", "HEAD^{tree}"))
+
+	result, err := CommitAndPush(dir, "catch-all parity")
+	if err != nil {
+		t.Fatalf("CommitAndPush: %v", err)
+	}
+	if result.CommitSHA == "" {
+		t.Fatal("expected non-empty CommitSHA")
+	}
+
+	gotTree := strings.TrimSpace(gitx.GitRun(t, dir, "rev-parse", "HEAD^{tree}"))
+	if gotTree != wantTree {
+		t.Errorf("wrapper produced different tree than git add -A baseline:\n  got:  %s\n  want: %s",
+			gotTree, wantTree)
+	}
+
+	// Working tree must be clean post-commit (catch-all semantics).
+	postDirty := dirtyPathSet(t, dir)
+	if len(postDirty) != 0 {
+		t.Errorf("working tree should be clean post catch-all commit; dirty=%v", postDirty)
+	}
+}
+
+func TestCommitAndPushPaths_ShellSpecialChars(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	bare := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "origin", bare)
+	gitx.GitRun(t, dir, "push", "origin", "main")
+
+	// Space + `$` — would be a shell-metacharacter disaster if we
+	// didn't go through exec.Command's argv-array form. The `--`
+	// separator on `git add` is what makes leading-dash paths safe;
+	// argv-array dispatch is what makes shell-metachars safe.
+	weird := "weird name $.md"
+	writeFiles(t, dir, map[string]string{weird: "weird content"})
+
+	result, err := CommitAndPushPaths(dir, "weird path", []string{weird})
+	if err != nil {
+		t.Fatalf("CommitAndPushPaths: %v", err)
+	}
+	if result.CommitSHA == "" {
+		t.Fatal("expected non-empty CommitSHA")
+	}
+
+	got := commitPaths(t, dir, "HEAD")
+	if len(got) != 1 || !got[weird] {
+		t.Errorf("commit paths = %v, want exactly {%q}", got, weird)
+	}
+}
+
+func TestCommitAndPushPaths_LargePathListChunking(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	bare := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "origin", bare)
+	gitx.GitRun(t, dir, "push", "origin", "main")
+
+	// 5000 files with ~30-byte names → ~150 KB argv if batched as one
+	// invocation; well past the macOS ~64 KB MAX_ARG_LEN ceiling. The
+	// chunking loop must split this into multiple `git add` invocations.
+	const n = 5000
+	files := make(map[string]string, n)
+	paths := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		// 30-byte path: "chunk/file-NNNNNNNN-padding.md"
+		rel := fmt.Sprintf("chunk/file-%08d-padding.md", i)
+		files[rel] = "x"
+		paths = append(paths, rel)
+	}
+	writeFiles(t, dir, files)
+
+	// Sanity: byte-budget exceeds one batch's allowance, proving the
+	// test exercises chunking rather than slipping under the limit.
+	totalBytes := 0
+	for _, p := range paths {
+		totalBytes += len(p) + 1
+	}
+	if totalBytes <= stageBatchByteBudget {
+		t.Fatalf("test setup error: total argv bytes %d <= budget %d — would not exercise chunking",
+			totalBytes, stageBatchByteBudget)
+	}
+
+	result, err := CommitAndPushPaths(dir, "large path list", paths)
+	if err != nil {
+		t.Fatalf("CommitAndPushPaths: %v", err)
+	}
+	if result.CommitSHA == "" {
+		t.Fatal("expected non-empty CommitSHA")
+	}
+
+	// Count files in the commit via `git show --stat HEAD` style; use
+	// `git diff-tree --no-commit-id --name-only -r HEAD` for an exact
+	// path-set count.
+	out := gitx.GitRun(t, dir, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+	committed := 0
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if strings.TrimSpace(line) != "" {
+			committed++
+		}
+	}
+	if committed != n {
+		t.Errorf("commit contains %d files, want %d", committed, n)
+	}
 }
