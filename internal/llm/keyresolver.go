@@ -13,8 +13,8 @@ import (
 // ResolveAPIKey returns the API key for the named provider with config-first /
 // env-fallback / actionable-error precedence.
 //
-// Provider names are the lowercase short forms used by `[wrap.tiers]` and
-// `[enrichment].provider`: "anthropic", "openai", "google". Tier order:
+// Provider names are the lowercase short forms used by `[enrichment].provider`:
+// "anthropic", "openai", "google". Tier order:
 //
 //  1. providers.<P>.APIKey (from config.toml) wins if non-empty.
 //  2. os.Getenv(envVarFor(provider)) — fallback for operators with env-var
@@ -25,9 +25,7 @@ import (
 //
 // Unknown provider names return an error naming the supported set.
 //
-// This resolver is shared between `NewProvider` (hook + synthesis) and the
-// MCP wrap-dispatch handler — they route by different axes
-// (enrichment.provider vs tier-string-prefix) but share resolution semantics.
+// Used by `NewProvider` (hook + synthesis) for [enrichment].provider lookups.
 func ResolveAPIKey(provider string, providers config.ProvidersConfig) (string, error) {
 	envVar := envVarFor(provider)
 	if envVar == "" {

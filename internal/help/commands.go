@@ -524,11 +524,10 @@ var CmdConfig = Command{
 Subcommands:
   set-key   Store a per-provider API key (anthropic, openai, google)
 
-The wrap render path (vv_render_wrap_text) and hook enrichment /
-synthesis both resolve provider keys via a layered lookup: the value
-in config.toml wins, falling back to the provider's environment
-variable (ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY) for
-operators who already have shell-env-based setup.`,
+Hook enrichment and session synthesis resolve provider keys via a
+layered lookup: the value in config.toml wins, falling back to the
+provider's environment variable (ANTHROPIC_API_KEY / OPENAI_API_KEY /
+GOOGLE_API_KEY) for operators who already have shell-env-based setup.`,
 	SeeAlso: []string{"vv(1)", "vv-config-set-key(1)"},
 }
 
