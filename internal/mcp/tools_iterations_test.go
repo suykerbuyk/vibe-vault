@@ -466,6 +466,478 @@ func TestParseIterationsStripsTrailerWithMultilineBody(t *testing.T) {
 	}
 }
 
+// --- Phase A: parser strip + struct delta tests (6) ---
+
+// TestParseIterationsStripsFrontmatter is the v2-C1 regression lock —
+// front-matter must NOT leak into Iteration.Narrative or any narrative-
+// derived consumer (resume.md project-history-tail in particular).
+func TestParseIterationsStripsFrontmatter(t *testing.T) {
+	content := `### Iteration 50 — Front-matter iter (2026-04-30)
+
+---
+shape: planning
+summary: Filed plan v3 with 3 critical fixes.
+---
+
+The body opens here. No front-matter leakage allowed.
+
+Second paragraph.
+`
+	got := parseIterations(content)
+	if len(got) != 1 {
+		t.Fatalf("parseIterations returned %d entries, want 1", len(got))
+	}
+	for _, leak := range []string{"---", "shape:", "summary:", "Filed plan v3"} {
+		if strings.Contains(got[0].Narrative, leak) {
+			t.Errorf("Narrative leaked %q: %q", leak, got[0].Narrative)
+		}
+	}
+	if !strings.Contains(got[0].Narrative, "The body opens here.") {
+		t.Errorf("Narrative missing body: %q", got[0].Narrative)
+	}
+	if !strings.Contains(got[0].Narrative, "Second paragraph.") {
+		t.Errorf("Narrative missing second paragraph: %q", got[0].Narrative)
+	}
+}
+
+// TestParseIterationsPopulatesFrontmatter pins that the parser exposes
+// the structured fields via Iteration.Frontmatter.
+func TestParseIterationsPopulatesFrontmatter(t *testing.T) {
+	content := `### Iteration 51 — Iter with FM (2026-04-30)
+
+---
+shape: fresh-feature
+summary: Two-tier vault staging shipped.
+---
+
+Body content here.
+`
+	got := parseIterations(content)
+	if len(got) != 1 {
+		t.Fatalf("parseIterations returned %d entries, want 1", len(got))
+	}
+	if got[0].Frontmatter == nil {
+		t.Fatal("Frontmatter should be non-nil when block is present")
+	}
+	if got[0].Frontmatter["shape"] != "fresh-feature" {
+		t.Errorf("Frontmatter[shape] = %q, want %q", got[0].Frontmatter["shape"], "fresh-feature")
+	}
+	if got[0].Frontmatter["summary"] != "Two-tier vault staging shipped." {
+		t.Errorf("Frontmatter[summary] = %q, want %q",
+			got[0].Frontmatter["summary"], "Two-tier vault staging shipped.")
+	}
+}
+
+// TestParseIterationsNoFrontmatterBackCompat is the regression lock for
+// the 200+ existing iters that have no front-matter — they must round-
+// trip with Frontmatter == nil and the narrative untouched.
+func TestParseIterationsNoFrontmatterBackCompat(t *testing.T) {
+	content := `### Iteration 52 — Legacy iter (2026-04-30)
+
+Plain narrative without any front-matter block.
+
+Second paragraph survives.
+`
+	got := parseIterations(content)
+	if len(got) != 1 {
+		t.Fatalf("parseIterations returned %d entries, want 1", len(got))
+	}
+	if got[0].Frontmatter != nil {
+		t.Errorf("Frontmatter should be nil for legacy iter, got %v", got[0].Frontmatter)
+	}
+	want := "Plain narrative without any front-matter block.\n\nSecond paragraph survives."
+	if got[0].Narrative != want {
+		t.Errorf("Narrative = %q, want %q", got[0].Narrative, want)
+	}
+}
+
+// TestParseIterationsMalformedFrontmatter exercises the "no closing ---"
+// fallback: the parser must NOT error, the front-matter remains in the
+// narrative, and Frontmatter is nil. (A warning is logged; we don't
+// assert against the log output here — it would couple to global state.)
+func TestParseIterationsMalformedFrontmatter(t *testing.T) {
+	content := `### Iteration 53 — Bad FM (2026-04-30)
+
+---
+shape: planning
+summary: Missing the closing fence below.
+
+Body that becomes part of the unterminated block.
+`
+	got := parseIterations(content)
+	if len(got) != 1 {
+		t.Fatalf("parseIterations returned %d entries, want 1", len(got))
+	}
+	if got[0].Frontmatter != nil {
+		t.Errorf("Frontmatter should be nil on malformed block, got %v", got[0].Frontmatter)
+	}
+	// The unclosed YAML stays inside the narrative (operators can spot
+	// the drift visually).
+	if !strings.Contains(got[0].Narrative, "---") {
+		t.Errorf("malformed front-matter should remain in narrative; got %q", got[0].Narrative)
+	}
+	if !strings.Contains(got[0].Narrative, "shape: planning") {
+		t.Errorf("unclosed YAML keys should remain in narrative; got %q", got[0].Narrative)
+	}
+}
+
+// TestParseIterationsForwardCompatExtraKeys pins forward-compat: future
+// schema additions land as extra keys in Frontmatter and are preserved
+// (even if downstream ignores them).
+func TestParseIterationsForwardCompatExtraKeys(t *testing.T) {
+	content := `### Iteration 54 — Future iter (2026-04-30)
+
+---
+shape: planning
+summary: Test extra-keys preservation.
+future_field: some-value
+another_extra: 42
+---
+
+Body.
+`
+	got := parseIterations(content)
+	if len(got) != 1 {
+		t.Fatalf("parseIterations returned %d entries, want 1", len(got))
+	}
+	if got[0].Frontmatter["future_field"] != "some-value" {
+		t.Errorf("Frontmatter[future_field] = %q, want %q",
+			got[0].Frontmatter["future_field"], "some-value")
+	}
+	if got[0].Frontmatter["another_extra"] != "42" {
+		t.Errorf("Frontmatter[another_extra] = %q, want %q",
+			got[0].Frontmatter["another_extra"], "42")
+	}
+}
+
+// TestIterationFrontmatterNotSerialized is the v3-M5 json:"-" gate. The
+// Frontmatter map must be invisible in serialized table or full responses
+// regardless of population state.
+func TestIterationFrontmatterNotSerialized(t *testing.T) {
+	const fixtureFM = `# proj — Project History
+
+### Iteration 1 — With FM (2026-04-30)
+
+---
+shape: planning
+summary: A summary.
+---
+
+Body.
+`
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": fixtureFM,
+	})
+	tool := NewGetIterationsTool(cfg)
+	for _, format := range []string{"table", "full"} {
+		result, err := tool.Handler(json.RawMessage(`{"project":"testproj","format":"` + format + `"}`))
+		if err != nil {
+			t.Fatalf("handler error (format=%s): %v", format, err)
+		}
+		for _, leak := range []string{`"frontmatter"`, `"Frontmatter"`} {
+			if strings.Contains(result, leak) {
+				t.Errorf("format=%s leaked %q in JSON: %s", format, leak, result)
+			}
+		}
+	}
+}
+
+// --- Phase A: format=summary handler tests (10) ---
+
+type iterationSummaryResponse struct {
+	Project    string             `json:"project"`
+	Total      int                `json:"total"`
+	Returned   int                `json:"returned"`
+	Iterations []IterationSummary `json:"iterations"`
+}
+
+func parseSummaryResponse(t *testing.T, raw string) iterationSummaryResponse {
+	t.Helper()
+	var resp iterationSummaryResponse
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v\nresult: %s", err, raw)
+	}
+	return resp
+}
+
+// Test 7: format=summary returns documented schema with shape/summary
+// from front-matter and both *_present discriminators true.
+func TestGetIterationsSummaryFromFrontmatter(t *testing.T) {
+	content := `# proj
+
+### Iteration 1 — Has FM (2026-04-30)
+
+---
+shape: fresh-feature
+summary: Summary from front-matter.
+---
+
+Body that should NOT appear in summary.
+`
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": content,
+	})
+	tool := NewGetIterationsTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj","format":"summary"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	resp := parseSummaryResponse(t, result)
+	if len(resp.Iterations) != 1 {
+		t.Fatalf("want 1 iter, got %d", len(resp.Iterations))
+	}
+	got := resp.Iterations[0]
+	if got.Shape != "fresh-feature" || !got.ShapePresent {
+		t.Errorf("Shape = %q, ShapePresent = %v; want fresh-feature, true", got.Shape, got.ShapePresent)
+	}
+	if got.Summary != "Summary from front-matter." || !got.SummaryPresent {
+		t.Errorf("Summary = %q, SummaryPresent = %v; want 'Summary from front-matter.', true",
+			got.Summary, got.SummaryPresent)
+	}
+	if got.Title != "Has FM" {
+		t.Errorf("Title = %q, want 'Has FM'", got.Title)
+	}
+}
+
+// Test 8: format=summary first-paragraph fallback when no front-matter.
+func TestGetIterationsSummaryFallback(t *testing.T) {
+	content := `# proj
+
+### Iteration 1 — No FM (2026-04-30)
+
+This is the first paragraph that becomes the fallback summary.
+
+Second paragraph is ignored by the fallback.
+`
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": content,
+	})
+	tool := NewGetIterationsTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj","format":"summary"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	resp := parseSummaryResponse(t, result)
+	if len(resp.Iterations) != 1 {
+		t.Fatalf("want 1 iter, got %d", len(resp.Iterations))
+	}
+	got := resp.Iterations[0]
+	if got.SummaryPresent {
+		t.Error("SummaryPresent should be false when summary came from fallback")
+	}
+	if got.ShapePresent {
+		t.Error("ShapePresent should be false when no front-matter")
+	}
+	if got.Shape != "" {
+		t.Errorf("Shape should be empty without front-matter, got %q", got.Shape)
+	}
+	if got.Summary != "This is the first paragraph that becomes the fallback summary." {
+		t.Errorf("Summary = %q, want fallback first paragraph", got.Summary)
+	}
+}
+
+// Test 9: format=summary truncates >200-char first paragraph at word
+// boundary with trailing ellipsis (v3-C5: word-boundary, not sentence).
+func TestGetIterationsSummaryTruncatesAtWordBoundary(t *testing.T) {
+	long := strings.Repeat("alpha bravo charlie ", 20) // ~400 chars
+	content := "# proj\n\n### Iteration 1 — Long (2026-04-30)\n\n" + long + "\n"
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": content,
+	})
+	tool := NewGetIterationsTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj","format":"summary"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	resp := parseSummaryResponse(t, result)
+	if len(resp.Iterations) != 1 {
+		t.Fatalf("want 1 iter")
+	}
+	got := resp.Iterations[0].Summary
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("Summary should end with ellipsis when truncated; got %q", got)
+	}
+	// 200 chars max + the ellipsis (1 rune). The truncation cut at last
+	// space before 200, so length-of-runes ≤ 200 + 1.
+	if runes := []rune(got); len(runes) > 201 {
+		t.Errorf("Summary too long: %d runes, want ≤201", len(runes))
+	}
+	// Word-boundary: the cut must not be mid-word; the rune before the
+	// ellipsis is a non-space.
+	if strings.Contains(got, " …") {
+		t.Errorf("Summary should trim trailing space before ellipsis; got %q", got)
+	}
+}
+
+// Test 10: format=summary strips leading **Bold:** prefix.
+func TestGetIterationsSummaryStripsBoldPrefix(t *testing.T) {
+	content := `# proj
+
+### Iteration 1 — Bold prefix (2026-04-30)
+
+**Shape:** **Inner:** the rest of the summary survives.
+`
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": content,
+	})
+	tool := NewGetIterationsTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj","format":"summary"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	resp := parseSummaryResponse(t, result)
+	got := resp.Iterations[0].Summary
+	// Only the FIRST **Bold:** prefix is stripped; the second remains
+	// (acceptable per D8).
+	if strings.HasPrefix(got, "**Shape:**") {
+		t.Errorf("first **Bold:** prefix should be stripped; got %q", got)
+	}
+	if !strings.Contains(got, "**Inner:**") {
+		t.Errorf("multi-prefix should retain inner **Bold:**; got %q", got)
+	}
+	if !strings.Contains(got, "the rest of the summary survives") {
+		t.Errorf("summary content missing; got %q", got)
+	}
+}
+
+// Test 11: format=summary handles markdown-list first paragraph.
+func TestGetIterationsSummaryHandlesMarkdownList(t *testing.T) {
+	content := `# proj
+
+### Iteration 1 — List start (2026-04-30)
+
+- item one in the list
+- item two in the list
+- item three in the list
+
+Real prose paragraph.
+`
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": content,
+	})
+	tool := NewGetIterationsTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj","format":"summary"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	resp := parseSummaryResponse(t, result)
+	got := resp.Iterations[0].Summary
+	// First "paragraph" is the list, joined on space; no special-casing.
+	if !strings.Contains(got, "item one in the list") {
+		t.Errorf("list-as-paragraph should be in summary; got %q", got)
+	}
+	if got == "" {
+		t.Errorf("summary should not be empty for list-shaped first paragraph")
+	}
+}
+
+// Test 12: format=summary handles fenced-code first paragraph.
+func TestGetIterationsSummaryHandlesCodeFence(t *testing.T) {
+	content := "# proj\n\n### Iteration 1 — Fence (2026-04-30)\n\n```bash\ngo test ./...\nmake build\n```\n\nReal prose.\n"
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": content,
+	})
+	tool := NewGetIterationsTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj","format":"summary"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	resp := parseSummaryResponse(t, result)
+	got := resp.Iterations[0].Summary
+	if got == "" {
+		t.Errorf("summary should not be empty for code-fence first paragraph")
+	}
+	// First "paragraph" is the fenced block; joined on space.
+	if !strings.Contains(got, "```bash") {
+		t.Errorf("code fence content should be in summary; got %q", got)
+	}
+}
+
+// Test 13: format=summary handles empty body.
+func TestGetIterationsSummaryEmptyBody(t *testing.T) {
+	content := "# proj\n\n### Iteration 1 — Empty (2026-04-30)\n\n"
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": content,
+	})
+	tool := NewGetIterationsTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj","format":"summary"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	resp := parseSummaryResponse(t, result)
+	got := resp.Iterations[0]
+	if got.Summary != "" {
+		t.Errorf("empty body should give empty summary, got %q", got.Summary)
+	}
+	if got.SummaryPresent {
+		t.Error("SummaryPresent must be false on empty body")
+	}
+}
+
+// Test 14: format=summary handles only-trailer (planning iter shape).
+func TestGetIterationsSummaryOnlyTrailer(t *testing.T) {
+	content := "# proj\n\n### Iteration 1 — Trailer only (2026-04-30)\n\n<!-- recorded: host=H -->\n"
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": content,
+	})
+	tool := NewGetIterationsTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj","format":"summary"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	resp := parseSummaryResponse(t, result)
+	got := resp.Iterations[0]
+	// Trailer is stripped by parseIterations, so the body is empty;
+	// summary stays empty.
+	if got.Summary != "" {
+		t.Errorf("trailer-only iter should have empty summary, got %q", got.Summary)
+	}
+	if got.SummaryPresent {
+		t.Error("SummaryPresent must be false on trailer-only body")
+	}
+}
+
+// Test 15: format=summary respects since_iteration filter.
+func TestGetIterationsSummarySinceFilter(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": fixtureIterations,
+	})
+	tool := NewGetIterationsTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj","format":"summary","since_iteration":3}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	resp := parseSummaryResponse(t, result)
+	if resp.Returned != 3 {
+		t.Errorf("returned = %d, want 3 (iters 3,4,5)", resp.Returned)
+	}
+	for _, it := range resp.Iterations {
+		if it.Number < 3 {
+			t.Errorf("iter %d should have been filtered out", it.Number)
+		}
+	}
+}
+
+// Test 16: format=summary respects limit cap.
+func TestGetIterationsSummaryLimit(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": fixtureIterations,
+	})
+	tool := NewGetIterationsTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{"project":"testproj","format":"summary","limit":2}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	resp := parseSummaryResponse(t, result)
+	if resp.Returned != 2 {
+		t.Errorf("returned = %d, want 2 with limit=2", resp.Returned)
+	}
+	if resp.Iterations[0].Number != 5 || resp.Iterations[1].Number != 4 {
+		t.Errorf("limit=2 should return iters 5,4 newest-first; got %d,%d",
+			resp.Iterations[0].Number, resp.Iterations[1].Number)
+	}
+}
+
 func TestGetIterationsEmptyVault(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
 		"Projects/testproj/agentctx/iterations.md": "# No iterations yet\n",

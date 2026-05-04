@@ -486,6 +486,135 @@ func TestRenderUserPrompt_GoldenSnapshot(t *testing.T) {
 	}
 }
 
+// --- Phase A: renderer + caller-contract tests (21–24) ---
+
+// Test 21: wrapRenderResponse round-trips Summary across narrative kinds;
+// commit_msg kind zeroes Summary even when the LLM leaks it.
+func TestRenderWrapText_SummaryRoundTripAndCommitZero(t *testing.T) {
+	cfg := configWithTiers(t)
+
+	t.Run("iter_narrative_round_trip", func(t *testing.T) {
+		scripted := &scriptedProvider{
+			response: `{"narrative_title":"T","narrative_body":"NB","summary":"LLM-supplied summary."}`,
+		}
+		withWrapRenderProviderFactory(t, scripted)
+		tool := NewRenderWrapTextTool(cfg)
+		out, err := tool.Handler(sampleRenderArgs(t, WrapRenderKindIterNarrative))
+		if err != nil {
+			t.Fatalf("handler: %v", err)
+		}
+		var resp wrapRenderResponse
+		if jerr := json.Unmarshal([]byte(out), &resp); jerr != nil {
+			t.Fatalf("unmarshal: %v", jerr)
+		}
+		if resp.Summary != "LLM-supplied summary." {
+			t.Errorf("Summary = %q, want round-trip", resp.Summary)
+		}
+	})
+
+	t.Run("joint_round_trip", func(t *testing.T) {
+		scripted := &scriptedProvider{
+			response: `{"narrative_title":"T","narrative_body":"NB","summary":"Joint summary.","commit_subject":"feat: x","commit_prose_body":"CB"}`,
+		}
+		withWrapRenderProviderFactory(t, scripted)
+		tool := NewRenderWrapTextTool(cfg)
+		out, err := tool.Handler(sampleRenderArgs(t, WrapRenderKindIterNarrativeAndCommitMsg))
+		if err != nil {
+			t.Fatalf("handler: %v", err)
+		}
+		var resp wrapRenderResponse
+		_ = json.Unmarshal([]byte(out), &resp)
+		if resp.Summary != "Joint summary." {
+			t.Errorf("joint Summary = %q, want round-trip", resp.Summary)
+		}
+	})
+
+	t.Run("commit_msg_zeroes_leaked_summary", func(t *testing.T) {
+		// LLM leaks summary even though commit_msg shouldn't carry it.
+		scripted := &scriptedProvider{
+			response: `{"commit_subject":"feat: x","commit_prose_body":"CB","summary":"LEAKED — should be zeroed."}`,
+		}
+		withWrapRenderProviderFactory(t, scripted)
+		tool := NewRenderWrapTextTool(cfg)
+		out, err := tool.Handler(sampleRenderArgs(t, WrapRenderKindCommitMsg))
+		if err != nil {
+			t.Fatalf("handler: %v", err)
+		}
+		var resp wrapRenderResponse
+		_ = json.Unmarshal([]byte(out), &resp)
+		if resp.Summary != "" {
+			t.Errorf("commit_msg kind must zero leaked summary; got %q", resp.Summary)
+		}
+		// Make sure JSON didn't carry the summary key either (omitempty).
+		if strings.Contains(out, `"summary"`) {
+			t.Errorf("commit_msg JSON must omit summary key; got: %s", out)
+		}
+	})
+}
+
+// Test 22: zeroNonKindFields rejects Summary >200 chars (no auto-truncate).
+func TestRenderWrapText_RejectsSummaryOverLength(t *testing.T) {
+	cfg := configWithTiers(t)
+	long := strings.Repeat("x", 201)
+	scripted := &scriptedProvider{
+		response: `{"narrative_title":"T","narrative_body":"NB","summary":"` + long + `"}`,
+	}
+	withWrapRenderProviderFactory(t, scripted)
+	tool := NewRenderWrapTextTool(cfg)
+	_, err := tool.Handler(sampleRenderArgs(t, WrapRenderKindIterNarrative))
+	if err == nil {
+		t.Fatal("expected error for >200-char summary")
+	}
+	if !strings.Contains(err.Error(), "summary") || !strings.Contains(err.Error(), "200") {
+		t.Errorf("error should cite summary + 200; got: %v", err)
+	}
+}
+
+// Test 23: zeroNonKindFields rejects Summary containing newline.
+func TestRenderWrapText_RejectsSummaryNewline(t *testing.T) {
+	cfg := configWithTiers(t)
+	scripted := &scriptedProvider{
+		response: `{"narrative_title":"T","narrative_body":"NB","summary":"line one\nline two"}`,
+	}
+	withWrapRenderProviderFactory(t, scripted)
+	tool := NewRenderWrapTextTool(cfg)
+	_, err := tool.Handler(sampleRenderArgs(t, WrapRenderKindIterNarrative))
+	if err == nil {
+		t.Fatal("expected error for multi-line summary")
+	}
+	if !strings.Contains(err.Error(), "multi-line") && !strings.Contains(err.Error(), "single-line") {
+		t.Errorf("error should cite single-line; got: %v", err)
+	}
+}
+
+// Test 24: Path A H5 fallback. When LLM omits summary for narrative kind
+// and NarrativeBody is non-empty, Summary is auto-populated from the
+// first-paragraph extraction. No error.
+func TestRenderWrapText_PathAFallbackFromBody(t *testing.T) {
+	cfg := configWithTiers(t)
+	scripted := &scriptedProvider{
+		// No summary key.
+		response: `{"narrative_title":"T","narrative_body":"First paragraph of the narrative body.\n\nSecond paragraph."}`,
+	}
+	withWrapRenderProviderFactory(t, scripted)
+	tool := NewRenderWrapTextTool(cfg)
+	out, err := tool.Handler(sampleRenderArgs(t, WrapRenderKindIterNarrative))
+	if err != nil {
+		t.Fatalf("Path A fallback should not error: %v", err)
+	}
+	var resp wrapRenderResponse
+	_ = json.Unmarshal([]byte(out), &resp)
+	if resp.Summary == "" {
+		t.Error("Summary should be auto-filled from NarrativeBody")
+	}
+	if !strings.Contains(resp.Summary, "First paragraph") {
+		t.Errorf("fallback summary should come from first paragraph; got %q", resp.Summary)
+	}
+	if strings.Contains(resp.Summary, "Second paragraph") {
+		t.Errorf("fallback should stop at paragraph boundary; got %q", resp.Summary)
+	}
+}
+
 // TestRenderWrapText_DefaultProviderFactoryRejectsEmpty asserts the
 // production factory returns an actionable error when [wrap.tiers] is
 // empty. This locks the operator-guidance contract.

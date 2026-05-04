@@ -101,9 +101,18 @@ type wrapRenderRequest struct {
 // command. Fields are populated based on the kind discriminator: the
 // narrative_* pair for iter_narrative, the commit_* pair for
 // commit_msg, and all four for iter_narrative_and_commit_msg.
+//
+// Summary is the optional 1-sentence digest (≤200 chars, no newlines)
+// emitted for narrative kinds so the slash command can pass it back to
+// vv_append_iteration as front-matter (D4). For commit_msg kind the
+// field is always zeroed in zeroNonKindFields. For narrative kinds, the
+// renderer auto-fills it from the first paragraph of NarrativeBody when
+// the LLM omits it (Path A, D10) — keeping omitempty so a degenerate
+// "no body" case still serialises cleanly.
 type wrapRenderResponse struct {
 	NarrativeTitle  string `json:"narrative_title,omitempty"`
 	NarrativeBody   string `json:"narrative_body,omitempty"`
+	Summary         string `json:"summary,omitempty"`
 	CommitSubject   string `json:"commit_subject,omitempty"`
 	CommitProseBody string `json:"commit_prose_body,omitempty"`
 }
@@ -336,10 +345,41 @@ func NewRenderWrapTextTool(cfg config.Config) Tool {
 	}
 }
 
+// summaryMaxChars is the renderer's hard cap on the optional Summary
+// field. Mirrored by vv_append_iteration's surface validation so the
+// front-matter writer cannot accept anything the renderer would have
+// rejected.
+const summaryMaxChars = 200
+
+// validateRenderSummary enforces the single-line, ≤200-char contract on
+// a non-empty Summary value. Returns an error matching the Path A
+// rejection rules (D4 / D10 / H5).
+func validateRenderSummary(summary string) error {
+	if summary == "" {
+		return nil
+	}
+	if strings.Contains(summary, "\n") {
+		return fmt.Errorf("provider returned multi-line summary (must be single-line)")
+	}
+	if len(summary) > summaryMaxChars {
+		return fmt.Errorf("provider returned summary >%d characters (got %d)", summaryMaxChars, len(summary))
+	}
+	return nil
+}
+
 // zeroNonKindFields enforces the kind→fields contract: iter_narrative
 // kind must NOT carry commit_subject/commit_prose_body (the LLM may
 // leak them); commit_msg kind must NOT carry narrative_*. The joint
 // kind requires all four fields and errors when any are empty.
+//
+// For narrative kinds (iter_narrative, iter_narrative_and_commit_msg)
+// the optional Summary field is validated and, when empty, auto-filled
+// via truncateForSummary(NarrativeBody, 200) — Path A per H5/D10. The
+// renderer never opus-retries on a missing summary; the silent fallback
+// is the contract.
+//
+// For commit_msg kind the Summary field is always zeroed even if the
+// LLM leaks it, mirroring the narrative_* zeroing.
 func zeroNonKindFields(kind string, resp *wrapRenderResponse) error {
 	switch kind {
 	case WrapRenderKindIterNarrative:
@@ -348,9 +388,16 @@ func zeroNonKindFields(kind string, resp *wrapRenderResponse) error {
 		if resp.NarrativeTitle == "" || resp.NarrativeBody == "" {
 			return fmt.Errorf("provider returned empty narrative_title or narrative_body for iter_narrative kind")
 		}
+		if err := validateRenderSummary(resp.Summary); err != nil {
+			return err
+		}
+		if resp.Summary == "" {
+			resp.Summary = truncateForSummary(resp.NarrativeBody, summaryMaxChars)
+		}
 	case WrapRenderKindCommitMsg:
 		resp.NarrativeTitle = ""
 		resp.NarrativeBody = ""
+		resp.Summary = ""
 		if resp.CommitSubject == "" || resp.CommitProseBody == "" {
 			return fmt.Errorf("provider returned empty commit_subject or commit_prose_body for commit_msg kind")
 		}
@@ -366,6 +413,12 @@ func zeroNonKindFields(kind string, resp *wrapRenderResponse) error {
 		}
 		if strings.Contains(resp.CommitSubject, "\n") {
 			return fmt.Errorf("provider returned multi-line commit_subject (must be single-line)")
+		}
+		if err := validateRenderSummary(resp.Summary); err != nil {
+			return err
+		}
+		if resp.Summary == "" {
+			resp.Summary = truncateForSummary(resp.NarrativeBody, summaryMaxChars)
 		}
 	}
 	return nil

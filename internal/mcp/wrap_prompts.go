@@ -54,10 +54,11 @@ Output a JSON object matching this schema:
 
   {
     "narrative_title": "<short title, ≤80 chars, no leading 'Iteration N —' prefix>",
-    "narrative_body":  "<2–6 paragraph narrative body in markdown, no heading line>"
+    "narrative_body":  "<2–6 paragraph narrative body in markdown, no heading line>",
+    "summary":         "<one-sentence summary, ≤200 chars, no newlines>"
   }
 
-The title must be a noun phrase that captures the work unit's shape (e.g., "Layered API key resolution lands end-to-end" or "Direction-C wrap-pipeline-collapse plan filed v1 → v3"). The body must open with a one-sentence summary of what shipped or was decided, then expand into mechanical detail (commits, files, decisions, tests). Close with a one-sentence forward pointer if open_threads or carried-forward items relate to the work; omit the forward pointer when no thread linkage exists.`
+The title must be a noun phrase that captures the work unit's shape (e.g., "Layered API key resolution lands end-to-end" or "Direction-C wrap-pipeline-collapse plan filed v1 → v3"). The body must open with a one-sentence summary of what shipped or was decided, then expand into mechanical detail (commits, files, decisions, tests). Close with a one-sentence forward pointer if open_threads or carried-forward items relate to the work; omit the forward pointer when no thread linkage exists. The summary field is a single sentence (≤200 chars, no newlines) that captures the headline deliverable; it feeds the structured front-matter index used by vv_get_iterations(format=summary).`
 
 // wrapRenderUserPromptCommitMsg is the user-prompt template for
 // kind="commit_msg" — commit-message-only renderer.
@@ -111,6 +112,7 @@ Output a JSON object matching this schema:
   {
     "narrative_title":   "<as in iter_narrative kind>",
     "narrative_body":    "<as in iter_narrative kind>",
+    "summary":           "<one-sentence summary, ≤200 chars, no newlines>",
     "commit_subject":    "<as in commit_msg kind>",
     "commit_prose_body": "<as in commit_msg kind>"
   }
