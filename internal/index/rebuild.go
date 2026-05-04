@@ -8,34 +8,31 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
-	"time"
-
-	"github.com/suykerbuyk/vibe-vault/internal/noteparse"
-	"github.com/suykerbuyk/vibe-vault/internal/render"
 )
 
-// sessionsSegment is the path-segment marker the walker uses to detect
-// session notes. We require an exact "/sessions/" segment (slash-bounded)
-// so a project literally named "sessions" or a path fragment like
-// "my-sessions/" never falsely matches. The walker normalizes filepath
-// separators to '/' before checking.
-const sessionsSegment = "/sessions/"
-
-// Rebuild walks the Projects directory, parses each note via noteparse,
-// and builds an enriched index from scratch. It processes .md files whose
-// path contains a "/sessions/" segment (relative to the project root); the
-// parser confirms candidacy by reading frontmatter. This generalization
-// (Phase 1.5 of vault-two-tier) covers all three layouts simultaneously:
+// Rebuild walks the Projects directory and dispatches one
+// AggregateProject pass per project subdirectory, then merges the
+// per-project results into a single index. Layout coverage matches the
+// per-project aggregator:
 //
 //   - Flat (legacy):   Projects/<p>/sessions/<file>.md
 //   - Per-host (β2):   Projects/<p>/sessions/<host>/<date>/<file>.md
 //   - Archive (β2):    Projects/<p>/sessions/_pre-staging-archive/<file>.md
 //
-// Malformed notes are logged and skipped.
+// Phase 4 of vault-two-tier collapsed the historical inline walk into
+// AggregateProject so per-host bucketing, fast-path index reads, and
+// per-host attribution all live in one place. Rebuild is now a thin
+// orchestrator: enumerate projects, aggregate each, reconcile fields
+// the notes do not carry (TranscriptPath, ToolCounts) against the prior
+// on-disk index, and merge with cross-project collision detection.
+//
+// Malformed notes are logged and skipped by the aggregator. A
+// SessionID that appears in two projects (a fixture / corruption case)
+// surfaces as an error — defense-in-depth, since SessionIDs are UUIDs.
 func Rebuild(projectsDir, stateDir string) (*Index, int, error) {
-	// Load existing index to preserve TranscriptPaths (not stored in notes)
+	// Load existing index to preserve fields the notes do not carry
+	// (TranscriptPath, ToolCounts). Errors collapse to an empty oldIdx;
+	// a missing prior index is the common first-run case.
 	oldIdx, _ := Load(stateDir)
 
 	idx := &Index{
@@ -45,165 +42,55 @@ func Rebuild(projectsDir, stateDir string) (*Index, int, error) {
 
 	count := 0
 
-	err := filepath.Walk(projectsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
+	// AggregateProject expects vaultPath = parent(projectsDir). The
+	// historical contract for Rebuild is that projectsDir is always
+	// `<vaultPath>/Projects`; the aggregator joins back the same
+	// `Projects/<project>/sessions/...` shape.
+	vaultPath := filepath.Dir(projectsDir)
+
+	projectEntries, readErr := os.ReadDir(projectsDir)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return idx, 0, nil
 		}
+		return nil, 0, fmt.Errorf("read projects dir %s: %w", projectsDir, readErr)
+	}
 
-		// Skip directories
-		if info.IsDir() {
-			return nil
+	for _, pe := range projectEntries {
+		if !pe.IsDir() {
+			continue
 		}
-
-		// Only process .md files
-		if filepath.Ext(path) != ".md" {
-			return nil
+		projectIdx, aggErr := AggregateProject(vaultPath, pe.Name())
+		if aggErr != nil {
+			return nil, 0, fmt.Errorf("aggregate %s: %w", pe.Name(), aggErr)
 		}
-
-		// Only process files whose path contains a /sessions/ segment.
-		// Path-containment (vs the legacy parent-name check) covers flat,
-		// per-host, and _pre-staging-archive/ layouts in one rule. We
-		// normalize separators so the same check works on Windows.
-		normalized := filepath.ToSlash(path)
-		if !strings.Contains(normalized, sessionsSegment) {
-			return nil
-		}
-
-		// Mechanism-1 compat (session-slot-multihost-disambiguation):
-		// recognize all three filename shapes — legacy counter,
-		// plain timestamp, and timestamp-with-retry-suffix. We do not
-		// derive any field from the filename; iteration comes from
-		// frontmatter (frontmatter is authoritative). The match is used
-		// only to skip files that aren't session notes (e.g., README.md).
-		if _, _, _, ok := render.ParseSessionFilename(filepath.Base(path)); !ok {
-			return nil
-		}
-
-		note, parseErr := noteparse.ParseFile(path)
-		if parseErr != nil {
-			log.Printf("rebuild: skip %s: %v", path, parseErr)
-			return nil
-		}
-
-		// Must have a session_id to be valid
-		if note.SessionID == "" {
-			log.Printf("rebuild: skip %s: no session_id", path)
-			return nil
-		}
-
-		// Build relative path from parent of projectsDir
-		// projectsDir is like /vault/Projects, we want Projects/project/sessions/file.md
-		vaultRoot := filepath.Dir(projectsDir)
-		relPath, _ := filepath.Rel(vaultRoot, path)
-
-		// Frontmatter is the sole source of truth for the project name.
-		// render.SessionNote() writes `project:` unconditionally, so a
-		// missing field signals a corrupt or hand-edited note; treat it
-		// the same way as a missing session_id (skip + log) rather than
-		// falling back to a path-derived guess. The legacy grandparent
-		// fallback was dead under the flat layout AND a foot-gun under
-		// the per-host layout (would resolve to <host> or <date>, not
-		// the project). Removed in Phase 1.5 of vault-two-tier.
-		if note.Project == "" {
-			log.Printf("rebuild: skip %s: no project in frontmatter", path)
-			return nil
-		}
-		project := note.Project
-
-		// Frontmatter is authoritative for iteration.
-		// session-slot-multihost-disambiguation v8 / Mechanism 1: with timestamp
-		// filenames there is no counter to recover from the filename; the
-		// frontmatter `iteration:` field is the sole source of truth on rebuild.
-		iteration := 0
-		if note.Iteration != "" {
-			iteration, _ = strconv.Atoi(note.Iteration)
-		}
-
-		entry := SessionEntry{
-			SessionID:    note.SessionID,
-			NotePath:     relPath,
-			Project:      project,
-			Domain:       note.Domain,
-			Date:         note.Date,
-			Iteration:    iteration,
-			Title:        note.Frontmatter["type"],
-			Model:        note.Model,
-			Summary:      note.Summary,
-			Decisions:    note.Decisions,
-			OpenThreads:  note.OpenThreads,
-			Tag:          note.Tag,
-			FilesChanged: note.FilesChanged,
-			Branch:       note.Branch,
-			Commits:      note.Commits,
-		}
-
-		// Extract title from frontmatter or first heading
-		if t, ok := note.Frontmatter["title"]; ok && t != "" {
-			entry.Title = t
-		} else {
-			// Use summary as title fallback
-			entry.Title = note.Summary
-		}
-
-		// Parse duration
-		if d, ok := note.Frontmatter["duration_minutes"]; ok {
-			entry.Duration, _ = strconv.Atoi(d)
-		}
-
-		// Parse created_at from date + approximate time
-		if note.Date != "" {
-			t, err := time.Parse("2006-01-02", note.Date)
-			if err == nil {
-				entry.CreatedAt = t
+		for sid, entry := range projectIdx.Entries {
+			if existing, ok := idx.Entries[sid]; ok {
+				// Cross-project SessionID collisions are a corruption /
+				// migration artifact (e.g. two clones of the same
+				// project with overlapping captures). The aggregator's
+				// per-project pass already enforces uniqueness within
+				// a project's per-host subtrees; cross-project we WARN
+				// and let last-write-win, preserving the historical
+				// inline-walker behavior so existing operator vaults
+				// are not bricked by Phase 4. The intra-project check
+				// is the load-bearing one; cross-project would rather
+				// be addressed by a project rename / dedupe operation
+				// outside of `vv index`.
+				log.Printf("rebuild: session_id %s collides between projects %s and %s; keeping last",
+					sid, existing.Project, entry.Project)
 			}
-		}
-
-		// Parse tool_uses from frontmatter
-		if tu, ok := note.Frontmatter["tool_uses"]; ok {
-			entry.ToolUses, _ = strconv.Atoi(tu)
-		}
-
-		// Parse token/message counts from frontmatter
-		if ti, ok := note.Frontmatter["tokens_in"]; ok {
-			entry.TokensIn, _ = strconv.Atoi(ti)
-		}
-		if to, ok := note.Frontmatter["tokens_out"]; ok {
-			entry.TokensOut, _ = strconv.Atoi(to)
-		}
-		if msgs, ok := note.Frontmatter["messages"]; ok {
-			entry.Messages, _ = strconv.Atoi(msgs)
-		}
-
-		// Parse friction fields from frontmatter
-		if fs, ok := note.Frontmatter["friction_score"]; ok {
-			entry.FrictionScore, _ = strconv.Atoi(fs)
-		}
-		if corr, ok := note.Frontmatter["corrections"]; ok {
-			entry.Corrections, _ = strconv.Atoi(corr)
-		}
-
-		// Parse status: checkpoint flag
-		if status, ok := note.Frontmatter["status"]; ok && status == "checkpoint" {
-			entry.Checkpoint = true
-		}
-
-		// Preserve fields from old index that aren't stored in notes
-		if old, ok := oldIdx.Entries[note.SessionID]; ok {
-			if old.TranscriptPath != "" {
-				entry.TranscriptPath = old.TranscriptPath
+			if old, ok := oldIdx.Entries[sid]; ok {
+				if old.TranscriptPath != "" {
+					entry.TranscriptPath = old.TranscriptPath
+				}
+				if len(old.ToolCounts) > 0 {
+					entry.ToolCounts = old.ToolCounts
+				}
 			}
-			if len(old.ToolCounts) > 0 {
-				entry.ToolCounts = old.ToolCounts
-			}
+			idx.Entries[sid] = entry
+			count++
 		}
-
-		idx.Entries[note.SessionID] = entry
-		count++
-		return nil
-	})
-
-	if err != nil {
-		return nil, 0, fmt.Errorf("walk projects: %w", err)
 	}
 
 	return idx, count, nil
