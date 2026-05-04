@@ -138,6 +138,7 @@ vv_render_wrap_text(
                     task_deltas, test_counts},
     project_context = {resume_state, recent_iterations,
                        open_threads, friction_trends},
+    vault_side_narrative_seed = "<orchestrator-supplied prose, ≤4096 chars>",  // optional; see below
 )
 → {narrative_title, narrative_body, summary, commit_subject, commit_prose_body}
 ```
@@ -154,6 +155,7 @@ vv_render_wrap_text(
     iter_state = {...},
     project_context = {resume_state: "", recent_iterations,
                        open_threads: [], friction_trends: {}},
+    vault_side_narrative_seed = "<orchestrator-supplied prose, ≤4096 chars>",  // optional; see below
 )
 → {narrative_title, narrative_body, summary}
 ```
@@ -164,6 +166,45 @@ and pass it directly to `vv_set_commit_msg` in Stage 4.
 
 If output is poor, re-run with a higher tier (e.g. `tier = "opus"`).
 There is no auto-escalation — the operator controls tier choice.
+
+### Composing the vault_side_narrative_seed
+
+Optional orchestrator-supplied prose context (≤4096 chars) that the
+renderer treats as load-bearing ground truth. Use it for substance the
+commit graph doesn't carry — verification milestones, multi-iter
+dispatch arcs, post-merge reconciliation framing, carried-thread
+instance counts.
+
+`commit_msg` kind hard-errors when seed is non-empty (commit messages
+are mechanical iter_state-derivations). `iter_narrative` and
+`iter_narrative_and_commit_msg` honor it.
+
+Two canonical example shapes (operator-greppable in iterations.md):
+
+**Verification-milestone shape (iter 208):** "Iter 208 ships
+iterations-summary-frontmatter Phase A end-to-end via single
+worktree-isolated /execute-plan dispatch (commit b061adc1) plus
+orchestrator follow-on commit e79b069 wiring summary/shape args
+through wrap.md Stage 3 returns. First wrap to exercise
+vv_append_iteration(summary, shape) end-to-end — DoD #7 fires live
+as it ships. 25 new tests, surface 13→14, 6 subagent-flagged plan
+deviations all approved at verification."
+
+**Post-merge reconciliation shape (iter 209):** "Iter 209 is the
+second of 2-3 recommended verification wraps for
+iterations-summary-frontmatter Phase A. iter-208 PR rebase-merged to
+main preserving 3 commits with new SHAs: b061adc→a1cfcc6,
+e79b069→5954187, 20b7a6e→0008301. DoD #4 verified live in Stage 1
+via vv_get_iterations(format=summary): iter 208 shape_present=true,
+summary_present=true, iters 207-206 fell back to first-paragraph
+extraction with *_present=false. DoD #5 fires post-this-wrap on
+auto-heal'd resume.md project-history-tail (D9 fast-path returns
+iter 208 front-matter summary verbatim)."
+
+Empty / omitted seed renders the prompt section as `(none provided)`
+so the LLM sees absence explicitly. When iter_state is empty, the
+seed IS the substance — the renderer is instructed to write the
+narrative around the seed rather than producing 'null cycle' framing.
 
 ### Stage 4 — Mechanical apply
 
