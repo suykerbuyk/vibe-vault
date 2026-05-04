@@ -1021,3 +1021,46 @@ func TestWrapTemplate_VaultSideNarrativeSeedSubsection(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderWrapText_InputSchemaDeclaresVaultSideNarrativeSeed is the
+// regression lock for the Phase A InputSchema gap (iter 211 surface).
+// MCP clients that strict-validate against the declared schema strip
+// undeclared properties before forwarding to the server, so the
+// vault_side_narrative_seed argument was unreachable via the canonical
+// tool-call interface even though the Go-side wiring (struct,
+// validation, substitution, prompt template) was correct. This test
+// asserts the property is declared on the tool's InputSchema, typed as
+// a string, has a non-empty description, and is NOT in the required
+// array (defends against accidental promotion past plan v2 D5).
+func TestRenderWrapText_InputSchemaDeclaresVaultSideNarrativeSeed(t *testing.T) {
+	cfg := configWithTiers(t)
+	tool := NewRenderWrapTextTool(cfg)
+
+	var schema map[string]any
+	if err := json.Unmarshal(tool.Definition.InputSchema, &schema); err != nil {
+		t.Fatalf("unmarshal InputSchema: %v", err)
+	}
+
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("InputSchema.properties is not an object: %T", schema["properties"])
+	}
+	seedProp, ok := props["vault_side_narrative_seed"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties.vault_side_narrative_seed missing or not an object; got %T", props["vault_side_narrative_seed"])
+	}
+	if got := seedProp["type"]; got != "string" {
+		t.Errorf("vault_side_narrative_seed.type = %v, want \"string\"", got)
+	}
+	desc, _ := seedProp["description"].(string)
+	if strings.TrimSpace(desc) == "" {
+		t.Errorf("vault_side_narrative_seed.description must be non-empty; got %q", desc)
+	}
+
+	requiredAny, _ := schema["required"].([]any)
+	for _, r := range requiredAny {
+		if s, _ := r.(string); s == "vault_side_narrative_seed" {
+			t.Errorf("vault_side_narrative_seed must remain optional; found in required array")
+		}
+	}
+}
