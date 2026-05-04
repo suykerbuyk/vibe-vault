@@ -167,8 +167,8 @@ func lastIterAnchorSha(cwd string) (string, error) {
 // mechanically-computable facts (iter_n, branch,
 // vault_has_uncommitted_writes, last_iter_anchor_sha). Higher-level
 // fields (commits_since_last_iter, files_changed, task_deltas,
-// test_counts) are slash-command-computed and passed to
-// vv_render_wrap_text directly.
+// test_counts) are slash-command-computed and folded into the iter
+// narrative the orchestrator writes inline.
 func NewDescribeIterStateTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
@@ -178,7 +178,7 @@ func NewDescribeIterStateTool(cfg config.Config) Tool {
 				"vault_has_uncommitted_writes (bool from `git status --porcelain` in the vault repo), " +
 				"last_iter_anchor_sha (SHA of the most recent commit that wrote .vibe-vault/last-iter (the iter stamp file written by vv_stamp_iter); null/omitted if not found). " +
 				"The slash command computes commits_since_last_iter, files_changed, task_deltas, and " +
-				"test_counts itself via git/filesystem and bundles them into vv_render_wrap_text.",
+				"test_counts itself via git/filesystem and folds them into the iter narrative it writes inline.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {

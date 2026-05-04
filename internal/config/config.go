@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -32,7 +31,6 @@ type Config struct {
 	MCP        MCPConfig        `toml:"mcp"`
 	Zed        ZedConfig        `toml:"zed"`
 	Synthesis  SynthesisConfig  `toml:"synthesis"`
-	Wrap       WrapConfig       `toml:"wrap"`
 	Providers  ProvidersConfig  `toml:"providers"`
 	Staging    StagingConfig    `toml:"staging"`
 }
@@ -58,35 +56,6 @@ type ProvidersConfig struct {
 // relies on the env-var fallback path.
 type ProviderConfig struct {
 	APIKey string `toml:"api_key"`
-}
-
-// WrapConfig holds the [wrap] section of config.toml.
-//
-// Phase 4 of wrap-model-tiering lifted tier→model resolution from a
-// hardcoded map in internal/mcp/tools_wrap_dispatch.go into operator-
-// controlled config. Direction-C (the wrap-pipeline-collapse epic)
-// retires the multi-tier escalation ladder: callers pick a tier per-call
-// and re-run with --tier=opus if a haiku/sonnet output is poor (no
-// auto-escalation).
-//
-// DefaultModel is the tier label /wrap uses when no flag overrides it.
-// Tiers maps a tier label (e.g. "sonnet") to a "provider:model" string
-// (e.g. "anthropic:claude-sonnet-4-6"). v1 supports only the
-// "anthropic:" provider; Validate enforces this fail-fast at load.
-//
-// When the [wrap] section is absent from config.toml, Load() pre-
-// populates the three default tiers and DefaultModel="opus" —
-// preserving the iter-157 inline-Opus behavior.
-//
-// Direction-C D5: the legacy [wrap].escalation_ladder TOML key is
-// deprecated. Load() emits a stderr warning when it is encountered
-// (Q6 decision); the value is otherwise discarded. Removing the
-// struct field is forward-compat with BurntSushi/toml's permissive
-// decoder (audit-confirmed at config.go's Load() — never calls
-// MetaData.Undecoded()).
-type WrapConfig struct {
-	DefaultModel string            `toml:"default_model"` // e.g. "sonnet" / "opus" / "haiku"
-	Tiers        map[string]string `toml:"tiers"`         // tier name -> "provider:model"
 }
 
 // SynthesisConfig controls the end-of-session synthesis agent.
@@ -222,65 +191,13 @@ func DefaultConfig() Config {
 			Enabled:        true,
 			TimeoutSeconds: 60,
 		},
-		Wrap: WrapConfig{
-			DefaultModel: "opus",
-			Tiers: map[string]string{
-				"haiku":  "anthropic:claude-haiku-4-5",
-				"sonnet": "anthropic:claude-sonnet-4-6",
-				"opus":   "anthropic:claude-opus-4-7",
-			},
-		},
 	}
 }
-
-// wrapTierValueRe matches a "provider:model" string. v1 only accepts
-// "anthropic:" providers; Validate enforces that policy fail-fast at
-// config load (rather than at first dispatch).
-var wrapTierValueRe = regexp.MustCompile(`^[a-z]+:.+$`)
 
 // Validate checks the configuration for internal consistency.
-// Currently it covers the Wrap section: DefaultModel must reference a
-// defined tier, and each tier value must use a supported provider
-// prefix. Returns nil when the configuration is well-formed.
+// Returns nil when the configuration is well-formed.
 func (c Config) Validate() error {
-	// Wrap.Tiers may legitimately be empty (e.g. when the operator opts out
-	// of wrap entirely); skip wrap validation in that case.
-	if len(c.Wrap.Tiers) == 0 {
-		if c.Wrap.DefaultModel != "" {
-			return fmt.Errorf("[wrap] default_model %q set but [wrap.tiers] is empty",
-				c.Wrap.DefaultModel)
-		}
-		return nil
-	}
-
-	for tier, providerModel := range c.Wrap.Tiers {
-		if !wrapTierValueRe.MatchString(providerModel) {
-			return fmt.Errorf("[wrap.tiers] %q value %q must be \"provider:model\"",
-				tier, providerModel)
-		}
-		// v1 anthropic-only: fail fast at load so operators get a clear
-		// error rather than a runtime EscalateReason later.
-		provider := strings.SplitN(providerModel, ":", 2)[0]
-		if provider != "anthropic" {
-			return fmt.Errorf("[wrap.tiers] %q provider %q unsupported "+
-				"(v1 supports only \"anthropic:\")", tier, provider)
-		}
-	}
-
-	if c.Wrap.DefaultModel != "" {
-		if _, ok := c.Wrap.Tiers[c.Wrap.DefaultModel]; !ok {
-			return fmt.Errorf("[wrap] default_model %q not defined in [wrap.tiers]",
-				c.Wrap.DefaultModel)
-		}
-	}
-
 	return nil
-}
-
-// deprecationWarner is the test seam used to capture deprecation
-// warnings in tests. Production writes to os.Stderr.
-var deprecationWarner = func(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format, args...)
 }
 
 // Load reads config from the standard path, falling back to defaults.
@@ -290,21 +207,8 @@ func Load() (Config, error) {
 	paths := configPaths()
 	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {
-			md, err := toml.DecodeFile(p, &cfg)
-			if err != nil {
+			if _, err := toml.DecodeFile(p, &cfg); err != nil {
 				return cfg, fmt.Errorf("parse config %s: %w", p, err)
-			}
-			// Direction-C D5: warn when the legacy
-			// [wrap].escalation_ladder key is present. The value is
-			// silently discarded by the struct-decode (the field
-			// no longer exists); the warning helps operators clean
-			// up legacy config without surprise behavior change.
-			if md.IsDefined("wrap", "escalation_ladder") {
-				deprecationWarner(
-					"vibe-vault: warning: [wrap].escalation_ladder is "+
-						"deprecated (retired in Direction-C wrap pipeline "+
-						"collapse) and is now ignored — remove from %s "+
-						"to silence this warning\n", p)
 			}
 			break
 		}
@@ -448,34 +352,6 @@ func (c Config) Overlay(projectConfigPath string) Config {
 	}
 	if md.IsDefined("synthesis", "timeout_seconds") {
 		c.Synthesis.TimeoutSeconds = overlay.Synthesis.TimeoutSeconds
-	}
-	if md.IsDefined("wrap", "default_model") {
-		c.Wrap.DefaultModel = overlay.Wrap.DefaultModel
-	}
-	// Direction-C D5: [wrap].escalation_ladder is retired. Project-
-	// local overlays that still set it are silently ignored (the
-	// struct field no longer exists); Load() emits a stderr warning
-	// for the user-level config so operators learn about the rename.
-	if md.IsDefined("wrap", "tiers") {
-		// H3-v3: map MERGE semantics, not whole-replacement. The Load()
-		// path gets this for free from BurntSushi/toml's automatic map
-		// merge, but Overlay() decodes into a fresh struct, so we have to
-		// merge manually here. Without this an overlay that sets only
-		// `[wrap.tiers] sonnet = "..."` would silently nuke the haiku and
-		// opus defaults.
-		//
-		// We must also clone the base map before merging — even though
-		// Overlay has a value receiver, c.Wrap.Tiers is a map header that
-		// shares the same backing storage as the caller's Config. Writing
-		// straight into it would mutate the caller's defaults.
-		merged := make(map[string]string, len(c.Wrap.Tiers)+len(overlay.Wrap.Tiers))
-		for k, v := range c.Wrap.Tiers {
-			merged[k] = v
-		}
-		for k, v := range overlay.Wrap.Tiers {
-			merged[k] = v
-		}
-		c.Wrap.Tiers = merged
 	}
 	// Providers: struct-of-structs, merged field-by-field via md.IsDefined().
 	// Mirrors the Wrap.Tiers approach for the same reason — Overlay() decodes

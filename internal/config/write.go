@@ -91,10 +91,10 @@ timeout_seconds = 15
 
 # [providers.anthropic]
 # api_key = "sk-ant-..."
-# # Required by vv_render_wrap_text (the unified wrap renderer)
-# # and by hook enrichment / session synthesis when [enrichment].provider
-# # = "anthropic". Bills against this key, NOT against your Claude Code
-# # subscription. Set via: vv config set-key anthropic <key>
+# # Required by hook enrichment / session synthesis when
+# # [enrichment].provider = "anthropic". Bills against this key, NOT
+# # against your Claude Code subscription. Set via:
+# # vv config set-key anthropic <key>
 
 # [providers.openai]
 # api_key = "sk-..."
@@ -197,10 +197,10 @@ func ProjectConfigTemplate() string {
 
 # [providers.anthropic]
 # api_key = "sk-ant-..."
-# # Required by vv_render_wrap_text (the unified wrap renderer)
-# # and by hook enrichment / session synthesis when [enrichment].provider
-# # = "anthropic". Bills against this key, NOT against your Claude Code
-# # subscription. Set via: vv config set-key anthropic <key>
+# # Required by hook enrichment / session synthesis when
+# # [enrichment].provider = "anthropic". Bills against this key, NOT
+# # against your Claude Code subscription. Set via:
+# # vv config set-key anthropic <key>
 
 # [providers.openai]
 # api_key = "sk-..."

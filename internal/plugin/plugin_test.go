@@ -194,8 +194,9 @@ func TestGenerate_PathRelativeBinary(t *testing.T) {
 	}
 
 	// env block must propagate ANTHROPIC_API_KEY, OPENAI_API_KEY, and
-	// GOOGLE_API_KEY so vv_render_wrap_text and other LLM-backed handlers see
-	// the operator's live shell keys (env-fallback tier of ResolveAPIKey).
+	// GOOGLE_API_KEY so hook enrichment / synthesis and other LLM-backed
+	// handlers see the operator's live shell keys (env-fallback tier of
+	// ResolveAPIKey).
 	env, ok := entry["env"].(map[string]any)
 	if !ok {
 		t.Fatal(".mcp.json missing env block")
