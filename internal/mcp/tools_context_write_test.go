@@ -436,6 +436,140 @@ func TestAppendIterationDefaultDate(t *testing.T) {
 	}
 }
 
+// --- Phase A: vv_append_iteration front-matter writer tests (4) ---
+
+// Test 17: vv_append_iteration with summary writes a correct front-matter
+// block (heading → blank line → ---/key/---/blank → body).
+func TestAppendIterationWithSummaryWritesFrontmatter(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": "# Iterations\n",
+	})
+	tool := NewAppendIterationTool(cfg)
+	args := map[string]any{
+		"project":   "testproj",
+		"title":     "FM iter",
+		"narrative": "Body line one.",
+		"date":      "2026-04-30",
+		"summary":   "One-sentence summary.",
+		"shape":     "fresh-feature",
+	}
+	payload, _ := json.Marshal(args)
+	if _, err := tool.Handler(payload); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(cfg.VaultPath, "Projects", "testproj", "agentctx", "iterations.md"))
+	content := string(data)
+	// Heading then a blank line then the front-matter block.
+	want := "### Iteration 1 — FM iter (2026-04-30)\n\n---\nshape: fresh-feature\nsummary: One-sentence summary.\n---\n\nBody line one."
+	if !strings.Contains(content, want) {
+		t.Errorf("expected substring:\n%s\n\ngot file:\n%s", want, content)
+	}
+}
+
+// Test 18: vv_append_iteration with shape-only emits partial front-matter
+// (forward-compat for shape-classification before LLM summary lands).
+func TestAppendIterationShapeOnlyFrontmatter(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": "# Iterations\n",
+	})
+	tool := NewAppendIterationTool(cfg)
+	args := map[string]any{
+		"project":   "testproj",
+		"title":     "Shape only",
+		"narrative": "Body.",
+		"date":      "2026-04-30",
+		"shape":     "planning",
+	}
+	payload, _ := json.Marshal(args)
+	if _, err := tool.Handler(payload); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(cfg.VaultPath, "Projects", "testproj", "agentctx", "iterations.md"))
+	content := string(data)
+	if !strings.Contains(content, "---\nshape: planning\n---\n") {
+		t.Errorf("shape-only front-matter missing or malformed:\n%s", content)
+	}
+	if strings.Contains(content, "summary:") {
+		t.Errorf("shape-only block must NOT emit summary key:\n%s", content)
+	}
+}
+
+// Test 19: vv_append_iteration without summary or shape emits the legacy
+// shape (no front-matter block) — back-compat regression lock.
+func TestAppendIterationLegacyShape(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": "# Iterations\n",
+	})
+	tool := NewAppendIterationTool(cfg)
+	args := map[string]any{
+		"project":   "testproj",
+		"title":     "Legacy",
+		"narrative": "Plain body.",
+		"date":      "2026-04-30",
+	}
+	payload, _ := json.Marshal(args)
+	if _, err := tool.Handler(payload); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(cfg.VaultPath, "Projects", "testproj", "agentctx", "iterations.md"))
+	content := string(data)
+	// No front-matter block — body sits directly after the blank line
+	// following the heading.
+	want := "### Iteration 1 — Legacy (2026-04-30)\n\nPlain body."
+	if !strings.Contains(content, want) {
+		t.Errorf("expected legacy shape substring:\n%s\n\ngot:\n%s", want, content)
+	}
+	// Specifically, no `---\n` fence.
+	headingIdx := strings.Index(content, "### Iteration 1")
+	if headingIdx >= 0 && strings.Contains(content[headingIdx:], "\n---\n") {
+		t.Errorf("legacy iter must NOT emit a front-matter fence:\n%s", content)
+	}
+}
+
+// Test 20: write-then-read round-trip via format=summary.
+func TestAppendIterationRoundTripsThroughSummary(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
+		"Projects/testproj/agentctx/iterations.md": "# Iterations\n",
+	})
+	appendTool := NewAppendIterationTool(cfg)
+	args := map[string]any{
+		"project":   "testproj",
+		"title":     "Round trip",
+		"narrative": "Body.",
+		"date":      "2026-04-30",
+		"summary":   "Round-trip canary summary.",
+		"shape":     "bookkeeping",
+	}
+	payload, _ := json.Marshal(args)
+	if _, err := appendTool.Handler(payload); err != nil {
+		t.Fatalf("append handler: %v", err)
+	}
+
+	getTool := NewGetIterationsTool(cfg)
+	out, err := getTool.Handler(json.RawMessage(`{"project":"testproj","format":"summary"}`))
+	if err != nil {
+		t.Fatalf("get handler: %v", err)
+	}
+	var resp struct {
+		Iterations []IterationSummary `json:"iterations"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &resp); jerr != nil {
+		t.Fatalf("unmarshal: %v", jerr)
+	}
+	if len(resp.Iterations) != 1 {
+		t.Fatalf("want 1 iter, got %d", len(resp.Iterations))
+	}
+	got := resp.Iterations[0]
+	if got.Summary != "Round-trip canary summary." || !got.SummaryPresent {
+		t.Errorf("Summary round-trip: %q, present=%v; want 'Round-trip canary summary.', true",
+			got.Summary, got.SummaryPresent)
+	}
+	if got.Shape != "bookkeeping" || !got.ShapePresent {
+		t.Errorf("Shape round-trip: %q, present=%v; want 'bookkeeping', true",
+			got.Shape, got.ShapePresent)
+	}
+}
+
 // --- iteration helpers ---
 
 func TestIterationHeadingRoundTrip(t *testing.T) {

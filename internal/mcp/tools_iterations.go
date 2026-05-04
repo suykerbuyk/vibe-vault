@@ -6,6 +6,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,13 +29,27 @@ var iterationHeadingRegexp = regexp.MustCompile(`^### Iteration (\d+)\s*—\s*(.
 // the strip is a no-op on blocks without a trailer.
 var provenanceTrailerRE = regexp.MustCompile(`\n*<!-- recorded:[^\n]*-->\s*\z`)
 
+// frontmatterKeyValRE captures `key: value` lines inside a YAML front-matter
+// block. Keys are conservative ASCII identifiers (letters, digits, underscores)
+// and the value runs to end-of-line, with surrounding whitespace trimmed by
+// the caller. The regex is only consulted between the opening and closing
+// `---` markers, so non-matching lines inside the block are silently skipped.
+var frontmatterKeyValRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*?)\s*$`)
+
 // Iteration is one parsed entry from iterations.md. Narrative uses omitempty
 // so the compact "table" response format can drop narrative bodies cleanly.
+//
+// Frontmatter holds the optional YAML key/value pairs the iter writer may
+// place between the heading and the body (per the iterations-summary-
+// frontmatter task — D1, D4). It is populated by parseIterations and is
+// json:"-" so the field never serializes into table or full responses
+// (closes the v3-M5 leakage gate).
 type Iteration struct {
-	Number    int    `json:"number"`
-	Date      string `json:"date"`
-	Title     string `json:"title"`
-	Narrative string `json:"narrative,omitempty"`
+	Number      int               `json:"number"`
+	Date        string            `json:"date"`
+	Title       string            `json:"title"`
+	Narrative   string            `json:"narrative,omitempty"`
+	Frontmatter map[string]string `json:"-"`
 }
 
 // parseIterations walks an iterations.md body and returns structured entries
@@ -42,6 +57,13 @@ type Iteration struct {
 // preamble and ignored. Each entry's narrative is everything between its
 // heading and the next heading (or EOF), with leading/trailing blank lines
 // trimmed.
+//
+// If the body opens with a YAML front-matter block (a `---` fence on a line
+// by itself, optionally preceded by blank lines), the key/value pairs are
+// parsed into Iteration.Frontmatter and the entire fenced block is stripped
+// from Narrative. A malformed front-matter block (no closing `---`) logs a
+// warning and falls back to no-frontmatter capture; the unclosed YAML stays
+// inside Narrative so operators can spot the drift.
 func parseIterations(content string) []Iteration {
 	var out []Iteration
 	var current *Iteration
@@ -51,7 +73,13 @@ func parseIterations(content string) []Iteration {
 		if current == nil {
 			return
 		}
-		narr := strings.TrimSpace(buf.String())
+		raw := strings.TrimLeft(buf.String(), "\n")
+		fm, body, ok := extractIterationFrontmatter(raw)
+		if ok {
+			current.Frontmatter = fm
+			raw = body
+		}
+		narr := strings.TrimSpace(raw)
 		narr = provenanceTrailerRE.ReplaceAllString(narr, "")
 		current.Narrative = strings.TrimRight(narr, "\n")
 		out = append(out, *current)
@@ -79,12 +107,90 @@ func parseIterations(content string) []Iteration {
 	return out
 }
 
+// extractIterationFrontmatter inspects the trimmed body of an iteration
+// (everything between its heading and the next heading) and, if it opens
+// with a YAML-style `---` fence, captures the enclosed key/value pairs and
+// returns the body with the fenced block stripped.
+//
+// Returns (frontmatter, body-without-block, ok). When ok is false the body
+// is returned untouched and frontmatter is nil — covering both the no-front-
+// matter case and the malformed (unterminated) case (which also logs a
+// warning, per the parser-strip back-compat contract).
+func extractIterationFrontmatter(body string) (map[string]string, string, bool) {
+	lines := strings.Split(body, "\n")
+	// Skip leading blank lines so a body that opens with a blank line then
+	// `---` still picks up the front-matter cleanly.
+	i := 0
+	for i < len(lines) && strings.TrimSpace(lines[i]) == "" {
+		i++
+	}
+	if i >= len(lines) || strings.TrimSpace(lines[i]) != "---" {
+		return nil, body, false
+	}
+	openIdx := i
+	i++
+
+	fm := map[string]string{}
+	closed := false
+	for ; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "---" {
+			closed = true
+			break
+		}
+		if trimmed == "" {
+			// Blank lines inside the fence are tolerated.
+			continue
+		}
+		if m := frontmatterKeyValRE.FindStringSubmatch(trimmed); m != nil {
+			key := m[1]
+			val := strings.TrimSpace(m[2])
+			fm[key] = val
+		}
+		// Unrecognised lines are silently skipped (forward-compat for
+		// future schema additions or stray block content).
+	}
+
+	if !closed {
+		log.Printf("vv: warning — iteration front-matter at line %d has no closing '---'; treating as narrative",
+			openIdx+1)
+		return nil, body, false
+	}
+
+	// Rejoin the body after the closing fence. i now indexes the closing
+	// `---` line; everything after that is the real narrative.
+	rest := ""
+	if i+1 < len(lines) {
+		rest = strings.Join(lines[i+1:], "\n")
+	}
+	// Strip a single leading newline-blank-line if present so the narrative
+	// starts cleanly. TrimSpace at the call site handles the rest.
+	rest = strings.TrimLeft(rest, "\n")
+	return fm, rest, true
+}
+
+// IterationSummary is the shape returned by format="summary". Each entry
+// reports the iter heading data plus the structured `summary` and `shape`
+// from front-matter (when present) or first-paragraph fallback (per D8).
+// The `*_present` discriminators tell consumers whether the value came
+// from front-matter; `shape_present=false` means no fallback exists for
+// shape (per D3).
+type IterationSummary struct {
+	Number         int    `json:"number"`
+	Date           string `json:"date"`
+	Title          string `json:"title"`
+	Shape          string `json:"shape"`
+	ShapePresent   bool   `json:"shape_present"`
+	Summary        string `json:"summary"`
+	SummaryPresent bool   `json:"summary_present"`
+}
+
 // NewGetIterationsTool creates the vv_get_iterations tool.
 func NewGetIterationsTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
 			Name:        "vv_get_iterations",
-			Description: "Get iteration narratives from a project's iterations.md. Defaults to the 10 most recent entries in compact table format. Use format=\"full\" to include narrative bodies; use since_iteration to fetch a specific range.",
+			Description: "Get iteration narratives from a project's iterations.md. Defaults to the 10 most recent entries in compact table format. Use format=\"full\" to include narrative bodies, format=\"summary\" for a body-free 1-line digest per iter (with first-paragraph fallback when front-matter is absent), or since_iteration to fetch a specific range.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -102,8 +208,8 @@ func NewGetIterationsTool(cfg config.Config) Tool {
 					},
 					"format": {
 						"type": "string",
-						"enum": ["table", "full"],
-						"description": "\"table\" returns {number,date,title} only (compact). \"full\" includes the narrative body. Default: \"table\"."
+						"enum": ["table", "full", "summary"],
+						"description": "\"table\" returns {number,date,title} only (compact). \"full\" includes the narrative body. \"summary\" returns {number,date,title,shape,shape_present,summary,summary_present} — front-matter when present, else first-paragraph fallback for the summary. Default: \"table\"."
 					}
 				}
 			}`),
@@ -133,8 +239,8 @@ func NewGetIterationsTool(cfg config.Config) Tool {
 			if format == "" {
 				format = "table"
 			}
-			if format != "table" && format != "full" {
-				return "", fmt.Errorf("invalid format %q — must be \"table\" or \"full\"", format)
+			if format != "table" && format != "full" && format != "summary" {
+				return "", fmt.Errorf("invalid format %q — must be \"table\", \"full\", or \"summary\"", format)
 			}
 
 			project, err := resolveProject(args.Project)
@@ -176,6 +282,51 @@ func NewGetIterationsTool(cfg config.Config) Tool {
 
 			if len(all) > limit {
 				all = all[:limit]
+			}
+
+			if format == "summary" {
+				summaries := make([]IterationSummary, 0, len(all))
+				for i := range all {
+					it := &all[i]
+					entry := IterationSummary{
+						Number: it.Number,
+						Date:   it.Date,
+						Title:  it.Title,
+					}
+					if shape := it.Frontmatter["shape"]; shape != "" {
+						entry.Shape = shape
+						entry.ShapePresent = true
+					}
+					if s := it.Frontmatter["summary"]; s != "" {
+						entry.Summary = s
+						entry.SummaryPresent = true
+					} else {
+						entry.Summary = truncateForSummary(it.Narrative, 200)
+						// summary_present remains false — the value came from
+						// the first-paragraph fallback, not front-matter.
+					}
+					summaries = append(summaries, entry)
+				}
+
+				result := struct {
+					Project    string             `json:"project"`
+					Total      int                `json:"total"`
+					Returned   int                `json:"returned"`
+					Iterations []IterationSummary `json:"iterations"`
+				}{
+					Project:    project,
+					Total:      total,
+					Returned:   len(summaries),
+					Iterations: summaries,
+				}
+				if result.Iterations == nil {
+					result.Iterations = []IterationSummary{}
+				}
+				outBytes, marshalErr := json.MarshalIndent(result, "", "  ")
+				if marshalErr != nil {
+					return "", fmt.Errorf("marshal: %w", marshalErr)
+				}
+				return string(outBytes) + "\n", nil
 			}
 
 			if format == "table" {

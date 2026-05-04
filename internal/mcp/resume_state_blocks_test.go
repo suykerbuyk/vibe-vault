@@ -255,11 +255,69 @@ func TestSummarizeIterationNarrative(t *testing.T) {
 		{strings.Repeat("word ", 40), strings.TrimRight(strings.Repeat("word ", 24), " ") + "…"},
 	}
 	for _, c := range cases {
-		got := summarizeIterationNarrative(c.in)
+		it := &Iteration{Narrative: c.in}
+		got := summarizeIterationNarrative(it)
 		if got != c.want {
 			t.Errorf("summarizeIterationNarrative(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
+}
+
+// Test 25: D9/C4 fast-path lock. When Iteration.Frontmatter[summary] is
+// non-empty, summarizeIterationNarrative returns it verbatim; otherwise
+// it falls back to truncateForSummary on the narrative body at the
+// 120-char history-tail budget.
+func TestSummarizeIterationNarrativeFastPath(t *testing.T) {
+	t.Run("frontmatter_fast_path", func(t *testing.T) {
+		it := &Iteration{
+			Narrative: "This narrative body should be ignored when front-matter is present.",
+			Frontmatter: map[string]string{
+				"summary": "Front-matter summary returned verbatim.",
+			},
+		}
+		got := summarizeIterationNarrative(it)
+		want := "Front-matter summary returned verbatim."
+		if got != want {
+			t.Errorf("got %q, want %q (fast-path must not call truncateForSummary)", got, want)
+		}
+	})
+
+	t.Run("falls_back_to_body", func(t *testing.T) {
+		it := &Iteration{
+			Narrative:   "Body paragraph that becomes the fallback.",
+			Frontmatter: nil,
+		}
+		got := summarizeIterationNarrative(it)
+		want := "Body paragraph that becomes the fallback."
+		if got != want {
+			t.Errorf("got %q, want %q (body-fallback path)", got, want)
+		}
+	})
+
+	t.Run("empty_summary_falls_back", func(t *testing.T) {
+		it := &Iteration{
+			Narrative: "Body paragraph here.",
+			Frontmatter: map[string]string{
+				"summary": "",
+			},
+		}
+		got := summarizeIterationNarrative(it)
+		if got != "Body paragraph here." {
+			t.Errorf("empty front-matter summary should fall through; got %q", got)
+		}
+	})
+
+	t.Run("body_path_uses_120_char_budget", func(t *testing.T) {
+		long := strings.Repeat("alpha bravo ", 30) // ~360 chars
+		it := &Iteration{Narrative: long}
+		got := summarizeIterationNarrative(it)
+		if !strings.HasSuffix(got, "…") {
+			t.Errorf("long narrative should be truncated with ellipsis; got %q", got)
+		}
+		if runes := []rune(got); len(runes) > 121 {
+			t.Errorf("history-tail summary should be ≤121 runes (120 + ellipsis); got %d", len(runes))
+		}
+	})
 }
 
 // silenceContext is a no-op used to keep the context import live in

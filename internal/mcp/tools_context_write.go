@@ -203,12 +203,36 @@ func scanIterationNumbers(content string) []int {
 	return nums
 }
 
+// buildIterationFrontmatterBlock constructs the YAML front-matter block
+// the writer emits when summary or shape is set. Returns "" when both are
+// empty (legacy back-compat shape). The block is always terminated with a
+// trailing blank line so the narrative body starts cleanly below.
+func buildIterationFrontmatterBlock(summary, shape string) string {
+	if summary == "" && shape == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("---\n")
+	if shape != "" {
+		b.WriteString("shape: ")
+		b.WriteString(shape)
+		b.WriteString("\n")
+	}
+	if summary != "" {
+		b.WriteString("summary: ")
+		b.WriteString(summary)
+		b.WriteString("\n")
+	}
+	b.WriteString("---\n\n")
+	return b.String()
+}
+
 // NewAppendIterationTool creates the vv_append_iteration tool.
 func NewAppendIterationTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
 			Name:        "vv_append_iteration",
-			Description: "Append a new iteration block to iterations.md for a project.",
+			Description: "Append a new iteration block to iterations.md for a project. Optional summary/shape arguments emit a YAML front-matter block between the heading and the body so vv_get_iterations(format=summary) can return a structured 1-sentence digest.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -231,6 +255,14 @@ func NewAppendIterationTool(cfg config.Config) Tool {
 					"date": {
 						"type": "string",
 						"description": "Date in YYYY-MM-DD format. Defaults to today."
+					},
+					"summary": {
+						"type": "string",
+						"description": "Optional 1-sentence summary (≤200 chars, no newlines). When set, prepended as YAML front-matter so vv_get_iterations(format=summary) returns the value verbatim."
+					},
+					"shape": {
+						"type": "string",
+						"description": "Optional shape classifier (e.g. fresh-feature | planning | bookkeeping | writes-already-landed). When set, emitted alongside summary in the front-matter block."
 					}
 				},
 				"required": ["title", "narrative"]
@@ -243,6 +275,8 @@ func NewAppendIterationTool(cfg config.Config) Tool {
 				Title     string `json:"title"`
 				Narrative string `json:"narrative"`
 				Date      string `json:"date"`
+				Summary   string `json:"summary"`
+				Shape     string `json:"shape"`
 			}
 			if len(params) > 0 {
 				if err := json.Unmarshal(params, &args); err != nil {
@@ -254,6 +288,18 @@ func NewAppendIterationTool(cfg config.Config) Tool {
 			}
 			if args.Narrative == "" {
 				return "", fmt.Errorf("narrative is required")
+			}
+			// Defensive validation: summary is a single line under the
+			// 200-char budget. The renderer enforces the same contract; we
+			// re-check here so direct callers (CLI, tests, future tools)
+			// cannot bypass the surface invariant.
+			if args.Summary != "" {
+				if strings.Contains(args.Summary, "\n") {
+					return "", fmt.Errorf("summary must be a single line (no newlines)")
+				}
+				if len(args.Summary) > 200 {
+					return "", fmt.Errorf("summary must be ≤200 characters; got %d", len(args.Summary))
+				}
 			}
 
 			// Validate/default date
@@ -306,11 +352,15 @@ func NewAppendIterationTool(cfg config.Config) Tool {
 				}
 			}
 
-			// Build the iteration block
+			// Build the iteration block. When summary or shape is set,
+			// the front-matter block is prepended to the narrative body
+			// (D4: front-matter is part of the body, not the heading).
 			heading := iterationHeading(iterNum, args.Title, date)
 			narrative := strings.TrimRight(args.Narrative, "\n")
+			fmBlock := buildIterationFrontmatterBlock(args.Summary, args.Shape)
+			body := fmBlock + narrative
 			trailer := provenanceTrailer(meta.Stamp(), cfg.VaultPath)
-			block := fmt.Sprintf("\n%s\n\n%s%s\n", heading, narrative, trailer)
+			block := fmt.Sprintf("\n%s\n\n%s%s\n", heading, body, trailer)
 
 			// Ensure content ends with newline before appending
 			if !strings.HasSuffix(content, "\n") {

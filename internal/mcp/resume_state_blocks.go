@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -219,11 +220,15 @@ func collectHistoryRows(cfg config.Config, project string, n int) ([]wraprender.
 
 	parsed := parseIterations(string(data))
 	rows := make([]wraprender.HistoryRow, 0, len(parsed))
-	for _, it := range parsed {
+	// Use index-based loop so summarizeIterationNarrative receives a stable
+	// pointer to each parsed iteration (Go 1.22+ already scopes the range
+	// variable per-iteration, but the explicit form documents the intent).
+	for i := range parsed {
+		it := &parsed[i]
 		rows = append(rows, wraprender.HistoryRow{
 			Iteration: it.Number,
 			Date:      it.Date,
-			Summary:   summarizeIterationNarrative(it.Narrative),
+			Summary:   summarizeIterationNarrative(it),
 		})
 	}
 	// Document-order is iteration-ascending in vibe-vault, but
@@ -237,19 +242,53 @@ func collectHistoryRows(cfg config.Config, project string, n int) ([]wraprender.
 	return rows, nil
 }
 
-// summarizeIterationNarrative extracts a one-line summary from an
-// iteration body. Picks the first non-blank paragraph, joins its
-// lines on " ", truncates to ~120 characters at a word boundary, and
-// replaces stray pipe characters so the summary is safe to drop into
-// a GFM table cell (the renderer also escapes pipes; this is defense
-// in depth).
-func summarizeIterationNarrative(narr string) string {
-	const maxLen = 120
-	for _, para := range strings.Split(narr, "\n\n") {
+// summarizeIterationNarrative extracts a one-line summary for the
+// resume.md project-history-tail row. When the iteration carries a
+// front-matter `summary:` value (the D9 fast-path) it is returned
+// verbatim; otherwise the narrative body is run through the shared
+// truncateForSummary helper at the 120-char history-tail budget.
+//
+// Accepting *Iteration (rather than the raw narrative) keeps the
+// front-matter shortcut available to future fast-paths that need
+// access to other parsed fields.
+func summarizeIterationNarrative(it *Iteration) string {
+	if it == nil {
+		return ""
+	}
+	if s := it.Frontmatter["summary"]; s != "" {
+		return s
+	}
+	return truncateForSummary(it.Narrative, 120)
+}
+
+// boldPrefixRE matches a single leading **Bold:** markdown emphasis at the
+// start of a paragraph. The trailing colon and at-least-one space are
+// required so we only catch the convention the iter writer uses (e.g.
+// **Shape:** planning) without mangling content that happens to open with
+// generic bold prose.
+var boldPrefixRE = regexp.MustCompile(`^\*\*[^*\n]+:\*\*\s+`)
+
+// truncateForSummary extracts a body-derived summary string per D8:
+// strip a single leading **Bold:** prefix, take the first non-empty
+// paragraph (split on \n\n), join wrapped lines on space, and truncate
+// to maxChars at a word boundary with a trailing ellipsis. Trailing
+// punctuation (`,;:`) before the cut is trimmed so the ellipsis sits
+// cleanly.
+//
+// Two callers, two budgets: summarizeIterationNarrative uses 120, the
+// format=summary handler uses 200. Word-boundary truncation is retained
+// from the legacy implementation (sentence-boundary regex was rejected
+// because abbreviations like `e.g.` and `vs.` produce false splits).
+func truncateForSummary(text string, maxChars int) string {
+	for _, para := range strings.Split(text, "\n\n") {
 		para = strings.TrimSpace(para)
 		if para == "" {
 			continue
 		}
+		// Single-pass strip: only the first **Bold:** prefix is
+		// removed (multi-prefix paragraphs like "**A:** **B:** rest"
+		// keep the second prefix — acceptable per D8 / R4).
+		para = boldPrefixRE.ReplaceAllString(para, "")
 		// Join wrapped lines with single spaces.
 		lines := strings.Split(para, "\n")
 		flat := strings.Join(lines, " ")
@@ -257,11 +296,11 @@ func summarizeIterationNarrative(narr string) string {
 		if flat == "" {
 			continue
 		}
-		if len(flat) <= maxLen {
+		if len(flat) <= maxChars {
 			return flat
 		}
-		// Truncate at last word boundary before maxLen.
-		cut := flat[:maxLen]
+		// Truncate at last word boundary before maxChars.
+		cut := flat[:maxChars]
 		if i := strings.LastIndex(cut, " "); i > 0 {
 			cut = cut[:i]
 		}

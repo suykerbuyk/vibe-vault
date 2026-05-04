@@ -5,9 +5,12 @@ package atomicfile
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/suykerbuyk/vibe-vault/internal/surface"
 )
 
 // TestWrite_HappyPath verifies a basic write succeeds, the content matches,
@@ -221,8 +224,9 @@ func TestWrite_StampsOnVaultPath(t *testing.T) {
 		t.Fatalf("read .surface: %v", err)
 	}
 	body := string(got)
-	if !bytes.Contains(got, []byte("surface = 13")) {
-		t.Errorf(".surface missing surface=13; got %q", body)
+	wantSurface := fmt.Sprintf("surface = %d", surface.MCPSurfaceVersion)
+	if !bytes.Contains(got, []byte(wantSurface)) {
+		t.Errorf(".surface missing %q; got %q", wantSurface, body)
 	}
 	if !bytes.Contains(got, []byte("last_writer")) {
 		t.Errorf(".surface missing last_writer; got %q", body)
