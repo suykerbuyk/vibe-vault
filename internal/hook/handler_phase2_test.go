@@ -63,10 +63,10 @@ func TestPhase2_HookFire_RecoversFromMissingGit(t *testing.T) {
 	cfg := testConfig(t)
 	t.Setenv("VIBE_VAULT_HOSTNAME", "testhost")
 
-	if err := staging.Init("proj"); err != nil {
-		t.Fatalf("pre-Init: %v", err)
-	}
 	stagingDir := filepath.Join(cfg.Staging.Root, "proj")
+	if err := staging.InitAt(stagingDir); err != nil {
+		t.Fatalf("pre-InitAt: %v", err)
+	}
 	if err := os.RemoveAll(filepath.Join(stagingDir, ".git")); err != nil {
 		t.Fatalf("rm .git: %v", err)
 	}

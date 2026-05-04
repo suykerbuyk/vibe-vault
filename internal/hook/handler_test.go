@@ -30,11 +30,12 @@ func testConfig(t *testing.T) config.Config {
 	cfg := config.DefaultConfig()
 	cfg.VaultPath = filepath.Join(t.TempDir(), "vault")
 	cfg.Enrichment.Enabled = false
-	// Phase 2 of vault-two-tier-narrative-vs-sessions-split: isolate
-	// the host-local staging dir per test so the global XDG path is
-	// never touched. Tests that need to inspect the staging dir read
-	// cfg.Staging.Root directly.
 	cfg.Staging.Root = filepath.Join(t.TempDir(), "staging")
+	// Defense in depth: any package-level staging call (Init, EnsureInit,
+	// Path, Root) that bypasses cfg.Staging.Root will route through XDG.
+	// Pinning XDG_STATE_HOME to a tempdir keeps the real
+	// ~/.local/state/vibe-vault/ untouched even if a test slips.
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "xdg"))
 	return cfg
 }
 
