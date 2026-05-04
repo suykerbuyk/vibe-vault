@@ -1,11 +1,12 @@
 # /wrap
 
-Wrap the current iteration into the vault using the surgical-render
-path. The slash command is the orchestrator: it inspects iter state,
-classifies the work-unit shape, calls a single render tool when prose
-is needed, and applies mutations mechanically. Source-control history
-and the vault filesystem are the canonical record; the LLM's job is to
-write short, accurate prose when prose is needed — nothing more.
+Wrap the current iteration into the vault. The slash command is the
+orchestrator: it inspects iter state, classifies the work-unit shape,
+composes the iter narrative inline, and applies mutations
+mechanically. Source-control history and the vault filesystem are the
+canonical record; the orchestrator's job is to write short, accurate
+prose using its full session context — no LLM render dispatch, no
+tier selection.
 
 This is **the** wrap path. There is no fallback.
 
@@ -33,13 +34,12 @@ four rules. After always-stamps, vault dirty/clean is purely about
 when in the wrap sequence the describe-iter-state call happens, not
 about the iter's shape.
 
-Only `fresh-feature` and `planning` always need a full LLM render
-call. `bookkeeping` (empty window + no new task) covers two cases
-that previously lived in separate shapes: post-merge reconciliation
-of a previously-wrapped feature branch, and pre-staged vault-only
-work. Both produce the same minimal narrative + mechanically-
-composed commit message (`chore(wrap): stamp iter N`).
-`writes-already-landed` short-circuits the render entirely.
+`bookkeeping` (empty window + no new task) covers two cases that
+previously lived in separate shapes: post-merge reconciliation of a
+previously-wrapped feature branch, and pre-staged vault-only work.
+Both produce the same minimal narrative + mechanically-composed
+commit message (`chore(wrap): stamp iter N`).
+`writes-already-landed` short-circuits the narrative entirely.
 
 `bookkeeping` replaces the retired `vault-only` and `reconciliation`
 shapes (DESIGN #93). Rebase-merge and squash-merge of a previously-
@@ -56,12 +56,7 @@ wrap commit) and HEAD.
    is `cd ~/code/vibe-vault && git pull && make install`.
 1. `make pre-commit` clean before wrapping. Wrapping over a dirty
    pre-commit produces a misleading iter record.
-2. An API key is configured for the tier's provider. Tiers map
-   `provider:model` strings via `[wrap.tiers]` in
-   `~/.config/vibe-vault/config.toml`. Set the key via
-   `vv config set-key <provider> <key>` (preferred — stored at mode
-   0600) or export the provider's `*_API_KEY` env var.
-3. **Merge-pattern timing.** When the project uses a feature-branch
+2. **Merge-pattern timing.** When the project uses a feature-branch
    merge pattern, run `/wrap` on the feature branch BEFORE merging.
    Wrapping after merge produces `bookkeeping` instead of
    `fresh-feature`, losing the per-decision narrative.
@@ -111,100 +106,27 @@ Apply the rules from "Work-unit shapes" above. Exactly one shape must
 match; if zero or more match, prefer the more restrictive (e.g.
 `writes-already-landed` over `bookkeeping`) and proceed.
 
-### Stage 3 — Render call
+### Stage 3 — Compose narrative inline
 
-Skip when shape is `writes-already-landed`. Otherwise parallel-fetch
-the project-context bundle:
+The orchestrator (Claude Code) writes the iter narrative directly
+using its full session context. No render dispatch, no tier
+selection, no LLM round-trip.
 
-- `vv_get_resume` — current resume.md content
-- `vv_get_iterations` — last few iter narratives (voice calibration +
-  back-references)
-- `vv_get_friction_trends` — friction-trend summary
+Compose the iter narrative covering:
 
-Parse `open_threads` as a slug list from the resume.md
-"Carried-forward threads" section.
+- Shape-appropriate framing (`fresh-feature` cites commits/files;
+  `planning` cites the new task slug + decisions; `bookkeeping`
+  acknowledges work substance even when the commit graph is empty;
+  `writes-already-landed` short-circuits — no narrative).
+- Citation discipline: SHAs + file paths + line numbers when
+  referenced.
+- Summary line ≤200 chars (single sentence, no newlines) for the
+  iterations.md front-matter.
+- Compose the conventional-commit subject + body inline.
 
-Then dispatch by shape:
-
-**`fresh-feature` / `planning`** — full render:
-
-```
-vv_render_wrap_text(
-    kind         = "iter_narrative_and_commit_msg",
-    tier         = "<tier>",                    // default sonnet; opus on re-run
-    project_name = "<project>",
-    iter_state   = {iter_n, branch, last_iter_anchor_sha,
-                    commits_since_last_iter, files_changed,
-                    task_deltas, test_counts},
-    project_context = {resume_state, recent_iterations,
-                       open_threads, friction_trends},
-    vault_side_narrative_seed = "<orchestrator-supplied prose, ≤4096 chars>",  // optional; see below
-)
-→ {narrative_title, narrative_body, summary, commit_subject, commit_prose_body}
-```
-
-**`bookkeeping`** — minimal narrative (`kind = iter_narrative`).
-Commit message is mechanically composed by the orchestrator: subject
-`chore(wrap): stamp iter N` (no LLM); body is one line:
-`Bookkeeping iter — no project-side work this cycle.` plus any
-operator-supplied context.
-
-```
-vv_render_wrap_text(
-    kind = "iter_narrative", tier = "<tier>", project_name = "<project>",
-    iter_state = {...},
-    project_context = {resume_state: "", recent_iterations,
-                       open_threads: [], friction_trends: {}},
-    vault_side_narrative_seed = "<orchestrator-supplied prose, ≤4096 chars>",  // optional; see below
-)
-→ {narrative_title, narrative_body, summary}
-```
-
-**`writes-already-landed`** — skip render. Compose the commit message
-inline (one-line conventional-commit subject + 1–3 paragraph body)
-and pass it directly to `vv_set_commit_msg` in Stage 4.
-
-If output is poor, re-run with a higher tier (e.g. `tier = "opus"`).
-There is no auto-escalation — the operator controls tier choice.
-
-### Composing the vault_side_narrative_seed
-
-Optional orchestrator-supplied prose context (≤4096 chars) that the
-renderer treats as load-bearing ground truth. Use it for substance the
-commit graph doesn't carry — verification milestones, multi-iter
-dispatch arcs, post-merge reconciliation framing, carried-thread
-instance counts.
-
-`commit_msg` kind hard-errors when seed is non-empty (commit messages
-are mechanical iter_state-derivations). `iter_narrative` and
-`iter_narrative_and_commit_msg` honor it.
-
-Two canonical example shapes (operator-greppable in iterations.md):
-
-**Verification-milestone shape (iter 208):** "Iter 208 ships
-iterations-summary-frontmatter Phase A end-to-end via single
-worktree-isolated /execute-plan dispatch (commit b061adc1) plus
-orchestrator follow-on commit e79b069 wiring summary/shape args
-through wrap.md Stage 3 returns. First wrap to exercise
-vv_append_iteration(summary, shape) end-to-end — DoD #7 fires live
-as it ships. 25 new tests, surface 13→14, 6 subagent-flagged plan
-deviations all approved at verification."
-
-**Post-merge reconciliation shape (iter 209):** "Iter 209 is the
-second of 2-3 recommended verification wraps for
-iterations-summary-frontmatter Phase A. iter-208 PR rebase-merged to
-main preserving 3 commits with new SHAs: b061adc→a1cfcc6,
-e79b069→5954187, 20b7a6e→0008301. DoD #4 verified live in Stage 1
-via vv_get_iterations(format=summary): iter 208 shape_present=true,
-summary_present=true, iters 207-206 fell back to first-paragraph
-extraction with *_present=false. DoD #5 fires post-this-wrap on
-auto-heal'd resume.md project-history-tail (D9 fast-path returns
-iter 208 front-matter summary verbatim)."
-
-Empty / omitted seed renders the prompt section as `(none provided)`
-so the LLM sees absence explicitly. When iter_state is empty, the
-seed IS the substance — the renderer is instructed to write the
-narrative around the seed rather than producing 'null cycle' framing.
+Pass the orchestrator-composed prose directly to `vv_append_iteration`
+(Stage 4) with `summary` and `shape` args populated. The commit
+message is composed inline and written via `vv_set_commit_msg`.
 
 ### Stage 4 — Mechanical apply
 
@@ -212,18 +134,18 @@ Order matters: iter row, then thread/carried, then commit msg, then
 session capture.
 
 1. **`vv_append_iteration`** — append the new row to `iterations.md`.
-   Skip on `writes-already-landed`. Pass the renderer's `summary` and
-   the Stage-2 shape verbatim as optional args (`summary=<from
-   renderer>`, `shape=<classified>`) so the writer emits a YAML
-   front-matter block between the heading and body. The block feeds
-   `vv_get_iterations(format=summary)` at the structured-digest fast
-   path; absence falls back to first-paragraph extraction at read time
-   without breaking anything. For `bookkeeping` shape: pass
-   `shape="bookkeeping"`; the renderer still produces `summary`. The
-   auto-heal hook re-renders the resume.md state-derived regions
-   (`vv:active-tasks`, `vv:current-state`, `vv:project-history-tail`)
-   from filesystem ground truth post-write — no separate marker-block
-   step required.
+   Skip on `writes-already-landed`. Pass the orchestrator-composed
+   `summary` and the Stage-2 shape verbatim as optional args
+   (`summary=<from orchestrator>`, `shape=<classified>`) so the
+   writer emits a YAML front-matter block between the heading and
+   body. The block feeds `vv_get_iterations(format=summary)` at the
+   structured-digest fast path; absence falls back to first-paragraph
+   extraction at read time without breaking anything. For
+   `bookkeeping` shape: pass `shape="bookkeeping"`; the orchestrator
+   still produces `summary`. The auto-heal hook re-renders the
+   resume.md state-derived regions (`vv:active-tasks`,
+   `vv:current-state`, `vv:project-history-tail`) from filesystem
+   ground truth post-write — no separate marker-block step required.
 2. **`vv_update_resume`** — mutate resume.md narrative sections only
    when the wrap carries non-state changes. Auto-heal hook also fires.
 3. **Thread/carried mutations** as needed:
@@ -236,7 +158,7 @@ session capture.
    - `vv_carried_remove(slug)` — drop a carried-forward bullet
    - `vv_carried_promote_to_task(slug, task_path)` — promote a carried
      bullet into a full task file
-4. **`vv_set_commit_msg`** — write the rendered (or composed)
+4. **`vv_set_commit_msg`** — write the orchestrator-composed
    `commit_subject` + blank line + `commit_prose_body` to
    `commit.msg` at project root. Single `content` field; markdown
    verbatim.
@@ -328,19 +250,12 @@ session capture.
 
 ## Flags
 
-- `/wrap` — uses `[wrap].default_model` as the tier when present;
-  otherwise `sonnet`.
-- `/wrap --tier <name>` — pin the tier (operator-defined tiers in
-  `[wrap.tiers]` accepted).
-- `/wrap --dry-run` — run Stages 1–3 and print the rendered prose plus
-  proposed mutations without applying.
+- `/wrap` — runs the full wrap procedure.
+- `/wrap --dry-run` — run Stages 1–3 and print the composed prose
+  plus proposed mutations without applying.
 
 ## Schema reminders
 
-- `vv_render_wrap_text`: `kind` is one of
-  `iter_narrative | commit_msg | iter_narrative_and_commit_msg`. Only
-  the fields relevant to the requested kind are populated in the
-  response.
 - `vv_set_commit_msg`: single `content` field. Pass
   `<commit_subject>\n\n<commit_prose_body>` verbatim.
 - `vv_thread_replace` / `vv_thread_remove`: hard-error on slug

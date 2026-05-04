@@ -141,7 +141,7 @@ which (plus `vv_render_commit_msg`, plus the two `vv_synthesize_wrap_bundle` /
 `vv_apply_wrap_bundle_by_handle` handle-based replacements) retired in DESIGN #92's
 Direction-C collapse. Direction-C added two new tools (`vv_describe_iter_state`,
 `vv_render_wrap_text`); DESIGN #98 added `vv_worktree_gc`; DESIGN #100 added
-`vv_check_toolchain` (surface bump 12→13), bringing the current count to 42.
+`vv_check_toolchain` (surface bump 14→15), bringing the current count to 42.
 
 ## HOME-Sandbox Classification
 

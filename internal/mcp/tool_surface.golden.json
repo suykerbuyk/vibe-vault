@@ -1,5 +1,5 @@
 {
-  "surface_version": 14,
+  "surface_version": 15,
   "tools": [
     {
       "name": "vv_append_iteration",
@@ -130,12 +130,7 @@
     },
     {
       "name": "vv_render_wrap_text",
-      "required_inputs": [
-        "iter_state",
-        "kind",
-        "project_name",
-        "tier"
-      ]
+      "required_inputs": null
     },
     {
       "name": "vv_search_sessions",

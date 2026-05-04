@@ -103,7 +103,7 @@ func RegisterAllTools(srv *Server, cfg config.Config) {
 	srv.RegisterTool(NewGetAgentDefinitionTool())
 	srv.RegisterTool(NewCheckToolchainTool())
 	srv.RegisterTool(NewDescribeIterStateTool(cfg))
-	srv.RegisterTool(NewRenderWrapTextTool(cfg))
+	srv.RegisterTool(NewRenderWrapTextTool())
 	srv.RegisterTool(NewWorktreeGCTool(cfg))
 	srv.RegisterPrompt(NewSessionGuidelinesPrompt())
 }
