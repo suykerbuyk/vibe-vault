@@ -323,6 +323,10 @@ func NewRenderWrapTextTool(cfg config.Config) Tool {
 					"project_context": {
 						"type": "object",
 						"description": "Parallel-fetched context bundle: resume_state, recent_iterations, open_threads, friction_trends."
+					},
+					"vault_side_narrative_seed": {
+						"type": "string",
+						"description": "Optional orchestrator-supplied narrative context (≤4096 chars). See vault-side-narrative-seed task plan D3/D4. Hard-errors when supplied with kind=commit_msg."
 					}
 				},
 				"required": ["kind", "tier", "project_name", "iter_state"]
