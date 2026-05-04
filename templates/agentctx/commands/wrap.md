@@ -247,19 +247,35 @@ session capture.
 
 ### Stage 6 — Vault sync
 
-`vv vault push` commits and pushes vault writes. On feature-branch
-merge patterns, run vault push **after** the project-side push but
-**before** the upstream merge — the vault iter row references the
-project commit, so the project commit must exist on a pushed branch
-by the time the vault record is published.
+1. **`vv vault sync-sessions`** — mirrors host-local staging
+   (`<XDG_STATE_HOME>/vibe-vault/<project>/`) into
+   `<vault>/Projects/<p>/sessions/<host>/` for every project with
+   pending changes, writes the per-host `index.json`, and creates one
+   LOCAL commit per project. No remote push happens here. Idempotent:
+   re-running with no source changes performs zero copies AND zero
+   commits, so calling it on every wrap is safe (and required —
+   without it, hook-fired session notes never reach the shared vault).
 
-`vv vault push --paths <p1> --paths <p2>` is available when the caller
-knows the explicit list of vault files it intends to publish; it
-stages only those paths and leaves any other dirty file in the vault
-working tree untouched. Today's wrap procedure does not yet require
-it — the migration from catch-all to selective staging at wrap time is
-tracked under `vault-two-tier-narrative-vs-sessions-split` (β2) and
-will land when β2 ships.
+2. **`vv vault push`** — commits any remaining vault writes (narrative:
+   `iterations.md`, `resume.md`, tasks, last-iter stamp) AND pushes
+   ALL pending vault commits (the per-project sync-sessions commits
+   from step 1 plus the narrative commit) to all configured remotes
+   in a single network round-trip. The deferred-push design preserves
+   the single-push wrap invariant: one network operation per wrap,
+   regardless of how many projects produced session content.
+
+   On feature-branch merge patterns, run vault push **after** the
+   project-side push but **before** the upstream merge — the vault
+   iter row references the project commit, so the project commit must
+   exist on a pushed branch by the time the vault record is published.
+
+   `vv vault push --paths <p1> --paths <p2>` is available when the
+   caller knows the explicit list of vault files it intends to
+   publish; it stages only those paths and leaves any other dirty
+   file in the vault working tree untouched. Today's wrap procedure
+   uses the catch-all form because the per-host sync-sessions step
+   has already pre-committed the session subtrees with explicit-path
+   precision.
 
 ## Flags
 

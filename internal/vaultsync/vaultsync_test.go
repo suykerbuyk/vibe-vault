@@ -1170,7 +1170,7 @@ func TestCommitAndPushPaths_SelectiveStaging_ThreeOfFive(t *testing.T) {
 		"e.md": "echo",
 	})
 
-	result, err := CommitAndPushPaths(dir, "selective stage", []string{"a.md", "c.md", "e.md"})
+	result, err := CommitAndPushPaths(dir, "selective stage", []string{"a.md", "c.md", "e.md"}, true)
 	if err != nil {
 		t.Fatalf("CommitAndPushPaths: %v", err)
 	}
@@ -1217,7 +1217,7 @@ func TestCommitAndPushPaths_EmptyPathsRejected(t *testing.T) {
 	preHEAD := strings.TrimSpace(gitx.GitRun(t, dir, "rev-parse", "HEAD"))
 
 	for _, paths := range [][]string{nil, {}} {
-		result, err := CommitAndPushPaths(dir, "empty", paths)
+		result, err := CommitAndPushPaths(dir, "empty", paths, true)
 		if err == nil {
 			t.Fatalf("CommitAndPushPaths(%v) returned nil error", paths)
 		}
@@ -1243,7 +1243,7 @@ func TestCommitAndPushPaths_SinglePath(t *testing.T) {
 
 	writeFiles(t, dir, map[string]string{"foo.md": "foo content"})
 
-	result, err := CommitAndPushPaths(dir, "single path", []string{"foo.md"})
+	result, err := CommitAndPushPaths(dir, "single path", []string{"foo.md"}, true)
 	if err != nil {
 		t.Fatalf("CommitAndPushPaths: %v", err)
 	}
@@ -1327,7 +1327,7 @@ func TestCommitAndPushPaths_ShellSpecialChars(t *testing.T) {
 	weird := "weird name $.md"
 	writeFiles(t, dir, map[string]string{weird: "weird content"})
 
-	result, err := CommitAndPushPaths(dir, "weird path", []string{weird})
+	result, err := CommitAndPushPaths(dir, "weird path", []string{weird}, true)
 	if err != nil {
 		t.Fatalf("CommitAndPushPaths: %v", err)
 	}
@@ -1372,7 +1372,7 @@ func TestCommitAndPushPaths_LargePathListChunking(t *testing.T) {
 			totalBytes, stageBatchByteBudget)
 	}
 
-	result, err := CommitAndPushPaths(dir, "large path list", paths)
+	result, err := CommitAndPushPaths(dir, "large path list", paths, true)
 	if err != nil {
 		t.Fatalf("CommitAndPushPaths: %v", err)
 	}
@@ -1394,3 +1394,104 @@ func TestCommitAndPushPaths_LargePathListChunking(t *testing.T) {
 		t.Errorf("commit contains %d files, want %d", committed, n)
 	}
 }
+
+// TestCommitAndPushPaths_PushFalse_LocalCommitOnly is the Phase 3
+// push=false regression lock. With push=false:
+//   - Commit lands locally (HEAD moves, CommitSHA is non-empty).
+//   - Remote refs are NOT updated (snapshot before/after).
+//   - RemoteResults is nil (no remote interaction occurred).
+//   - The function succeeds even on a vault with NO configured remotes.
+func TestCommitAndPushPaths_PushFalse_LocalCommitOnly(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	bare := gitx.InitBareRemote(t)
+	gitx.AddRemote(t, dir, "origin", bare)
+	gitx.GitRun(t, dir, "push", "origin", "main")
+
+	writeFiles(t, dir, map[string]string{"x.md": "x content"})
+
+	preLocal := strings.TrimSpace(gitx.GitRun(t, dir, "rev-parse", "HEAD"))
+	preBare := strings.TrimSpace(gitx.GitRun(t, bare, "rev-parse", "main"))
+
+	result, err := CommitAndPushPaths(dir, "local only", []string{"x.md"}, false)
+	if err != nil {
+		t.Fatalf("CommitAndPushPaths(push=false): %v", err)
+	}
+	if result.CommitSHA == "" {
+		t.Fatal("expected non-empty CommitSHA on local commit")
+	}
+	if result.RemoteResults != nil {
+		t.Errorf("RemoteResults = %v, want nil (no remote interaction)", result.RemoteResults)
+	}
+
+	postLocal := strings.TrimSpace(gitx.GitRun(t, dir, "rev-parse", "HEAD"))
+	postBare := strings.TrimSpace(gitx.GitRun(t, bare, "rev-parse", "main"))
+
+	if preLocal == postLocal {
+		t.Errorf("local HEAD did not move: %s == %s", preLocal, postLocal)
+	}
+	if preBare != postBare {
+		t.Errorf("remote ref moved despite push=false: %s -> %s", preBare, postBare)
+	}
+}
+
+// TestCommitAndPushPaths_PushFalse_NoRemotes_OK locks the contract
+// that push=false succeeds on a remote-less vault. Critical for the
+// wrap-time orchestrator to function on hosts that haven't configured
+// vault remotes yet.
+func TestCommitAndPushPaths_PushFalse_NoRemotes_OK(t *testing.T) {
+	dir := gitx.InitTestRepo(t) // no remote
+	writeFiles(t, dir, map[string]string{"y.md": "y content"})
+
+	result, err := CommitAndPushPaths(dir, "local only no remote", []string{"y.md"}, false)
+	if err != nil {
+		t.Fatalf("CommitAndPushPaths(push=false, no remotes): %v", err)
+	}
+	if result.CommitSHA == "" {
+		t.Fatal("expected non-empty CommitSHA")
+	}
+}
+
+// TestPull_AutostashIncludesUntracked is the v4-H5 regression lock for
+// the `vault-pull-untracked-precondition-gap` fix. Without
+// `--include-untracked`, an untracked file at a path the rebase target
+// wants to add causes "untracked working tree files would be
+// overwritten by checkout" → rebase aborts pre-conflict-mode → keep-
+// local resolver never runs → misleading "unresolvable conflicts"
+// error.
+//
+// Fixture: bare remote adds path X. Local has untracked path X with
+// different content. Pull must:
+//   - Stash the untracked file (because of --include-untracked).
+//   - Rebase cleanly.
+//   - Pop the stash (StashPopConflict may or may not surface based on
+//     content overlap; what matters is Pull does not error).
+//   - Restore the file (post-pop, the path exists).
+func TestPull_AutostashIncludesUntracked(t *testing.T) {
+	rel := "Projects/p/sessions/host1/2026-05-03/upstream-add.md"
+	dir, bare := pullSetup(t, "Projects/p/seed.md", "seed\n")
+
+	// Upstream commit ADDS a brand-new path that does not exist locally
+	// yet (rebase target wants to ADD this file).
+	barePushOverwrite(t, bare, rel, "upstream content\n", "upstream add")
+
+	// Local has an UNTRACKED file at the same path with different
+	// content. Without --include-untracked, the autostash misses this
+	// file and the subsequent rebase fails with the "untracked working
+	// tree files would be overwritten" precondition error.
+	full := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(full, []byte("local untracked\n"), 0o644); err != nil {
+		t.Fatalf("write untracked: %v", err)
+	}
+
+	result, err := Pull(dir)
+	if err != nil {
+		t.Fatalf("Pull errored despite --include-untracked autostash: %v", err)
+	}
+	if !result.Updated {
+		t.Error("Pull reports no update despite upstream commit")
+	}
+}
+

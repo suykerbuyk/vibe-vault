@@ -1004,10 +1004,34 @@ var CmdVault = Command{
 The vault repo is owned entirely by vv — all git operations are safe.
 
 Subcommands:
-  vv vault status    Show vault git state (clean/dirty, ahead/behind)
-  vv vault pull      Fetch + rebase with automatic conflict resolution
-  vv vault push      Commit all changes and push
-  vv vault recover   List upstream commits whose content was dropped on rebase`,
+  vv vault status         Show vault git state (clean/dirty, ahead/behind)
+  vv vault pull           Fetch + rebase with automatic conflict resolution
+  vv vault sync-sessions  Mirror host-local staging into vault per-host subtree
+  vv vault push           Commit all changes and push
+  vv vault recover        List upstream commits whose content was dropped on rebase`,
+}
+
+var CmdVaultSyncSessions = Command{
+	Name:     "sync-sessions",
+	Synopsis: "mirror host-local staging into vault per-host subtree",
+	Brief:    "Mirror staging notes into Projects/<p>/sessions/<host>/ and commit locally",
+	Usage:    "vv vault sync-sessions [--project <p> | --all-projects]",
+	Flags: []Flag{
+		{"--project <p>", "Sync only the named project (default: --all-projects)"},
+		{"--all-projects", "Sync every project found under the staging root (default)"},
+	},
+	Description: `Mirrors session notes from the host-local staging dir
+(<XDG_STATE_HOME>/vibe-vault/<project>/) into
+<vault>/Projects/<p>/sessions/<host>/, writes a per-host index.json next
+to the mirrored notes, and commits each project's per-host subtree
+LOCALLY (no remote push). The terminal 'vv vault push' performs the
+single network push for ALL pending vault commits at the end of /wrap.
+
+Idempotent: re-running with no source changes performs zero copies AND
+zero commits. The mirror is unidirectional (staging → vault) and
+content-hash-skip — only files whose source content differs from the
+destination are written. Projects are enumerated from the staging root,
+not the vault: a project that exists only in the vault is not synced.`,
 }
 
 var CmdVaultStatus = Command{
@@ -1093,6 +1117,7 @@ for callers (or operators) that know which files belong to a given work unit.`,
 var VaultSubcommands = []Command{
 	CmdVaultStatus,
 	CmdVaultPull,
+	CmdVaultSyncSessions,
 	CmdVaultPush,
 	CmdVaultRecover,
 }

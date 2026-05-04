@@ -337,10 +337,11 @@ var expectedTerminal = map[string]string{
 		"The vault repo is owned entirely by vv \u2014 all git operations are safe.\n" +
 		"\n" +
 		"Subcommands:\n" +
-		"  vv vault status    Show vault git state (clean/dirty, ahead/behind)\n" +
-		"  vv vault pull      Fetch + rebase with automatic conflict resolution\n" +
-		"  vv vault push      Commit all changes and push\n" +
-		"  vv vault recover   List upstream commits whose content was dropped on rebase\n",
+		"  vv vault status         Show vault git state (clean/dirty, ahead/behind)\n" +
+		"  vv vault pull           Fetch + rebase with automatic conflict resolution\n" +
+		"  vv vault sync-sessions  Mirror host-local staging into vault per-host subtree\n" +
+		"  vv vault push           Commit all changes and push\n" +
+		"  vv vault recover        List upstream commits whose content was dropped on rebase\n",
 
 	"staging": "vv staging \u2014 host-local session-capture staging dir\n" +
 		"\n" +

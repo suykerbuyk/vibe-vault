@@ -919,6 +919,13 @@ func runVault() {
 		}
 		runVaultRecover(cfg, args[1:])
 
+	case "sync-sessions":
+		if wantsHelp(args[1:]) {
+			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVaultSyncSessions))
+			return
+		}
+		runVaultSyncSessions(cfg, args[1:])
+
 	case "push":
 		if wantsHelp(args[1:]) {
 			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVaultPush))
@@ -939,7 +946,7 @@ func runVault() {
 			err    error
 		)
 		if len(paths) > 0 {
-			result, err = vaultsync.CommitAndPushPaths(cfg.VaultPath, msg, paths)
+			result, err = vaultsync.CommitAndPushPaths(cfg.VaultPath, msg, paths, true)
 		} else {
 			result, err = vaultsync.CommitAndPush(cfg.VaultPath, msg)
 		}
@@ -968,6 +975,58 @@ func runVault() {
 		fmt.Fprintf(os.Stderr, "unknown vault command: %s\n", args[0])
 		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVault))
 		os.Exit(1)
+	}
+}
+
+// runVaultSyncSessions implements `vv vault sync-sessions
+// [--project <p>] [--all-projects]`. Mirrors host-local staging into
+// `<vault>/Projects/<p>/sessions/<host>/` for each in-scope project,
+// writes the per-host index.json, and commits each project locally.
+// The terminal `vv vault push` performs the single network push for
+// ALL pending vault commits (narrative + sessions).
+//
+// Default scope is `--all-projects` — staging is the source of truth
+// for "what has unsynced changes," so the orchestrator enumerates
+// `<staging-root>/*/` rather than walking the vault.
+func runVaultSyncSessions(cfg config.Config, args []string) {
+	allProjects := hasFlag(args, "--all-projects")
+	project := flagValue(args, "--project")
+
+	if project != "" && allProjects {
+		fatal("vault sync-sessions: --project and --all-projects are mutually exclusive")
+	}
+
+	opts := staging.SyncSessionsOpts{}
+	if project != "" {
+		opts.Projects = []string{project}
+	}
+	// When neither flag is set, default to --all-projects (empty
+	// Projects list → enumerate from staging root).
+
+	res, err := staging.SyncSessions(cfg.VaultPath, opts)
+	if err != nil {
+		fatal("vault sync-sessions: %v", err)
+	}
+
+	if res == nil || len(res.Projects) == 0 {
+		fmt.Println("vault sync-sessions: no staging projects found")
+		return
+	}
+
+	commits := 0
+	for _, p := range res.Projects {
+		if p.CommitSHA != "" {
+			commits++
+			fmt.Printf("vault sync-sessions: %s/%s mirrored %d file(s) — local commit %s\n",
+				p.Project, p.Hostname, p.FilesMirrored, p.CommitSHA)
+		} else {
+			fmt.Printf("vault sync-sessions: %s no changes\n", p.Project)
+		}
+	}
+	if commits == 0 {
+		fmt.Println("vault sync-sessions: nothing to commit (run `vv vault push` to publish any pending vault commits)")
+	} else {
+		fmt.Printf("vault sync-sessions: %d project(s) committed locally — run `vv vault push` to publish\n", commits)
 	}
 }
 

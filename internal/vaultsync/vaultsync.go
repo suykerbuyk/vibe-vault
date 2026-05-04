@@ -308,11 +308,20 @@ func Pull(vaultPath string) (*PullResult, error) {
 		}
 	}
 
-	// Stash if dirty
+	// Stash if dirty.
+	//
+	// `--include-untracked` is critical (vault-pull-untracked-precondition-gap,
+	// v4-H5): without it, untracked files at paths the rebase target wants to
+	// add cause "untracked working tree files would be overwritten by checkout"
+	// → rebase aborts pre-conflict-mode → keep-local resolver never runs →
+	// misleading "unresolvable conflicts" surfaces. β2 raises this risk
+	// because hosts may have new path patterns (per-host subtrees) the
+	// operator hasn't yet committed when first sync-sessions runs alongside
+	// another host's pull.
 	porcelain, _ := gitCmd(vaultPath, 10*time.Second, "status", "--porcelain")
 	stashed := false
 	if porcelain != "" {
-		if _, err := gitCmd(vaultPath, 10*time.Second, "stash", "push", "-m", "vv-vault-sync-autostash"); err != nil {
+		if _, err := gitCmd(vaultPath, 10*time.Second, "stash", "push", "--include-untracked", "-m", "vv-vault-sync-autostash"); err != nil {
 			return nil, fmt.Errorf("git stash: %w", err)
 		}
 		stashed = true
@@ -353,9 +362,9 @@ func Pull(vaultPath string) (*PullResult, error) {
 // machine-stamped message, and pushes to all configured remotes. It is
 // a thin wrapper over CommitAndPushPaths: it enumerates the dirty
 // working-tree paths via `git status --porcelain -z` and forwards them
-// to the selective-staging entry point. Behaviour is identical to the
-// pre-refactor catch-all `git add -A` for any working-tree state — the
-// regression-locked test
+// to the selective-staging entry point with push=true. Behaviour is
+// identical to the pre-refactor catch-all `git add -A` for any
+// working-tree state — the regression-locked test
 // TestCommitAndPush_CatchAllParity_PreservesOriginalBehavior
 // keeps that contract enforced.
 //
@@ -381,14 +390,14 @@ func CommitAndPush(vaultPath, message string) (*PushResult, error) {
 		return &PushResult{}, nil
 	}
 
-	return CommitAndPushPaths(vaultPath, message, paths)
+	return CommitAndPushPaths(vaultPath, message, paths, true)
 }
 
 // CommitAndPushPaths stages only the supplied paths, commits with a
-// machine-stamped message, and pushes to all configured remotes. Unlike
-// CommitAndPush, dirty paths NOT in the supplied list are left dirty in
-// the working tree — this is the contamination-safe entry point used by
-// callers that know which files belong to their work unit.
+// machine-stamped message, and (when push=true) pushes to all configured
+// remotes. Unlike CommitAndPush, dirty paths NOT in the supplied list are
+// left dirty in the working tree — this is the contamination-safe entry
+// point used by callers that know which files belong to their work unit.
 //
 // Empty or nil paths returns (nil, error) — explicit caller intent is
 // required. Use CommitAndPush for the catch-all behaviour.
@@ -400,12 +409,21 @@ func CommitAndPush(vaultPath, message string) (*PushResult, error) {
 // MAX_ARG_LEN ceilings; all batches must succeed before the commit
 // step.
 //
-// Happy path is sequential push, unchanged. On a non-fast-forward
-// rejection, the rejected remote is fetched and the local branch is
-// rebased onto it; the rebased commit is then pushed to that remote.
-// Fetch failures and rebase failures (after `rebase --abort`) surface
-// directly via per-remote `RemoteResults` rather than masquerading as
-// downstream errors.
+// When push=false, the function stages, commits, and returns immediately
+// with PushResult.CommitSHA set and RemoteResults nil. No remote network
+// I/O occurs and the rebase / converge loop is skipped. This is the
+// wrap-time entry point used by Phase 3 sync-sessions: per-project
+// commits land locally so the terminal `vv vault push` performs the
+// single network push for ALL pending vault commits (narrative +
+// sessions).
+//
+// When push=true (the legacy / CommitAndPush behaviour): happy path is
+// sequential push, unchanged. On a non-fast-forward rejection, the
+// rejected remote is fetched and the local branch is rebased onto it;
+// the rebased commit is then pushed to that remote. Fetch failures and
+// rebase failures (after `rebase --abort`) surface directly via
+// per-remote `RemoteResults` rather than masquerading as downstream
+// errors.
 //
 // After every successful rebase-and-push, prior remotes whose
 // last-known-good SHA differs from the new HEAD are converged via
@@ -421,7 +439,7 @@ func CommitAndPush(vaultPath, message string) (*PushResult, error) {
 // `PushResult.CommitSHA` is refreshed to the post-loop HEAD if any
 // rebase happened, so the printed SHA always exists at the converged
 // remotes.
-func CommitAndPushPaths(vaultPath, message string, paths []string) (*PushResult, error) {
+func CommitAndPushPaths(vaultPath, message string, paths []string, push bool) (*PushResult, error) {
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("no paths specified")
 	}
@@ -432,12 +450,20 @@ func CommitAndPushPaths(vaultPath, message string, paths []string) (*PushResult,
 		return nil, err
 	}
 
-	remotes, err := listRemotes(vaultPath)
-	if err != nil {
-		return nil, fmt.Errorf("listing remotes: %w", err)
-	}
-	if len(remotes) == 0 {
-		return nil, fmt.Errorf("no git remotes configured in vault %s", vaultPath)
+	// Remote enumeration is required only for the network push path.
+	// Local-only commits (push=false) must succeed on a vault with
+	// zero remotes — that is the wrap-time orchestrator contract for
+	// per-project sync-sessions commits.
+	var remotes []string
+	if push {
+		var rErr error
+		remotes, rErr = listRemotes(vaultPath)
+		if rErr != nil {
+			return nil, fmt.Errorf("listing remotes: %w", rErr)
+		}
+		if len(remotes) == 0 {
+			return nil, fmt.Errorf("no git remotes configured in vault %s", vaultPath)
+		}
 	}
 
 	// Stage only the supplied paths. Chunk under a conservative argv
@@ -467,6 +493,13 @@ func CommitAndPushPaths(vaultPath, message string, paths []string) (*PushResult,
 	// Get commit SHA
 	sha, _ := gitCmd(vaultPath, 10*time.Second, "rev-parse", "--short", "HEAD")
 	result.CommitSHA = sha
+
+	// Local-only commit: skip the push loop entirely. Caller (typically
+	// the wrap orchestrator) collects N local commits and runs a single
+	// terminal `vv vault push` for the network push.
+	if !push {
+		return result, nil
+	}
 
 	// Push to all remotes
 	branch, _ := gitCmd(vaultPath, 10*time.Second, "rev-parse", "--abbrev-ref", "HEAD")
