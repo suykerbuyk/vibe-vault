@@ -178,6 +178,15 @@ func buildEnv(xdgConfigHome string) []string { //nolint:forbidigo // sandbox-hel
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.Getenv("HOME"),
 		"XDG_CONFIG_HOME=" + xdgConfigHome,
+		// Phase 2 of vault-two-tier-narrative-vs-sessions-split:
+		// integration tests assert on vault-relative session paths and
+		// rely on `vv index --rebuild` walking the vault tree. Until
+		// Phase 4's per-host aggregator lands, force the back-compat
+		// flat-vault layout via VIBE_VAULT_DISABLE_STAGING. New tests
+		// for staging routing live in the unit-test files for each
+		// affected entry point.
+		"XDG_STATE_HOME=" + filepath.Join(xdgConfigHome, ".state"),
+		"VIBE_VAULT_DISABLE_STAGING=1",
 	}
 }
 
@@ -186,6 +195,8 @@ func buildEnvWithHome(xdgConfigHome, home string) []string { //nolint:forbidigo 
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + home,
 		"XDG_CONFIG_HOME=" + xdgConfigHome,
+		"XDG_STATE_HOME=" + filepath.Join(xdgConfigHome, ".state"),
+		"VIBE_VAULT_DISABLE_STAGING=1",
 	}
 }
 
@@ -198,6 +209,8 @@ func buildEnvWithHomeUser(xdgConfigHome, home, user string) []string { //nolint:
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + home,
 		"XDG_CONFIG_HOME=" + xdgConfigHome,
+		"XDG_STATE_HOME=" + filepath.Join(xdgConfigHome, ".state"),
+		"VIBE_VAULT_DISABLE_STAGING=1",
 		"USER=" + user,
 		"LOGNAME=" + user,
 		"VIBE_VAULT_HOSTNAME=vibe-vault-test",
@@ -223,6 +236,12 @@ func findSessionNoteByID(t *testing.T, vaultPath, stateDir, sessionID string) st
 	notePath, ok := entry["note_path"].(string)
 	if !ok || notePath == "" {
 		t.Fatalf("session %q has no note_path: %+v", sessionID, entry)
+	}
+	// Phase 2 of vault-two-tier-narrative-vs-sessions-split: staging-
+	// routed entries record an absolute note_path under the per-host
+	// staging dir; vault-routed entries keep the vault-relative form.
+	if filepath.IsAbs(notePath) {
+		return notePath
 	}
 	return filepath.Join(vaultPath, notePath)
 }

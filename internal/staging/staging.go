@@ -158,7 +158,7 @@ func Root() (string, error) {
 // safe by construction (see internal/identity).
 func Path(project string) (string, error) {
 	if project == "" {
-		return "", errors.New("staging: project name is empty")
+		return "", ErrEmptyProject
 	}
 	root, err := Root()
 	if err != nil {
@@ -166,6 +166,12 @@ func Path(project string) (string, error) {
 	}
 	return filepath.Join(root, project), nil
 }
+
+// ErrEmptyProject is returned by Init / EnsureInitAt when called
+// with an empty project name. Surfacing the error lets callers
+// distinguish a programming bug ("we forgot to detect a project")
+// from an init failure on a known project.
+var ErrEmptyProject = errors.New("staging: project name is empty")
 
 // Init bootstraps the staging dir for a project. Idempotent: if the
 // staging dir is already a git repo with the sentinel present, returns
@@ -182,11 +188,32 @@ func Path(project string) (string, error) {
 // Re-running on a partially-initialized dir (sentinel missing but
 // .git/HEAD present, or vice-versa) re-runs the missing steps; both
 // must be present for the fast-path skip.
+//
+// Init resolves the staging dir via Path(project) (Root()-derived).
+// Callers with a cfg.Staging.Root override should use InitAt to pin
+// the staging dir explicitly.
 func Init(project string) error {
 	dir, err := Path(project)
 	if err != nil {
 		return err
 	}
+	return initAt(dir)
+}
+
+// InitAt is the cfg-aware variant of Init: it bootstraps the staging
+// dir at the supplied absolute path rather than re-resolving via
+// Path(project). Used by EnsureInitAt so cfg.Staging.Root overrides
+// flow through to the init target.
+func InitAt(dir string) error {
+	if dir == "" {
+		return errors.New("staging: dir is empty")
+	}
+	return initAt(dir)
+}
+
+// initAt is the shared bootstrap implementation. Both Init and InitAt
+// converge here once the target dir is resolved.
+func initAt(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create staging dir %s: %w", dir, err)
 	}
@@ -214,6 +241,22 @@ func Init(project string) error {
 	}
 	if _, err := vaultsync.GitCommand(dir, gitTimeout, "config", "user.name", "vibe-vault"); err != nil {
 		return fmt.Errorf("git config user.name: %w", err)
+	}
+
+	// Phase 2: keep the sentinel out of `git status` and the working
+	// tree porcelain. Without this, every staging.Commit would either
+	// error ("nothing to commit" after porcelain shows just the
+	// untracked sentinel) or noisily include the sentinel in the
+	// commit. The exclude file is repo-local — no global config
+	// pollution. Idempotent: writing identical bytes is a no-op for
+	// atomicfile.Write semantics.
+	excludePath := filepath.Join(dir, ".git", "info", "exclude")
+	if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
+		return fmt.Errorf("create .git/info dir: %w", err)
+	}
+	excludeBody := "# vibe-vault staging — Phase 2 init exclude list\n" + SentinelName + "\n"
+	if err := atomicfile.Write("", excludePath, []byte(excludeBody)); err != nil {
+		return fmt.Errorf("write .git/info/exclude: %w", err)
 	}
 
 	if !sentinelPresent {

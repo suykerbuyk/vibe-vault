@@ -13,6 +13,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/index"
 	"github.com/suykerbuyk/vibe-vault/internal/lockfile"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
+	"github.com/suykerbuyk/vibe-vault/internal/staging"
 )
 
 // BatchCaptureOpts configures a batch capture of Zed threads.
@@ -64,6 +65,12 @@ func BatchCapture(opts BatchCaptureOpts) BatchResult {
 		return result
 	}
 
+	// Phase 2 of vault-two-tier-narrative-vs-sessions-split: resolve
+	// the staging root once per batch so every thread in this run uses
+	// the same routing target. Empty string preserves legacy flat-vault
+	// behavior on resolution failure.
+	stagingRoot := staging.ResolveRoot(opts.Cfg.Staging.Root)
+
 	for _, thread := range opts.Threads {
 		info := DetectProject(&thread, opts.Cfg)
 
@@ -93,6 +100,7 @@ func BatchCapture(opts BatchCaptureOpts) BatchResult {
 			AutoCaptured:   opts.AutoCaptured,
 			SkipEnrichment: true,
 			Index:          idx,
+			StagingRoot:    stagingRoot,
 		}
 
 		captureResult, err := session.CaptureFromParsed(t, info, narr, dialogue, captureOpts, opts.Cfg)

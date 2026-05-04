@@ -25,6 +25,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/narrative"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
 	"github.com/suykerbuyk/vibe-vault/internal/sessionclaim"
+	"github.com/suykerbuyk/vibe-vault/internal/staging"
 	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 	"github.com/suykerbuyk/vibe-vault/internal/trends"
 )
@@ -720,12 +721,17 @@ func NewCaptureSessionTool(cfg config.Config) Tool {
 				OpenThreads: args.OpenThreads,
 			}
 
+			// Phase 2 of vault-two-tier-narrative-vs-sessions-split:
+			// route MCP-captured notes (called from /wrap) into the
+			// host-local staging dir. Pre-Phase-2, every wrap silently
+			// leaked a session note to the shared vault.
 			opts := session.CaptureOpts{
 				Source:         source,
 				ProjectRoot:    projectRoot,
 				SkipEnrichment: true,
 				CWD:            cwd,
 				SessionID:      sessionID,
+				StagingRoot:    staging.ResolveRoot(cfg.Staging.Root),
 			}
 
 			result, err := session.CaptureFromParsed(t, info, narr, nil, opts, cfg)

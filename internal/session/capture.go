@@ -25,6 +25,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/prose"
 	"github.com/suykerbuyk/vibe-vault/internal/render"
 	"github.com/suykerbuyk/vibe-vault/internal/sanitize"
+	"github.com/suykerbuyk/vibe-vault/internal/staging"
 	"github.com/suykerbuyk/vibe-vault/internal/stats"
 	"github.com/suykerbuyk/vibe-vault/internal/transcript"
 )
@@ -70,6 +71,22 @@ type CaptureOpts struct {
 	// session-slot-multihost-disambiguation). Empty falls back to legacy
 	// behavior — no UpdateHarnessSessionID call.
 	ProjectRoot string
+	// StagingRoot, when non-empty, routes the session-note write into the
+	// host-local staging dir at <StagingRoot>/<project>/<filename>
+	// instead of the shared vault's flat-layout
+	// Projects/<p>/sessions/<filename>. Phase 2 of
+	// vault-two-tier-narrative-vs-sessions-split centralized this routing
+	// decision here so all five session-write entry points (hook,
+	// `vv process`, `vv backfill`, `vv reprocess`, Zed batch, MCP
+	// `vv_capture_session`) honor the same rule. Empty preserves legacy
+	// flat-vault behavior — back-compat surface for tests and
+	// unconfigured environments.
+	//
+	// When non-empty, CaptureFromParsed also invokes staging.Commit
+	// post-write. A staging-commit failure is logged WARN and never
+	// propagates: the markdown write itself succeeded and the next
+	// successful fire's commit will pick up the untracked file.
+	StagingRoot string
 }
 
 // CaptureResult holds the output of a capture operation.
@@ -227,7 +244,15 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 	// note (it belongs to a different conceptual entry).
 	var prevPath string
 	if exists && existing.Project == info.Project && existing.NotePath != "" {
-		prevPath = filepath.Join(cfg.VaultPath, existing.NotePath)
+		// Phase 2: staging-routed entries record an absolute path in
+		// NotePath (the staging dir is host-local, not vault-relative).
+		// Vault-routed entries keep the historical vault-relative form.
+		// IsAbs disambiguates without a separate flag.
+		if filepath.IsAbs(existing.NotePath) {
+			prevPath = existing.NotePath
+		} else {
+			prevPath = filepath.Join(cfg.VaultPath, existing.NotePath)
+		}
 	}
 
 	// Iteration is now purely a frontmatter field (filenames use
@@ -417,20 +442,53 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 		}
 	}
 
+	// Phase 2: lazy staging-repo bootstrap. Two-stat fast path when the
+	// project's staging dir is already initialized (~20µs); falls back
+	// to in-process Init when the sentinel or .git/HEAD is missing.
+	// Failures are logged WARN — the markdown write proceeds, and the
+	// staging.Commit attempt below either succeeds (on partial init) or
+	// logs WARN itself (fail-safe — the hook never errors out due to a
+	// staging git failure).
+	//
+	// EnsureInitAt pins the init target to opts.StagingRoot so a
+	// cfg.Staging.Root override flows through; without this, EnsureInit
+	// would re-resolve via Root() (XDG default) and bootstrap the wrong
+	// dir while the write went to the cfg path.
+	if opts.StagingRoot != "" {
+		if initErr := staging.EnsureInitAt(opts.StagingRoot, info.Project); initErr != nil {
+			log.Printf("warning: staging EnsureInitAt(%s, %s): %v", opts.StagingRoot, info.Project, initErr)
+		}
+	}
+
 	// Mechanism 1 (Phase 4): timestamp filename with sub-millisecond
 	// collision-retry suffix. Stat each candidate; on collision (file
 	// exists), bump suffix 1..9; fail loudly after 10 exhausted attempts
 	// rather than silently overwriting a peer note.
+	//
+	// Phase 2 routing: opts.StagingRoot non-empty routes the write into
+	// the host-local staging dir (absolute path, no vault prefix);
+	// empty preserves the legacy flat-vault layout under
+	// Projects/<p>/sessions/<filename>. Both branches share the same
+	// collision-retry loop and post-write commit semantics.
 	var (
 		relPath string
 		absPath string
 	)
 	for suffix := 0; suffix <= 9; suffix++ {
-		// Phase 1.5: empty host → legacy flat layout. Phase 2 replaces
-		// this with a routing decision in CaptureOpts and passes the
-		// sanitized hostname for the per-host path.
-		relPath = render.NoteRelPathTimestamp(info.Project, "", date, now, suffix)
-		absPath = filepath.Join(cfg.VaultPath, relPath)
+		if opts.StagingRoot != "" {
+			absPath = staging.NotePath(opts.StagingRoot, info.Project, date, now, suffix)
+			// For staging routing the index records the absolute path
+			// (the staging dir lives outside the vault, so the
+			// historical vault-relative convention does not apply).
+			relPath = absPath
+		} else {
+			// Phase 1.5 back-compat: empty host → legacy flat layout
+			// under <vault>/Projects/<p>/sessions/<filename>. The
+			// helper's empty-host branch is the explicit back-compat
+			// surface used by tests and unconfigured environments.
+			relPath = render.NoteRelPathTimestamp(info.Project, "", date, now, suffix)
+			absPath = filepath.Join(cfg.VaultPath, relPath)
+		}
 		// Same-session re-write (Mechanism 3): if the prior path is the
 		// same as our candidate (rare, only on identical clock), allow
 		// overwrite — the prevPath removal at the bottom would otherwise
@@ -497,8 +555,28 @@ func CaptureFromParsed(t *transcript.Transcript, info Info,
 		return nil, fmt.Errorf("create session dir: %w", err)
 	}
 
-	if err := atomicfile.Write(cfg.VaultPath, absPath, []byte(markdown)); err != nil {
+	// Phase 2: staging writes pass vaultPath="" so atomicfile.Write
+	// does not stamp a .surface side-channel under the vault tree (the
+	// staging dir lives outside the vault). Vault writes keep the
+	// existing stamp-on-success behavior.
+	stampPath := cfg.VaultPath
+	if opts.StagingRoot != "" {
+		stampPath = ""
+	}
+	if err := atomicfile.Write(stampPath, absPath, []byte(markdown)); err != nil {
 		return nil, fmt.Errorf("write note: %w", err)
+	}
+
+	// Phase 2: post-write staging-repo commit. Fail-safe — a commit
+	// failure (identity, lock, disk full, etc.) leaves the markdown
+	// file on disk and surfaces only as a WARN log; the next
+	// successful fire's commit picks up the untracked file.
+	if opts.StagingRoot != "" {
+		stagingDir := filepath.Join(opts.StagingRoot, info.Project)
+		commitMsg := fmt.Sprintf("session: %s/%s", info.Project, filepath.Base(absPath))
+		if commitErr := staging.Commit(stagingDir, absPath, commitMsg); commitErr != nil {
+			log.Printf("warning: staging commit failed for %s: %v", absPath, commitErr)
+		}
 	}
 
 	// Probe context availability for effectiveness measurement

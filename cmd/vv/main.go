@@ -39,6 +39,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/meta"
 	"github.com/suykerbuyk/vibe-vault/internal/scaffold"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
+	"github.com/suykerbuyk/vibe-vault/internal/staging"
 	"github.com/suykerbuyk/vibe-vault/internal/stats"
 	"github.com/suykerbuyk/vibe-vault/internal/surface"
 	"github.com/suykerbuyk/vibe-vault/internal/templates"
@@ -432,8 +433,14 @@ func runProcess() {
 	}
 
 	path := os.Args[2]
+	// Phase 2 of vault-two-tier-narrative-vs-sessions-split: route the
+	// capture into the host-local staging dir so manual `vv process`
+	// invocations stay consistent with the hook + MCP entry points.
+	// Empty StagingRoot preserves the legacy flat-vault behavior for
+	// unconfigured environments.
 	result, err := session.Capture(session.CaptureOpts{
 		TranscriptPath: path,
+		StagingRoot:    staging.ResolveRoot(cfg.Staging.Root),
 		Provider:       provider,
 	}, cfg)
 	if err != nil {
@@ -1580,8 +1587,12 @@ func runBackfill() {
 			continue
 		}
 
+		// Phase 2: backfill writes also honor the staging-root routing
+		// rule so backfilled notes land where future hook fires write,
+		// not in a divergent flat-vault layout.
 		result, err := session.Capture(session.CaptureOpts{
 			TranscriptPath: tf.Path,
+			StagingRoot:    staging.ResolveRoot(cfg.Staging.Root),
 		}, cfg)
 		if err != nil {
 			log.Printf("error processing %s: %v", tf.SessionID, err)
@@ -1844,10 +1855,13 @@ func runReprocess() {
 			continue
 		}
 
+		// Phase 2: reprocess writes honor the staging-root routing rule
+		// so reprocessed notes land where future hook fires write.
 		result, err := session.Capture(session.CaptureOpts{
 			TranscriptPath: transcriptPath,
 			Force:          true,
 			Provider:       provider,
+			StagingRoot:    staging.ResolveRoot(cfg.Staging.Root),
 		}, cfg)
 
 		if cleanup != nil {
@@ -1943,11 +1957,13 @@ func reprocessZedEntry(entry index.SessionEntry, cfg config.Config) (*session.Ca
 	narr := zed.ExtractNarrative(thread)
 	dialogue := zed.ExtractDialogue(thread)
 
+	// Phase 2: Zed reprocess single-thread path honors staging routing.
 	opts := session.CaptureOpts{
 		TranscriptPath: entry.TranscriptPath,
 		Source:         "zed",
 		Force:          true,
 		SkipEnrichment: true,
+		StagingRoot:    staging.ResolveRoot(cfg.Staging.Root),
 	}
 
 	return session.CaptureFromParsed(t, info, narr, dialogue, opts, cfg)

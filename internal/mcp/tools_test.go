@@ -59,6 +59,10 @@ func writeTestVault(t *testing.T, entries map[string]index.SessionEntry, vaultFi
 	}
 	cfg := config.DefaultConfig()
 	cfg.VaultPath = vaultRoot
+	// Phase 2 of vault-two-tier-narrative-vs-sessions-split: isolate
+	// the staging dir per test so MCP capture writes never touch the
+	// global XDG path.
+	cfg.Staging.Root = filepath.Join(vaultRoot, ".vv-staging")
 	return cfg
 }
 
@@ -752,9 +756,13 @@ func TestCaptureSessionTool_Success(t *testing.T) {
 		t.Error("iteration should be set")
 	}
 
-	// Verify note was actually written
+	// Verify note was actually written. Phase 2: staging-routed notes
+	// have an absolute note_path; vault-routed notes are vault-relative.
 	notePath := resp["note_path"].(string)
-	absPath := filepath.Join(cfg.VaultPath, notePath)
+	absPath := notePath
+	if !filepath.IsAbs(absPath) {
+		absPath = filepath.Join(cfg.VaultPath, notePath)
+	}
 	data, err := os.ReadFile(absPath)
 	if err != nil {
 		t.Fatalf("note file not found: %v", err)
@@ -801,9 +809,14 @@ func TestCaptureSessionTool_MinimalInput(t *testing.T) {
 		t.Errorf("status = %v, want captured", resp["status"])
 	}
 
-	// Verify the note was written and title derived from summary
+	// Verify the note was written and title derived from summary.
+	// Phase 2: staging-routed note_path is absolute; vault-routed is relative.
 	notePath := resp["note_path"].(string)
-	data, _ := os.ReadFile(filepath.Join(cfg.VaultPath, notePath))
+	absPath := notePath
+	if !filepath.IsAbs(absPath) {
+		absPath = filepath.Join(cfg.VaultPath, notePath)
+	}
+	data, _ := os.ReadFile(absPath)
 	content := string(data)
 	if !strings.Contains(content, "Fixed a bug in the login flow.") {
 		t.Error("note should contain the summary-derived title")
@@ -889,7 +902,11 @@ func TestCaptureSessionTool_SourceFlip_ClaudeCode(t *testing.T) {
 		t.Fatalf("json parse: %v", jsonErr)
 	}
 	notePath := resp["note_path"].(string)
-	data, readErr := os.ReadFile(filepath.Join(cfg.VaultPath, notePath))
+	absPath := notePath
+	if !filepath.IsAbs(absPath) {
+		absPath = filepath.Join(cfg.VaultPath, notePath)
+	}
+	data, readErr := os.ReadFile(absPath)
 	if readErr != nil {
 		t.Fatalf("read note: %v", readErr)
 	}
@@ -918,7 +935,11 @@ func TestCaptureSessionTool_SourceFlip_ZedMCP(t *testing.T) {
 		t.Fatalf("json parse: %v", jsonErr)
 	}
 	notePath := resp["note_path"].(string)
-	data, readErr := os.ReadFile(filepath.Join(cfg.VaultPath, notePath))
+	absPath := notePath
+	if !filepath.IsAbs(absPath) {
+		absPath = filepath.Join(cfg.VaultPath, notePath)
+	}
+	data, readErr := os.ReadFile(absPath)
 	if readErr != nil {
 		t.Fatalf("read note: %v", readErr)
 	}
@@ -947,7 +968,11 @@ func TestCaptureSessionTool_NilClaimFallback(t *testing.T) {
 		t.Errorf("status = %v, want captured", resp["status"])
 	}
 	notePath := resp["note_path"].(string)
-	data, readErr := os.ReadFile(filepath.Join(cfg.VaultPath, notePath))
+	absPath := notePath
+	if !filepath.IsAbs(absPath) {
+		absPath = filepath.Join(cfg.VaultPath, notePath)
+	}
+	data, readErr := os.ReadFile(absPath)
 	if readErr != nil {
 		t.Fatalf("read note: %v", readErr)
 	}
@@ -958,5 +983,55 @@ func TestCaptureSessionTool_NilClaimFallback(t *testing.T) {
 	// Legacy fallback session_id has the "zed-mcp:" prefix.
 	if !strings.Contains(content, "session_id: \"zed-mcp:") {
 		t.Errorf("note should contain `session_id: \"zed-mcp:...\"` on H6 fallback, got:\n%s", content)
+	}
+}
+
+// TestCaptureSessionTool_Phase2_StagingRoute is the v4-C2 entry-point
+// lock for the MCP tool — the most embarrassing pre-Phase-2 leak,
+// since /wrap calls vv_capture_session and would silently write to
+// the shared vault on every wrap. Asserts the file lands in staging
+// and does NOT leak into the vault sessions/ subtree.
+func TestCaptureSessionTool_Phase2_StagingRoute(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	t.Setenv("VIBE_VAULT_HOSTNAME", "testhost")
+	withNilClaim(t)
+
+	tool := NewCaptureSessionTool(cfg)
+	result, err := tool.Handler(json.RawMessage(`{
+		"summary": "Phase 2 staging route smoke test."
+	}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	var resp map[string]any
+	if jerr := json.Unmarshal([]byte(result), &resp); jerr != nil {
+		t.Fatalf("json: %v", jerr)
+	}
+	notePath := resp["note_path"].(string)
+
+	// File-in-staging?
+	if !filepath.IsAbs(notePath) {
+		t.Errorf("note_path %q is not absolute (staging-routed paths must be absolute)", notePath)
+	}
+	if !strings.HasPrefix(notePath, cfg.Staging.Root) {
+		t.Errorf("note_path %q is not under staging root %q", notePath, cfg.Staging.Root)
+	}
+	if _, err := os.Stat(notePath); err != nil {
+		t.Errorf("note file missing in staging: %v", err)
+	}
+
+	// File-NOT-in-vault?
+	project := resp["project"].(string)
+	vaultSessions := filepath.Join(cfg.VaultPath, "Projects", project, "sessions")
+	if entries, _ := os.ReadDir(vaultSessions); len(entries) > 0 {
+		var leaked []string
+		for _, e := range entries {
+			if !e.IsDir() && filepath.Ext(e.Name()) == ".md" {
+				leaked = append(leaked, e.Name())
+			}
+		}
+		if len(leaked) > 0 {
+			t.Errorf("MCP capture leaked into vault sessions/: %v", leaked)
+		}
 	}
 }
