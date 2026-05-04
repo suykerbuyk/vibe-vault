@@ -16,7 +16,7 @@ func TestRenderWrapText_DeprecationShimErrors(t *testing.T) {
 		t.Fatal("expected error from deprecation shim, got nil")
 	}
 	msg := err.Error()
-	for _, want := range []string{"retired", "DESIGN #103", "vv context sync"} {
+	for _, want := range []string{"retired", "DESIGN #104", "vv context sync"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error message missing %q; got: %s", want, msg)
 		}

@@ -3761,3 +3761,100 @@ Key architectural and design decisions in vibe-vault, with rationale.
      the doc updates) shipped iter 205. Phase 6 (live
      verification + retiring `mcp-driven-vault-sync`)
      remains.**
+
+104. **Retire LLM renderer; orchestrator-inline narrative is
+     canonical (DESIGN #104, iter 215).** The wrap LLM renderer
+     (`vv_render_wrap_text`, `WrapConfig`, the prompt
+     templates in `internal/mcp/wrap_prompts.go`) is removed
+     in favor of orchestrator-composed narrative inlined
+     directly into the surgical-apply tools. The renderer
+     was a mechanism in search of a justification: across
+     22 consecutive iters its actual production usage was
+     zero, every wrap shipped via surgical-apply fallback,
+     and each remediation layer solved a problem created
+     by the previous layer's premise.
+
+     **Context.** 22-iter surgical-fallback streak
+     (152, 156–158, 161, 166–167, 196–213). Renderer's
+     actual production usage was zero across that window.
+     Wall time 60–150s sonnet + frequent opus retry vs.
+     ~30s orchestrator-inline. Each fix layer
+     (wrap-model-tiering iters 152–162, DESIGN #92
+     dispatch retirement iter 168, vault-side-narrative-
+     seed Phase A iter 210, InputSchema gap iter 212,
+     summary-cap + opus-temperature regression iter 213)
+     solved a problem created by the previous layer's
+     premise. The orchestrator-inline path was the
+     canonical path for 22 iters running.
+
+     **Decision.** Retire `vv_render_wrap_text` +
+     `WrapConfig` + prompts. Keep providers
+     (`internal/llm/anthropic.go`, `openai.go`,
+     `google.go` — synthesis still uses them) +
+     keyresolver + `[providers]` config section.
+
+     **Migration.** Phase 1 deprecation shim returns
+     actionable error pointing at `vv context sync`. Hard
+     removal in follow-up PR-Y after consumer projects
+     sync (20 active consumers per the iter-215 grep-
+     verified surface — see "Editor-portability
+     constraint" below for the cadence implications).
+
+     **Editor-portability constraint.** /wrap as a slash
+     command depends on the runtime providing context-
+     aware narrative composition. Today that runtime is
+     Claude Code, and the orchestrator's full session
+     context (multi-iter dispatch arcs, carried-thread
+     instance counts, post-merge reconciliation framing —
+     the same context that `vault_side_narrative_seed`
+     was filed to capture) IS the narrative. Synthesis
+     (post-session enrichment via SessionEnd / Stop /
+     PreCompact hooks) remains editor-agnostic via
+     `[providers]` and `[enrichment]` config — Anthropic,
+     OpenAI, Google, and Grok are all supported through
+     the basic `Provider` interface and unaffected by
+     this PR. Zed users get session capture (renderer-
+     independent) but not /wrap. A future Zed-native
+     /wrap (or Aider-, Cursor-, or Grok-driven /wrap)
+     would need its own orchestrator-context-aware
+     narrative path; the `Provider` interface and config
+     schema are ready when that capability arrives, but
+     composing the narrative is no longer the binary's
+     job. The trade-off: speed and simplicity for current
+     Claude-Code-centric workflows (the actual usage
+     pattern, validated by 22 iters of surgical fallback
+     evidence), at the cost of a LLM-driver-agnostic
+     /wrap path that was never working anyway.
+
+     **`[wrap]` config section retired.** The entire
+     `[wrap]` TOML section is now obsolete (no consumer
+     remains). The iter-150-era
+     `[wrap].escalation_ladder` deprecation warning is
+     removed alongside the `WrapConfig` struct because
+     the warning's purpose was to bridge a renamed field
+     within an active config section; with the section
+     itself gone, the warning is dead code.
+     BurntSushi/toml's permissive decoder silently
+     ignores the orphan section in operators' existing
+     config.toml files; no migration tooling required.
+     Operators editing their config will see the orphan
+     section and remove it on next edit.
+
+     **Why this is not DESIGN #92 reverted.** #92
+     retired the sandboxed-executor agentic dispatch
+     but kept the simpler single-call render path. This
+     entry takes #92's principle one step further: not
+     just no agentic dispatch, but no LLM in the wrap
+     render path AT ALL. The orchestrator, which has
+     full session context including the seed-shaped
+     multi-iter arc reasoning the seed was filed to
+     capture, IS the renderer.
+
+     **What stays.** Synthesis agent
+     (`internal/synthesis/`) for SessionEnd / Stop /
+     PreCompact enrichment; LLM providers in
+     `internal/llm/`; `[providers]` config +
+     `vv config set-key`; `internal/wraprender/` (the
+     auto-heal marker-block re-renderer from DESIGN #90 —
+     different package, despite the name); all non-
+     renderer MCP tools.

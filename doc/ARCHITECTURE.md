@@ -228,36 +228,41 @@ Claude Code / AI agent
         │                              {iter_n, branch,
         │                               vault_has_uncommitted_writes,
         │                               last_iter_anchor_sha}
-        ├─── vv_render_wrap_text     → unified context-aware renderer (DESIGN #92):
-        │                              kind ∈ {iter_narrative, commit_msg,
-        │                                      iter_narrative_and_commit_msg};
-        │                              tier-string lookup via [wrap.tiers];
-        │                              single-turn Provider call; returns prose
+        ├─── vv_render_wrap_text     → [RETIRED v15 / shim only] (DESIGN #104):
+        │                              returns actionable error pointing at
+        │                              `vv context sync`; orchestrator now
+        │                              writes iter narratives inline. Kept for
+        │                              one binary release as a migration
+        │                              affordance for consumer projects whose
+        │                              wrap.md still calls this tool.
         │
         └─── prompt: vv_session_guidelines → agent instructions for capture
 ```
 
-### Canonical Wrap-Render Path (DESIGN #92, Direction-C)
+### Canonical Wrap-Render Path (DESIGN #104, orchestrator-inline)
 
 The bundle-synthesize / bundle-apply / dispatch-ladder pipeline
-(formerly DESIGN #83–#88) was retired iter 168 by Direction-C; the
-section above describing it is replaced by this one. The dispatch
-ladder was architecturally unable to produce the citation-rigor
-output its QC layer demanded — the executor was forbidden from
-fetching context yet QC required commit SHAs and per-paragraph
-citations. See DESIGN #92 for the full architectural-root-cause
-write-up.
+(formerly DESIGN #83–#88) was retired iter 168 by Direction-C
+(DESIGN #92), which collapsed dispatch onto a single-turn
+`vv_render_wrap_text` LLM call. The renderer itself was retired
+in surface v15 (DESIGN #104) after a 22-iter surgical-fallback
+streak (iters 196–213) demonstrated zero production usage and
+faster, more reliable orchestrator-inline narrative composition.
+The slash command now composes iter narrative + commit prose
+inline using full session context, then hands off to the
+mechanical surgical-apply tools.
 
-The new shape: **/wrap records history; it does not interpret
-history.** The slash command does shape detection and git/filesystem
-state collection; two new MCP tools handle the LLM-touching parts;
+The new shape: **/wrap records history; the orchestrator
+interprets history.** The slash command does shape detection and
+git/filesystem state collection; the orchestrator (Claude Code,
+today) composes the narrative inline using full session context;
 the existing surgical-apply tools handle vault and git plumbing.
 
 ```
 operator: /wrap
     │
     ▼
-slash command (templates/agentctx/commands/wrap.md, 218 lines)
+slash command (templates/agentctx/commands/wrap.md)
     │
     ├── vv_describe_iter_state(project?)
     │     → server-minimal record: {iter_n, branch,
@@ -273,30 +278,22 @@ slash command (templates/agentctx/commands/wrap.md, 218 lines)
     ├── shape detection (slash-command pattern-match):
     │     fresh-feature   | planning | reconciliation
     │     vault-only      | writes-already-landed
-    │     (5 shapes; only the first 2 always need an LLM call)
     │
     ├── if shape needs prose:
     │     parallel-fetch context bundle:
-    │       - vv_get_resume        → project_context.resume_state
-    │       - vv_get_iterations    → project_context.recent_iterations
-    │       - vv_get_friction_trends → project_context.friction_trends
+    │       - vv_get_resume        → resume_state
+    │       - vv_get_iterations    → recent_iterations
+    │       - vv_get_friction_trends → friction_trends
     │       (open_threads parsed from resume_state)
     │
-    │     vv_render_wrap_text(
-    │       kind: "iter_narrative_and_commit_msg" | "iter_narrative" | "commit_msg",
-    │       tier: "haiku" | "sonnet" | "opus",   # [wrap.tiers] lookup
-    │       iter_state: {iter_n, branch, last_iter_anchor_sha,
-    │                    commits_since_last_iter, files_changed,
-    │                    task_deltas, test_counts},
-    │       project_context: {resume_state, recent_iterations,
-    │                         open_threads, friction_trends}
-    │     )
-    │       │
-    │       ▼  single-turn Provider call (NOT AgenticProvider — retired)
-    │     → {narrative_title?, narrative_body?,
-    │        commit_subject?,  commit_prose_body?}
+    │     ▼  orchestrator-inline narrative composition (no LLM
+    │         tool call): the orchestrator's session context
+    │         (multi-iter dispatch arcs, carried-thread instance
+    │         counts, post-merge reconciliation framing) IS the
+    │         narrative. Composes {narrative_title, narrative_body,
+    │         commit_subject, commit_prose_body} directly.
     │
-    ├── mechanical apply:
+    ├── mechanical apply (surgical, no LLM):
     │     vv_append_iteration (auto-heals resume.md — D4b hook)
     │     vv_update_resume    (auto-heals resume.md — D4b hook)
     │     vv_thread_{insert,replace,remove}
@@ -325,42 +322,15 @@ The slash command computes the rest itself (commits, files, task
 deltas, test counts) so shape detection lives in editable markdown,
 not Go.
 
-**`vv_render_wrap_text` schema.**
-
-```
-input:  {
-  kind:    "iter_narrative" | "commit_msg" | "iter_narrative_and_commit_msg",
-  tier:    string,                   # [wrap.tiers] lookup → provider:model
-  iter_state: {
-    iter_n:                 int,
-    branch:                 string,
-    last_iter_anchor_sha:   string|null,
-    commits_since_last_iter:[{sha, subject}],
-    files_changed:          [string],
-    task_deltas:            {added, retired, cancelled},
-    test_counts:            {unit, integration, lint}
-  },
-  project_context: {
-    resume_state:        string,
-    recent_iterations:   string,
-    open_threads:        [string],
-    friction_trends:     object
-  }
-}
-output: {
-  narrative_title?:    string,    # when kind includes "iter_narrative"
-  narrative_body?:     string,    # when kind includes "iter_narrative"
-  commit_subject?:     string,    # when kind includes "commit_msg"
-  commit_prose_body?:  string     # when kind includes "commit_msg"
-}
-```
-
-Single-turn `Provider.ChatCompletion`; no multi-turn loop, no
-auto-escalation. Operator re-runs with `--tier=opus` if the output
-is poor. Prompt templates (system preamble + 3 kind variants) live
-as Go string constants in `internal/mcp/wrap_prompts.go`; golden
-tests in `tools_render_wrap_text_test.go` snapshot prompt strings
-so prompt edits surface as reviewable diffs.
+**`vv_render_wrap_text` (retired, deprecation shim only).** The
+unified-renderer schema described in earlier revisions of this
+document is retired in surface v15. The tool registration remains
+for one binary release as a migration affordance: the handler
+returns an actionable error pointing operators at
+`vv context sync` to refresh their `wrap.md` template. See DESIGN
+#104 for the full retirement rationale; the old schema (`kind` /
+`tier` / `iter_state` / `project_context` / `vault_side_narrative_seed`)
+is no longer load-bearing on any code path.
 
 **D4b auto-heal hooks for marker-bounded resume.md state regions.**
 DESIGN #90 introduced three marker-bounded regions
@@ -566,8 +536,7 @@ for design rationale and options weighed, and `doc/OPERATIONS.md`
 | `mcp` | `tools_thread.go` | `vv_thread_insert`, `vv_thread_replace`, `vv_thread_remove` — surgical Open Threads subsection edits on `resume.md` using `mdutil` subsection family; rejects the reserved "Carried forward" slug |
 | `mcp` | `tools_carried.go` | `vv_carried_add`, `vv_carried_remove`, `vv_carried_promote_to_task` — manage `Carried forward` bullet list in resume.md via `mdutil.CarriedBullet` helpers; promote creates a task file and removes the bullet atomically |
 | `mcp` | `tools_describe_iter_state.go` | `vv_describe_iter_state` — minimal iter-state record (DESIGN #92). Returns `{iter_n, branch, vault_has_uncommitted_writes, last_iter_anchor_sha}`. Server-computable fields only; the slash command computes `commits_since_last_iter` / `files_changed` / `task_deltas` / `test_counts` itself via git/filesystem anchored by `last_iter_anchor_sha`. |
-| `mcp` | `tools_render_wrap_text.go` | `vv_render_wrap_text` — unified context-aware wrap-text renderer (DESIGN #92). Single tool with a `kind:` discriminator (`iter_narrative` \| `commit_msg` \| `iter_narrative_and_commit_msg`); single-turn `Provider.ChatCompletion` call (NOT `AgenticProvider` — retired in Direction-C); tier-string lookup via `[wrap.tiers]`. Operator re-runs with `--tier=opus` if output is poor (no auto-escalation). |
-| `mcp` | `wrap_prompts.go` | Prompt-template constants for `vv_render_wrap_text` (DESIGN #92): one common system preamble plus three kind-specific user-prompt constants. Templates are byte-stable Go string constants so prompt edits surface as reviewable diffs (golden tests in `tools_render_wrap_text_test.go`). |
+| `mcp` | `tools_render_wrap_text.go` | `vv_render_wrap_text` — deprecation shim (DESIGN #104). The original unified context-aware renderer retired in surface v15 after a 22-iter surgical-fallback streak demonstrated zero production usage; orchestrator-inline narrative composition is now canonical. The handler returns an actionable error directing operators to `vv context sync` to refresh wrap.md. Tool registration kept for one binary release as a migration affordance for consumer projects whose wrap.md still calls this tool. |
 | `mcp` | `resume_state_blocks.go` | D4b auto-heal hook (DESIGN #92). Helpers `collectActiveTasks` / `computeCurrentState` / `collectHistoryRows` extracted from the deleted `tools_apply_wrap_bundle.go`. Called from `NewAppendIterationTool` and `NewUpdateResumeTool` after their primary write succeeds: re-renders the three marker-bounded resume.md sub-regions (active-tasks, current-state, project-history-tail) from filesystem ground truth via `wraprender.ApplyMarkerBlocks`. Byte-identity regression-locked against the pre-Direction-C Step-9 output. |
 | `wraprender` | `markers.go` | Renderer for resume.md state-derived sub-regions (DESIGN #90 mechanism preserved by DESIGN #92 D4b). Public API: `RenderActiveTasks`, `RenderCurrentState`, `RenderProjectHistoryTail`, `ApplyMarkerBlocks`. The latter is **self-healing** — it replaces marker-pair contents in place when the pair is present, OR inserts the pair at a sensible default location relative to existing H2/H3 anchors when absent. Now driven by the D4b post-write hooks in `vv_append_iteration` and `vv_update_resume` (formerly Step 9 of the retired `ApplyBundle`). |
 | `mcp` | `tools_agents.go` | `vv_get_agent_definition(name)` — generic read path for the embedded agent registry. The wrap-executor agent template retired with the dispatch ladder (DESIGN #92); the registry's `agents/` directory ships empty in Direction-C. Tool surfaces remain as scaffolding for future agent-flow features. |
@@ -623,7 +592,7 @@ for design rationale and options weighed, and `doc/OPERATIONS.md`
 | `effectiveness` | `effectiveness.go` | Context depth vs session outcome correlation (cohort analysis, Pearson correlation) |
 | `identity` | `identity.go` | `.vibe-vault.toml` parser — explicit project name/domain/tags override |
 | `llm` | `provider.go`, `types.go`, `retry.go`, `openai.go`, `anthropic.go`, `google.go` | Multi-provider LLM abstraction: `Provider` interface (single-turn `ChatCompletion`), OpenAI-compatible/Anthropic/Gemini implementations, retry with backoff. `NewProvider(enrich, providers)` calls `ResolveAPIKey(enrich.Provider, providers)` to obtain the key (config-first / env-fallback / actionable-error), so hook + synthesis paths share the same resolution semantics as the wrap-render path (DESIGN #89, #92). The `AgenticProvider` interface and `AnthropicAgentic` implementation retired in DESIGN #92 as dead code. |
-| `llm` | `keyresolver.go` | `ResolveAPIKey(provider, providers) (string, error)` — single resolution point for Anthropic / OpenAI / Google API keys. Three-tier precedence: `[providers.<P>].api_key` (config) → `os.Getenv(envVarFor(provider))` → actionable error naming both `vv config set-key <provider> <key>` and the env var. Called by `NewProvider` (hook + synthesis path, routes by `[enrichment].provider`) AND by the wrap-render path in `internal/mcp/tools_render_wrap_text.go` (routes by `[wrap.tiers]` provider-prefix per DESIGN #92). Different routing axes, identical resolution (DESIGN #89). |
+| `llm` | `keyresolver.go` | `ResolveAPIKey(provider, providers) (string, error)` — single resolution point for Anthropic / OpenAI / Google API keys. Three-tier precedence: `[providers.<P>].api_key` (config) → `os.Getenv(envVarFor(provider))` → actionable error naming both `vv config set-key <provider> <key>` and the env var. Called by `NewProvider` (hook + synthesis path, routes by `[enrichment].provider`). The wrap-render caller retired with `vv_render_wrap_text` in DESIGN #104; synthesis remains the only first-party consumer (DESIGN #89). |
 | `templates` (internal) | `templates.go`, `diff.go`, `reset.go` | Template registry, vault-vs-embedded comparison, `vv templates` status reporting |
 | `vaultsync` | `vaultsync.go` | `Classify()` — file classification (Regenerable/AppendOnly/Manual/ConfigFile) for conflict resolution; `GetStatus()` — vault git state (branch, clean/dirty, ahead/behind); `Pull()` — fetch + rebase with auto-stash and classification-driven conflict resolution; `CommitAndPush()` — stage all, commit with hostname stamp, push with rebase-fallback + force-with-lease convergence to prior remotes; `EnsureRemote()` — verify origin exists |
 | `synthesis` | `types.go` | Data structures: `Input`, `Result`, `Learning`, `StaleEntry`, `ResumeUpdate`, `TaskUpdate`, `ActionReport` |
