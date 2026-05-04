@@ -89,12 +89,25 @@ type wrapRenderProjectContextInput struct {
 }
 
 // wrapRenderRequest is the full vv_render_wrap_text request shape.
+//
+// VaultSideNarrativeSeed is an optional orchestrator-supplied prose
+// field that the renderer treats as load-bearing ground truth in the
+// narrative_body and summary. It carries context that does not live in
+// the commit graph (verification milestones, multi-iter dispatch arcs,
+// post-merge reconciliation framing, carried-thread instance counts).
+// Empty / omitted is the default; non-empty seed substitutes into the
+// `iter_narrative` and `iter_narrative_and_commit_msg` prompt templates
+// per D3 of the vault-side-narrative-seed task. The `omitempty` JSON
+// tag pins empty-vs-omitted equivalence per L3 (both render as the
+// `(none provided)` placeholder per MC1). Hard-errors at validation
+// when supplied with kind=commit_msg per D2.
 type wrapRenderRequest struct {
-	Kind           string                        `json:"kind"`
-	Tier           string                        `json:"tier"`
-	ProjectName    string                        `json:"project_name"`
-	IterState      wrapRenderIterStateInput      `json:"iter_state"`
-	ProjectContext wrapRenderProjectContextInput `json:"project_context"`
+	Kind                   string                        `json:"kind"`
+	Tier                   string                        `json:"tier"`
+	ProjectName            string                        `json:"project_name"`
+	IterState              wrapRenderIterStateInput      `json:"iter_state"`
+	ProjectContext         wrapRenderProjectContextInput `json:"project_context"`
+	VaultSideNarrativeSeed string                        `json:"vault_side_narrative_seed,omitempty"`
 }
 
 // wrapRenderResponse is the rendered prose returned to the slash
@@ -172,6 +185,13 @@ func validateWrapRenderRequest(req wrapRenderRequest) error {
 	if req.IterState.IterN <= 0 {
 		return fmt.Errorf("iter_state.iter_n must be a positive integer")
 	}
+	if len(req.VaultSideNarrativeSeed) > vaultSideNarrativeSeedMaxChars {
+		return fmt.Errorf("vault_side_narrative_seed exceeds %d character limit (got %d); split context across multiple wraps if needed",
+			vaultSideNarrativeSeedMaxChars, len(req.VaultSideNarrativeSeed))
+	}
+	if req.Kind == WrapRenderKindCommitMsg && req.VaultSideNarrativeSeed != "" {
+		return fmt.Errorf("vault_side_narrative_seed is not supported for kind=commit_msg; commit messages are mechanically derived from iter_state")
+	}
 	return nil
 }
 
@@ -200,6 +220,11 @@ func renderUserPrompt(req wrapRenderRequest) (string, error) {
 		frictionJSON = json.RawMessage("{}")
 	}
 
+	seedOrPlaceholder := req.VaultSideNarrativeSeed
+	if seedOrPlaceholder == "" {
+		seedOrPlaceholder = "(none provided)"
+	}
+
 	rendered := tmpl
 	rendered = strings.ReplaceAll(rendered, "{{project_name}}", req.ProjectName)
 	rendered = strings.ReplaceAll(rendered, "{{iter_n}}", fmt.Sprintf("%d", req.IterState.IterN))
@@ -208,6 +233,7 @@ func renderUserPrompt(req wrapRenderRequest) (string, error) {
 	rendered = strings.ReplaceAll(rendered, "{{recent_iterations}}", req.ProjectContext.RecentIterations)
 	rendered = strings.ReplaceAll(rendered, "{{open_threads}}", strings.Join(req.ProjectContext.OpenThreads, ", "))
 	rendered = strings.ReplaceAll(rendered, "{{friction_trends_json}}", string(frictionJSON))
+	rendered = strings.ReplaceAll(rendered, "{{vault_side_narrative_seed}}", seedOrPlaceholder)
 	return rendered, nil
 }
 
@@ -350,6 +376,12 @@ func NewRenderWrapTextTool(cfg config.Config) Tool {
 // front-matter writer cannot accept anything the renderer would have
 // rejected.
 const summaryMaxChars = 200
+
+// vaultSideNarrativeSeedMaxChars is the hard cap on the optional
+// VaultSideNarrativeSeed argument per D4 of the
+// vault-side-narrative-seed task. ~1K tokens at typical ratios.
+// Validation enforced in validateWrapRenderRequest.
+const vaultSideNarrativeSeedMaxChars = 4096
 
 // validateRenderSummary enforces the single-line, ≤200-char contract on
 // a non-empty Summary value. Returns an error matching the Path A

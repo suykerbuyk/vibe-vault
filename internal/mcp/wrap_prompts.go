@@ -50,6 +50,17 @@ project_context.open_threads (slug list):
 project_context.friction_trends:
 {{friction_trends_json}}
 
+vault_side_narrative_seed (orchestrator-supplied context):
+{{vault_side_narrative_seed}}
+
+You are also given a ` + "`vault_side_narrative_seed`" + ` field with orchestrator-supplied narrative context that lives outside the commit graph (e.g., verification milestones, multi-iter dispatch arcs, post-merge reconciliation framing, carried-thread instance counts). Treat the seed as load-bearing ground truth: incorporate its claims into the narrative_body as facts, alongside the iter_state-derived citations. Do not paraphrase or hedge the seed.
+
+When iter_state is empty (zero commits, zero files, zero task deltas), the seed IS the substance — write the narrative around the seed's claims with iter_state-derived facts as supporting context. Do not produce 'null cycle' framing when a seed is provided.
+
+If the seed and iter_state appear to disagree (e.g., seed claims work shipped but iter_state shows zero commits), the seed is operator-supplied ground truth and supersedes iter_state's silence — the seed exists precisely to fill iter_state gaps.
+
+The ` + "`summary`" + ` field is also seed-augmented when seed is present — incorporate seed-derived facts into the 1-sentence summary alongside the iter_state-derived shape/citations.
+
 Output a JSON object matching this schema:
 
   {
@@ -106,6 +117,17 @@ project_context.open_threads (slug list):
 
 project_context.friction_trends:
 {{friction_trends_json}}
+
+vault_side_narrative_seed (orchestrator-supplied context):
+{{vault_side_narrative_seed}}
+
+You are also given a ` + "`vault_side_narrative_seed`" + ` field with orchestrator-supplied narrative context that lives outside the commit graph (e.g., verification milestones, multi-iter dispatch arcs, post-merge reconciliation framing, carried-thread instance counts). Treat the seed as load-bearing ground truth: incorporate its claims into the narrative_body as facts, alongside the iter_state-derived citations. Do not paraphrase or hedge the seed.
+
+When iter_state is empty (zero commits, zero files, zero task deltas), the seed IS the substance — write the narrative around the seed's claims with iter_state-derived facts as supporting context. Do not produce 'null cycle' framing when a seed is provided.
+
+If the seed and iter_state appear to disagree (e.g., seed claims work shipped but iter_state shows zero commits), the seed is operator-supplied ground truth and supersedes iter_state's silence — the seed exists precisely to fill iter_state gaps.
+
+The ` + "`summary`" + ` field is also seed-augmented when seed is present — incorporate seed-derived facts into the 1-sentence summary alongside the iter_state-derived shape/citations.
 
 Output a JSON object matching this schema:
 

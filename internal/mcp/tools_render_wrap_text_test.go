@@ -6,6 +6,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -635,5 +637,387 @@ func TestRenderWrapText_DefaultProviderFactoryUnknownTier(t *testing.T) {
 	_, err := wrapRenderProviderFactory(cfg, "sonnet")
 	if err == nil || !strings.Contains(err.Error(), "unknown tier") {
 		t.Errorf("expected unknown-tier error, got %v", err)
+	}
+}
+
+// --- Phase A: vault_side_narrative_seed tests (vault-side-narrative-seed task) ---
+
+// renderArgsWithSeed returns the standard sample args with an optional
+// vault_side_narrative_seed value injected. When seed is nil, the field
+// is omitted from the JSON entirely (exercising the omitempty
+// equivalence per L3).
+func renderArgsWithSeed(t *testing.T, kind string, seed *string) json.RawMessage {
+	t.Helper()
+	args := map[string]any{
+		"kind":         kind,
+		"tier":         "sonnet",
+		"project_name": "myproj",
+		"iter_state": map[string]any{
+			"iter_n":               42,
+			"branch":               "main",
+			"last_iter_anchor_sha": "abc123",
+			"commits_since_last_iter": []map[string]string{
+				{"sha": "deadbeef", "subject": "feat: ship"},
+			},
+			"files_changed": []string{"main.go"},
+			"task_deltas": map[string]any{
+				"added":     []string{},
+				"retired":   []string{"oldtask"},
+				"cancelled": []string{},
+			},
+			"test_counts": map[string]int{
+				"unit": 1974, "integration": 31, "lint": 0,
+			},
+		},
+		"project_context": map[string]any{
+			"resume_state":      "## Current State\n- Iterations: 168",
+			"recent_iterations": "### Iteration 41 — Prior\n\nbody.",
+			"open_threads":      []string{"slug-a", "slug-b"},
+			"friction_trends":   map[string]any{"alert": false},
+		},
+	}
+	if seed != nil {
+		args["vault_side_narrative_seed"] = *seed
+	}
+	out, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	return out
+}
+
+// Test 1: kind=iter_narrative with non-empty seed — seed substring
+// appears verbatim in scripted.lastUser (rendered prompt).
+func TestRenderWrapText_VaultSideNarrativeSeedInIterNarrativePrompt(t *testing.T) {
+	cfg := configWithTiers(t)
+	scripted := &scriptedProvider{
+		response: `{"narrative_title":"T","narrative_body":"B."}`,
+	}
+	withWrapRenderProviderFactory(t, scripted)
+
+	seed := "Iter 42 ships post-merge reconciliation context not in iter_state."
+	tool := NewRenderWrapTextTool(cfg)
+	if _, err := tool.Handler(renderArgsWithSeed(t, WrapRenderKindIterNarrative, &seed)); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if !strings.Contains(scripted.lastUser, seed) {
+		t.Errorf("seed substring missing from rendered iter_narrative prompt\nseed: %q\nprompt:\n%s",
+			seed, scripted.lastUser)
+	}
+	if strings.Contains(scripted.lastUser, "(none provided)") {
+		t.Errorf("placeholder leaked into prompt despite non-empty seed; prompt:\n%s", scripted.lastUser)
+	}
+}
+
+// Test 2: kind=iter_narrative_and_commit_msg with non-empty seed —
+// substring appears in the joint prompt.
+func TestRenderWrapText_VaultSideNarrativeSeedInJointPrompt(t *testing.T) {
+	cfg := configWithTiers(t)
+	scripted := &scriptedProvider{
+		response: `{"narrative_title":"T","narrative_body":"B","commit_subject":"feat: x","commit_prose_body":"CB"}`,
+	}
+	withWrapRenderProviderFactory(t, scripted)
+
+	seed := "Verification milestone: third dispatch in five-phase epic."
+	tool := NewRenderWrapTextTool(cfg)
+	if _, err := tool.Handler(renderArgsWithSeed(t, WrapRenderKindIterNarrativeAndCommitMsg, &seed)); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if !strings.Contains(scripted.lastUser, seed) {
+		t.Errorf("seed substring missing from rendered joint prompt\nseed: %q\nprompt:\n%s",
+			seed, scripted.lastUser)
+	}
+	if strings.Contains(scripted.lastUser, "(none provided)") {
+		t.Errorf("placeholder leaked into joint prompt despite non-empty seed; prompt:\n%s", scripted.lastUser)
+	}
+}
+
+// Test 3: kind=commit_msg with non-empty seed — handler hard-errors
+// at validation per D2; provider must not be called.
+func TestRenderWrapText_VaultSideNarrativeSeedRejectedForCommitMsg(t *testing.T) {
+	cfg := configWithTiers(t)
+	scripted := &scriptedProvider{
+		response: `{"commit_subject":"feat: x","commit_prose_body":"B"}`,
+	}
+	withWrapRenderProviderFactory(t, scripted)
+
+	seed := "should-be-rejected seed for commit_msg kind"
+	tool := NewRenderWrapTextTool(cfg)
+	_, err := tool.Handler(renderArgsWithSeed(t, WrapRenderKindCommitMsg, &seed))
+	if err == nil {
+		t.Fatal("expected error for seed-with-commit_msg kind")
+	}
+	if !strings.Contains(err.Error(), "vault_side_narrative_seed is not supported for kind=commit_msg") {
+		t.Errorf("error should match D2 message; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "mechanically derived from iter_state") {
+		t.Errorf("error should explain mechanical-derivation rationale; got: %v", err)
+	}
+	if scripted.calls != 0 {
+		t.Errorf("provider must not be called when validation rejects request; calls = %d", scripted.calls)
+	}
+}
+
+// Test 4: empty seed ("") renders the prompt section as "(none
+// provided)" per MC1; literal empty value does not appear as a leak.
+func TestRenderWrapText_VaultSideNarrativeSeedEmptyRendersPlaceholder(t *testing.T) {
+	cfg := configWithTiers(t)
+	scripted := &scriptedProvider{
+		response: `{"narrative_title":"T","narrative_body":"B."}`,
+	}
+	withWrapRenderProviderFactory(t, scripted)
+
+	empty := ""
+	tool := NewRenderWrapTextTool(cfg)
+	if _, err := tool.Handler(renderArgsWithSeed(t, WrapRenderKindIterNarrative, &empty)); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if !strings.Contains(scripted.lastUser, "(none provided)") {
+		t.Errorf("placeholder missing from rendered prompt for empty seed\nprompt:\n%s", scripted.lastUser)
+	}
+	// The {{vault_side_narrative_seed}} token must have been substituted
+	// — no raw template token should leak.
+	if strings.Contains(scripted.lastUser, "{{vault_side_narrative_seed}}") {
+		t.Errorf("raw template token leaked into prompt; substitution failed:\n%s", scripted.lastUser)
+	}
+}
+
+// Test 5: omitted seed (field absent from JSON, omitempty equivalence
+// per L3) renders identically to the empty-seed case.
+func TestRenderWrapText_VaultSideNarrativeSeedOmittedRendersPlaceholder(t *testing.T) {
+	cfg := configWithTiers(t)
+
+	// Render with omitted seed.
+	scriptedOmitted := &scriptedProvider{
+		response: `{"narrative_title":"T","narrative_body":"B."}`,
+	}
+	withWrapRenderProviderFactory(t, scriptedOmitted)
+	toolOmitted := NewRenderWrapTextTool(cfg)
+	if _, err := toolOmitted.Handler(renderArgsWithSeed(t, WrapRenderKindIterNarrative, nil)); err != nil {
+		t.Fatalf("handler (omitted): %v", err)
+	}
+
+	// Render with explicit empty-string seed (must restore factory after
+	// the omitted-side run, since withWrapRenderProviderFactory's cleanup
+	// is t.Cleanup-scoped to the test, not the call site).
+	scriptedEmpty := &scriptedProvider{
+		response: `{"narrative_title":"T","narrative_body":"B."}`,
+	}
+	withWrapRenderProviderFactory(t, scriptedEmpty)
+	toolEmpty := NewRenderWrapTextTool(cfg)
+	empty := ""
+	if _, err := toolEmpty.Handler(renderArgsWithSeed(t, WrapRenderKindIterNarrative, &empty)); err != nil {
+		t.Fatalf("handler (empty): %v", err)
+	}
+
+	if scriptedOmitted.lastUser != scriptedEmpty.lastUser {
+		t.Errorf("omitted-seed prompt must equal empty-seed prompt (omitempty equivalence)\n"+
+			"omitted:\n%s\n--\nempty:\n%s", scriptedOmitted.lastUser, scriptedEmpty.lastUser)
+	}
+	if !strings.Contains(scriptedOmitted.lastUser, "(none provided)") {
+		t.Errorf("omitted-seed prompt missing placeholder\nprompt:\n%s", scriptedOmitted.lastUser)
+	}
+}
+
+// Test 6: seed at exactly 4096 chars passes validation.
+func TestValidateWrapRenderRequest_VaultSideNarrativeSeedAtBoundary(t *testing.T) {
+	req := wrapRenderRequest{
+		Kind:        WrapRenderKindIterNarrative,
+		Tier:        "sonnet",
+		ProjectName: "p",
+		IterState: wrapRenderIterStateInput{
+			IterN: 1,
+		},
+		VaultSideNarrativeSeed: strings.Repeat("x", 4096),
+	}
+	if err := validateWrapRenderRequest(req); err != nil {
+		t.Errorf("seed of exactly %d chars should pass; got: %v", vaultSideNarrativeSeedMaxChars, err)
+	}
+}
+
+// Test 7: seed at 4097 chars rejected with the actionable error.
+func TestValidateWrapRenderRequest_VaultSideNarrativeSeedExceedsBoundary(t *testing.T) {
+	req := wrapRenderRequest{
+		Kind:        WrapRenderKindIterNarrative,
+		Tier:        "sonnet",
+		ProjectName: "p",
+		IterState: wrapRenderIterStateInput{
+			IterN: 1,
+		},
+		VaultSideNarrativeSeed: strings.Repeat("y", 4097),
+	}
+	err := validateWrapRenderRequest(req)
+	if err == nil {
+		t.Fatalf("seed of %d chars should be rejected", 4097)
+	}
+	if !strings.Contains(err.Error(), "vault_side_narrative_seed exceeds 4096 character limit") {
+		t.Errorf("error should cite the 4096 limit; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "got 4097") {
+		t.Errorf("error should report the actual length; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "split context across multiple wraps if needed") {
+		t.Errorf("error should be actionable; got: %v", err)
+	}
+}
+
+// Test 8: seed with markdown special characters (backticks, headings,
+// fences) survives substitution unescaped — drops into the prompt
+// verbatim.
+func TestRenderWrapText_VaultSideNarrativeSeedWithMarkdownSurvives(t *testing.T) {
+	cfg := configWithTiers(t)
+	scripted := &scriptedProvider{
+		response: `{"narrative_title":"T","narrative_body":"B."}`,
+	}
+	withWrapRenderProviderFactory(t, scripted)
+
+	seed := "## Heading\n\n" +
+		"Inline `backticks` and ```fenced code``` and a list:\n" +
+		"- item 1\n" +
+		"- item 2 with `code`\n\n" +
+		"```go\nfunc x() {}\n```\n"
+	tool := NewRenderWrapTextTool(cfg)
+	if _, err := tool.Handler(renderArgsWithSeed(t, WrapRenderKindIterNarrative, &seed)); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if !strings.Contains(scripted.lastUser, seed) {
+		t.Errorf("markdown-laden seed substring missing from rendered prompt verbatim\nseed:\n%s\nprompt:\n%s",
+			seed, scripted.lastUser)
+	}
+}
+
+// Test 9: golden-snapshot — D3 instruction paragraph ("Treat the seed
+// as load-bearing ground truth") appears verbatim with a representative
+// seed; placeholder is replaced when seed is non-empty. Table-driven
+// across both narrative kinds.
+func TestRenderUserPrompt_VaultSideNarrativeSeedGoldenSnapshot(t *testing.T) {
+	const repSeed = "Iter 209 is the second of 2-3 recommended verification wraps for iterations-summary-frontmatter Phase A. iter-208 PR rebase-merged to main preserving 3 commits."
+
+	cases := []struct {
+		name string
+		kind string
+	}{
+		{"iter_narrative", WrapRenderKindIterNarrative},
+		{"iter_narrative_and_commit_msg", WrapRenderKindIterNarrativeAndCommitMsg},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := wrapRenderRequest{
+				Kind:        tc.kind,
+				Tier:        "sonnet",
+				ProjectName: "vibe-vault",
+				IterState: wrapRenderIterStateInput{
+					IterN:                42,
+					Branch:               "main",
+					LastIterAnchorSha:    "abcd",
+					CommitsSinceLastIter: []wrapRenderCommitInput{{SHA: "deadbeef", Subject: "feat: x"}},
+					FilesChanged:         []string{"a.go"},
+					TestCounts:           wrapRenderTestCountsInput{Unit: 1},
+				},
+				ProjectContext: wrapRenderProjectContextInput{
+					ResumeState:      "RS",
+					RecentIterations: "RI",
+					OpenThreads:      []string{"a"},
+					FrictionTrends:   json.RawMessage(`{"k":1}`),
+				},
+				VaultSideNarrativeSeed: repSeed,
+			}
+			got, err := renderUserPrompt(req)
+			if err != nil {
+				t.Fatalf("renderUserPrompt: %v", err)
+			}
+			// D3 instruction substring (verbatim).
+			if !strings.Contains(got, "Treat the seed as load-bearing ground truth") {
+				t.Errorf("rendered prompt missing D3 instruction clause; rendered:\n%s", got)
+			}
+			// Seed substring (verbatim).
+			if !strings.Contains(got, repSeed) {
+				t.Errorf("rendered prompt missing representative seed; rendered:\n%s", got)
+			}
+			// Placeholder must be replaced.
+			if strings.Contains(got, "(none provided)") {
+				t.Errorf("placeholder leaked despite non-empty seed; rendered:\n%s", got)
+			}
+			// Section header.
+			if !strings.Contains(got, "vault_side_narrative_seed (orchestrator-supplied context):") {
+				t.Errorf("rendered prompt missing seed section header; rendered:\n%s", got)
+			}
+		})
+	}
+}
+
+// Test 10: M1 + M2 instruction clauses appear verbatim in both
+// narrative-kind rendered prompts.
+func TestRenderUserPrompt_VaultSideNarrativeSeedInstructionClauses(t *testing.T) {
+	for _, kind := range []string{WrapRenderKindIterNarrative, WrapRenderKindIterNarrativeAndCommitMsg} {
+		t.Run(kind, func(t *testing.T) {
+			req := wrapRenderRequest{
+				Kind:        kind,
+				Tier:        "sonnet",
+				ProjectName: "p",
+				IterState: wrapRenderIterStateInput{
+					IterN: 1,
+				},
+				VaultSideNarrativeSeed: "any seed",
+			}
+			got, err := renderUserPrompt(req)
+			if err != nil {
+				t.Fatalf("renderUserPrompt: %v", err)
+			}
+			// M1 clause: "the seed IS the substance"
+			if !strings.Contains(got, "the seed IS the substance") {
+				t.Errorf("M1 clause missing for kind %q; rendered:\n%s", kind, got)
+			}
+			// M2 clause: "seed is operator-supplied ground truth and
+			// supersedes iter_state's silence"
+			if !strings.Contains(got, "seed is operator-supplied ground truth and supersedes iter_state's silence") {
+				t.Errorf("M2 clause missing for kind %q; rendered:\n%s", kind, got)
+			}
+		})
+	}
+
+	// Sanity: M1/M2 clauses do NOT appear in the commit_msg template
+	// (D2 — seed never flows there).
+	reqCM := wrapRenderRequest{
+		Kind:        WrapRenderKindCommitMsg,
+		Tier:        "sonnet",
+		ProjectName: "p",
+		IterState: wrapRenderIterStateInput{
+			IterN: 1,
+		},
+	}
+	gotCM, err := renderUserPrompt(reqCM)
+	if err != nil {
+		t.Fatalf("renderUserPrompt commit_msg: %v", err)
+	}
+	if strings.Contains(gotCM, "the seed IS the substance") {
+		t.Error("commit_msg template must not carry the seed M1 clause")
+	}
+}
+
+// Test 11: templates/agentctx/commands/wrap.md carries the new
+// "Composing the vault_side_narrative_seed" sub-section with both
+// canonical example shape strings.
+func TestWrapTemplate_VaultSideNarrativeSeedSubsection(t *testing.T) {
+	// Tests run with cwd = package dir (internal/mcp). The template
+	// sits at the repo root: ../../templates/agentctx/commands/wrap.md.
+	path := filepath.Join("..", "..", "templates", "agentctx", "commands", "wrap.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read wrap.md: %v", err)
+	}
+	body := string(data)
+
+	for _, want := range []string{
+		"### Composing the vault_side_narrative_seed",
+		"Verification-milestone shape (iter 208)",
+		"Post-merge reconciliation shape (iter 209)",
+		"vault_side_narrative_seed = \"<orchestrator-supplied prose, ≤4096 chars>\"",
+		"`commit_msg` kind hard-errors when seed is non-empty",
+		"`(none provided)`",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("wrap.md missing required substring %q", want)
+		}
 	}
 }
