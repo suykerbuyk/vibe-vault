@@ -139,7 +139,7 @@ vv_render_wrap_text(
     project_context = {resume_state, recent_iterations,
                        open_threads, friction_trends},
 )
-→ {narrative_title, narrative_body, commit_subject, commit_prose_body}
+→ {narrative_title, narrative_body, summary, commit_subject, commit_prose_body}
 ```
 
 **`bookkeeping`** — minimal narrative (`kind = iter_narrative`).
@@ -155,7 +155,7 @@ vv_render_wrap_text(
     project_context = {resume_state: "", recent_iterations,
                        open_threads: [], friction_trends: {}},
 )
-→ {narrative_title, narrative_body}
+→ {narrative_title, narrative_body, summary}
 ```
 
 **`writes-already-landed`** — skip render. Compose the commit message
@@ -171,10 +171,18 @@ Order matters: iter row, then thread/carried, then commit msg, then
 session capture.
 
 1. **`vv_append_iteration`** — append the new row to `iterations.md`.
-   Skip on `writes-already-landed`. The auto-heal hook re-renders the
-   resume.md state-derived regions (`vv:active-tasks`,
-   `vv:current-state`, `vv:project-history-tail`) from filesystem
-   ground truth post-write — no separate marker-block step required.
+   Skip on `writes-already-landed`. Pass the renderer's `summary` and
+   the Stage-2 shape verbatim as optional args (`summary=<from
+   renderer>`, `shape=<classified>`) so the writer emits a YAML
+   front-matter block between the heading and body. The block feeds
+   `vv_get_iterations(format=summary)` at the structured-digest fast
+   path; absence falls back to first-paragraph extraction at read time
+   without breaking anything. For `bookkeeping` shape: pass
+   `shape="bookkeeping"`; the renderer still produces `summary`. The
+   auto-heal hook re-renders the resume.md state-derived regions
+   (`vv:active-tasks`, `vv:current-state`, `vv:project-history-tail`)
+   from filesystem ground truth post-write — no separate marker-block
+   step required.
 2. **`vv_update_resume`** — mutate resume.md narrative sections only
    when the wrap carries non-state changes. Auto-heal hook also fires.
 3. **Thread/carried mutations** as needed:
