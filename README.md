@@ -460,12 +460,18 @@ vv vault push --message "sync after refactor"      # commit + push with custom m
 The vault is a git repository shared across machines. `vv vault pull` fetches
 upstream changes and rebases local commits, automatically resolving conflicts
 based on file type: auto-generated files (`history.md`, session index) accept
-upstream and are regenerated locally; session notes (unique timestamps per
-machine) have near-zero conflict risk; manual files (`knowledge.md`) accept
-upstream but are flagged for human review. `vv vault push` stages all changes,
-commits with a hostname-stamped message, and pushes — retrying once via
-pull-rebase if rejected. On final failure, it surfaces the error for
-interactive resolution.
+upstream and are regenerated locally; manual files (`knowledge.md`) accept
+upstream but are flagged for human review. Session notes are
+**structurally immune** to cross-host merge conflicts — under the two-tier
+vault layout (DESIGN #103), each host writes its captures into a host-local
+staging dir at `~/.local/state/vibe-vault/<project>/`, and wrap-time
+`vv vault sync-sessions` mirrors them into per-host paths
+(`Projects/<p>/sessions/<host>/<date>/...`) so no two hosts ever write the
+same path. Run `vv staging init <project>` once per workstation per project
+to bootstrap the host-local staging repo (the hook auto-inits on first fire
+if missing). `vv vault push` stages all changes, commits with a
+hostname-stamped message, and pushes — retrying once via pull-rebase if
+rejected. On final failure, it surfaces the error for interactive resolution.
 
 The `/restart` and `/wrap` AI workflow commands call `vv vault pull` and
 `vv vault push` automatically at session boundaries, keeping the vault

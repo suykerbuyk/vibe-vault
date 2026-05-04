@@ -111,17 +111,42 @@ is the immediate finish line; Phase 2 is the long-running play.**
   `vault` remotes) holds Job-1 content only. Wrap is the only
   writer. Commit log is wrap-paced (~3/day).
 - A staging repo lives at
-  `~/obsidian/VibeVault/Projects/<p>/sessions/.git/` per
-  project. No remote. Hooks write here; the vault's
-  `.gitignore` excludes `Projects/*/sessions/`.
-- A wrap-time `vv vault sync-sessions` step rsyncs the
+  `~/.local/state/vibe-vault/<project>/` per project (XDG
+  state dir, honoring `$XDG_STATE_HOME` when set, fully
+  outside the vault tree). No remote. Hooks write the
+  per-fire markdown here, and the staging package commits it
+  via two fork-execs (`git add` + `git commit`) under a
+  repo-local `vibe-vault@<sanitized-host>` identity written
+  by `vv staging init`. The shared vault knows nothing about
+  staging — no `.gitignore` rule, no path inside the vault
+  tree refers to staging content.
+- A wrap-time `vv vault sync-sessions` step mirrors the
   staging repo's working tree into the shared vault under a
-  **per-host path layout** (e.g., `Projects/<p>/sessions/<host>/<date>/`).
-  Per-host paths means no host ever writes a path another
-  host writes — merge conflicts are structurally impossible.
-- The shared vault's commit log gains one "sessions snapshot
-  for host=<H>" commit per wrap. Wrap-paced, atomic,
-  operator-authored.
+  **per-host path layout** (`Projects/<p>/sessions/<host>/<date>/`)
+  via a Go-native `filepath.WalkDir` + content-hash
+  skip-if-equal copy (no `rsync` dep). Per-host paths mean
+  no host ever writes a path another host writes — merge
+  conflicts are structurally impossible.
+- The shared vault's commit log gains one "sessions for
+  host=<H>" commit per wrap (push-deferred via
+  `CommitAndPushPaths(..., push=false)`; the terminal
+  `vv vault push` rides one network push for narrative +
+  sessions together). Wrap-paced, atomic, operator-authored.
+
+**Considered and rejected: `Projects/<p>/sessions/.git/`
+(sessions IS the staging repo).** The original v1 proposal
+nested the staging git repo inside the shared vault at
+`<vault>/Projects/<p>/sessions/.git/`, with the vault's
+`.gitignore` excluding `Projects/*/sessions/` to keep
+hook-fired content out of the vault commit log. Operator's
+iter-203 `/review-plan` rejected this in favor of the XDG
+host-local path because it eliminates three hazard classes
+at once: no git-in-git nesting (no risk of an Obsidian git
+plugin recursing into a nested `.git`), no vault-side
+`.gitignore` management for staging content, and no Obsidian
+file-explorer visibility for staging churn. Cross-host
+browse-ability is preserved by the wrap-time mirror, which
+remains the operator non-negotiable.
 
 **Result:** cross-host session browse-ability preserved (every
 host sees every other host's sessions/ subtree). Job-1
@@ -294,3 +319,76 @@ document is the rebuttal:
   the architectural direction is fully realized in code. At
   that point, fold the surviving content into ARCHITECTURE.md
   and delete this file.
+
+---
+
+## Status as of iter 205 (β2 shipped)
+
+**Layout choice changed from the original proposal.** The
+Decision section above originally pinned the staging repo at
+`<vault>/Projects/<p>/sessions/.git/` (sessions-IS-staging);
+v1 of the implementation plan inherited that. v2 of the plan
+(iter 203 `/review-plan` revision) moved the staging dir to
+`~/.local/state/vibe-vault/<project>/` (XDG state dir,
+fully outside the vault). The Phase 1 prose above has been
+updated in place to reflect the shipped layout, and the
+original `sessions/.git/` proposal is preserved in a
+"Considered and rejected" subsection within the same
+section. The decision-history record (this doc's value) is
+preserved; only the load-bearing layout pin was rewritten.
+
+**What shipped under DESIGN #103.** Phases 1 → 4 landed on
+the `vault-two-tier` branch:
+
+- Phase 1 (`30805ff`) — `internal/staging/` package
+  (`SanitizeHostname`, `Root`, `Init`, `Path`, `.init-done`
+  sentinel); `vv staging init/status/path/gc/migrate`
+  subcommands; `[staging] root` config field;
+  `vaultsync.GitCommand` exported.
+- Phase 1.5 (`7753ca6`) — `internal/index/rebuild.go`
+  walker generalized to per-host AND
+  `_pre-staging-archive/` subtrees;
+  `NoteRelPathTimestamp(project, host, date, t, suffix)`
+  takes an explicit host segment; dead `NoteRelPath`
+  deleted; `vaultsync.Classify()` gains an explicit
+  per-host arm; the dead grandparent-project fallback in
+  `rebuild.go` deleted (frontmatter `project:` is
+  mandatory).
+- Phase 2 (`73fda8c`) — `session.CaptureOpts.StagingRoot`
+  routes session writes through the staging package across
+  all 5 entry points (hook, `vv process`, `vv backfill`,
+  `vv reprocess`, Zed batch, MCP `vv_capture_session`);
+  `staging.NotePath / Commit / EnsureInit / EnsureInitAt /
+  ResolveRoot` introduced; `VIBE_VAULT_DISABLE_STAGING=1`
+  env shim ships as the back-compat path for integration
+  tests and a documented operator escape hatch.
+- Phase 3 (`31fdaa2`) — `vv vault sync-sessions [--project | --all-projects]`;
+  `staging.Mirror` + `staging.SyncSessions`; per-host
+  `<vault>/Projects/<p>/sessions/<host>/index.json`
+  written by the mirror; `CommitAndPushPaths(_, _, _, push bool)`
+  push-deferred mode; `Pull` autostash gains
+  `--include-untracked`.
+- Phase 4 (`930aec3`) — `internal/index/aggregator.go`
+  (`AggregateProject`); `Rebuild` refactored to call
+  `AggregateProject` per project; `Host` field added to
+  `SessionEntry`; intra-project SessionID collision is an
+  error, cross-project collision WARNs and applies
+  last-write-wins; the aggregator emits vault-relative
+  paths and overwrites the absolute-path entries Phase 2's
+  hook writes leave in the index.
+- Phase 5 (this doc + `doc/ARCHITECTURE.md` "Two-tier vault"
+  section + `doc/OPERATIONS.md` "Two-tier vault: staging +
+  per-host sync" section + `doc/DESIGN.md` #103 status
+  stanza + `doc/DESIGN.md` #6 host-isolation note +
+  `README.md` multi-host paragraph rewrite). Iter 205.
+
+**Phase 6 (live verification + retirement)** is the
+remaining work. Once it lands, retire
+`mcp-driven-vault-sync` (Draft v4) — superseded by β2 —
+and re-evaluate
+`wrap-mcp-offload-state-collector-and-preflight` against
+β2's wrap-time orchestration to decide retire-vs-rescope.
+
+**γ (pluggable session source)** remains queued behind β2.
+Implementation is unchanged from the Phase 2 description
+above.
