@@ -66,7 +66,11 @@ detect.go    │   │   │   │
                               before summary; includes Work Performed + related
                               sessions)
                          ▼
-                    os.WriteFile    Projects/{project}/sessions/YYYY-MM-DD-NN.md
+                    os.WriteFile    <staging-root>/<project>/YYYY-MM-DD-HHMMSS-N.md
+                                   (host-local staging dir, β2 / DESIGN #103;
+                                   see "Two-tier vault" below — wrap-time
+                                   `vv vault sync-sessions` mirrors this into
+                                   `Projects/{project}/sessions/<host>/<date>/`)
                     index.Save()   .vibe-vault/session-index.json
                          │
                          ▼  (SessionEnd only, not Stop checkpoints)
@@ -130,7 +134,8 @@ the standalone SQLite watcher for auto-capturing outside the MCP server.
 vv index
     │
     ▼
-index/rebuild.go     Walk Projects/*/sessions/*.md, skip non-session files
+index/rebuild.go     Walk Projects/*/sessions/**/*.md (per-host subtrees +
+                     _pre-staging-archive/), skip non-session files
     │
     ▼
 noteparse/           Parse frontmatter + body sections from each note
@@ -454,6 +459,87 @@ by a `MCPSurfaceVersion` bump.
 See DESIGN.md #97 for the full design rationale, six-detection-point
 matrix, and merge-driver mechanics.
 
+### Two-tier vault: narrative repo + host-local staging + per-host wrap-time mirror (β2, DESIGN #103)
+
+The shared vault carries two workloads with incompatible correctness models —
+long-lived narrative content (low write rate, must be cross-host coherent) and
+hot session telemetry (high write rate, per-host source-of-truth). β2
+splits storage so each workload runs in the substrate that fits it:
+
+```
+Host-local staging                          Shared vault (~/obsidian/VibeVault)
+~/.local/state/vibe-vault/<project>/         git remotes: github, vault
+├── .git/                                   ├── Projects/<p>/agentctx/         ← Job 1, wrap-paced
+│   └── config (vibe-vault@<host> identity) ├── Projects/<p>/sessions/         ← Job 2, wrap-paced
+├── .init-done   (sentinel)                 │   ├── <host-A>/<date>/*.md       ← mirrored from A's staging
+└── <date>-<HHMMSS>-<n>.md   (hook writes)  │   ├── <host-B>/<date>/*.md       ← mirrored from B's staging
+                                            │   └── _pre-staging-archive/*.md  ← frozen pre-β2 sessions
+                                            └── ...
+```
+
+**Hook-time write path.** SessionEnd / Stop / PreCompact (and the MCP
+`vv_capture_session` tool, the Zed batch path, `vv backfill`, `vv reprocess`)
+all route session writes through `internal/staging`. The capture orchestrator
+(`session.CaptureOpts.StagingRoot`) resolves the staging root once via
+`staging.Root()` (`$XDG_STATE_HOME/vibe-vault` → `~/.local/state/vibe-vault`)
+and the staging package writes the markdown into `<root>/<project>/<filename>`,
+then commits the single file to a host-local git repo via two fork-execs
+(`git add` + `git commit`) under the repo-local identity
+`vibe-vault@<sanitized-host>`. The shared vault sees nothing during this path —
+no working-tree change, no remote push, no merge surface.
+
+**Wrap-time mirror.** `vv vault sync-sessions [--project | --all-projects]`
+mirrors each in-scope staging dir into
+`<vault>/Projects/<p>/sessions/<host>/` where `<host>` is
+`staging.SanitizeHostname(os.Hostname())`. The mirror is a Go-native
+`filepath.WalkDir` + content-hash skip-if-equal copy (no external `rsync`
+dep). Each host writes only into its own per-host subtree; no two hosts
+ever write the same path, so cross-host merge conflicts on session content
+are structurally impossible. Per-host `<vault>/Projects/<p>/sessions/<host>/index.json`
+records the host's contributions for fast aggregation.
+
+After mirroring, the orchestrator stages exactly the mirrored paths via
+`vaultsync.CommitAndPushPaths(vault, msg, ["Projects/<p>/sessions/<host>"], push=false)` —
+the `push=false` form lands a local commit but defers the network push to
+the terminal `vv vault push` so all wrap-time vault commits (narrative +
+sessions) ride a single push, preserving the single-push wrap invariant.
+`--all-projects` enumerates from `<staging-root>/*/` (staging is the source
+of truth for "what has unsynced changes"), not from `<vault>/Projects/*/`.
+
+**Index aggregation.** `vv index` aggregates per-host subtrees into the
+unified `session-index.json` via `internal/index/aggregator.AggregateProject`.
+Reads the per-host `sessions/<host>/index.json` fast path when present;
+falls back to walking `<host>/<date>/*.md` when missing or stale.
+Intra-project SessionID collisions are an error; cross-project collisions
+WARN and apply last-write-wins (likely a project clone with overlapping
+captures — see OPERATIONS.md). The aggregator emits vault-relative paths
+and overwrites the absolute-path entries Phase 2's hook writes leave in
+the index.
+
+**Staging vs vault commit identity.** Staging commits use the repo-local
+`vibe-vault@<host>` identity written by `vv staging init`; vault commits
+use the operator's global git identity (`user.email` / `user.name`). This
+asymmetry is intentional — the staging repo is a host-local commit
+substrate that records every hook fire as durable debugging history,
+attributed to the binary; the shared vault remains operator-authored.
+
+**Hostname rename recovery.** Sessions captured under an old hostname
+remain under that host's subtree forever; `os.Hostname()` resolution at
+`internal/meta/provenance.go:68` honors `VIBE_VAULT_HOSTNAME` first, so
+mid-rename sessions can be steered into the original subtree by setting
+the env var. Operator escape-hatch documented in OPERATIONS.md.
+
+**Migration.** Pre-β2 flat-layout sessions (committed at
+`Projects/<p>/sessions/*.md`) move in-place to
+`Projects/<p>/sessions/_pre-staging-archive/` via `vv staging migrate`
+(per-project commits via `git mv` so per-file history follows the rename).
+The archive subtree is **permanent vault history** and must never be
+deleted. The walker treats it the same as a per-host subtree.
+
+See DESIGN.md #103, the standalone `doc/SESSION-CAPTURE-ARCHITECTURE.md`
+for design rationale and options weighed, and `doc/OPERATIONS.md`
+"Two-tier vault: staging + per-host sync" for the operator runbook.
+
 ## Module Responsibilities
 
 | Package | File | Responsibility |
@@ -520,7 +606,7 @@ matrix, and merge-driver mechanics.
 | `session` | `capture.go` | Orchestration via `CaptureOpts`: parse → detect → **project config overlay** → index → **narrative** → **prose** → **commits** → enrich (skipped when prose succeeds) → **friction** → relate → render → write. Force mode reuses existing iteration to overwrite in place |
 | `session` | `detect.go` | Git remote origin + CWD-based project name, config-based domain detection |
 | `index` | `index.go` | Enriched SessionEntry + TranscriptPath + Commits + Friction + token/message counts, JSON index: dedup, iteration counting, cross-linking |
-| `index` | `rebuild.go` | `Rebuild()` — walk Projects/*/sessions/, parse via noteparse, preserve TranscriptPaths from old index, backfill token/message counts |
+| `index` | `rebuild.go` | `Rebuild()` — walk `Projects/*/sessions/**` (per-host subtrees + `_pre-staging-archive/` legacy archive), parse via noteparse, preserve TranscriptPaths from old index, backfill token/message counts. Walker uses path-containment check (`/sessions/` segment relative to project root); the pre-β2 grandparent-project fallback was deleted (frontmatter `project:` is mandatory). See "Two-tier vault" below. |
 | `index` | `related.go` | `RelatedSessions()` — multi-signal scoring (files, threads, branch, tag) |
 | `index` | `context.go` | `ProjectContext()` — per-project history.md (timeline with friction indicators, decisions, threads, friction patterns, key files) |
 | `index` | `generate.go` | `GenerateContext()` — shared function writing per-project `history.md` + seeding per-project `knowledge.md`; `GenerateResult` type with metrics; used by `runIndex()`, `runReprocess()`, and `handleSessionEnd()` |

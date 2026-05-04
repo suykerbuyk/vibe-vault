@@ -17,7 +17,11 @@ import (
 
 func batchTestConfig(t *testing.T) config.Config {
 	t.Helper()
-	return config.Config{VaultPath: t.TempDir()}
+	cfg := config.Config{VaultPath: t.TempDir()}
+	// Phase 2 of vault-two-tier-narrative-vs-sessions-split: isolate
+	// the staging dir per test so the global XDG path is never touched.
+	cfg.Staging.Root = filepath.Join(t.TempDir(), "staging")
+	return cfg
 }
 
 func makeThread(id string, msgs int) Thread {
@@ -144,7 +148,13 @@ func TestBatchCapture_AutoCaptured(t *testing.T) {
 	if !ok {
 		t.Fatal("expected index entry for zed:auto-1")
 	}
-	notePath := filepath.Join(cfg.VaultPath, entry.NotePath)
+	// Phase 2: staging-routed entries record an absolute NotePath under
+	// the per-host staging dir; vault-routed entries keep the
+	// historical vault-relative form. Resolve via IsAbs.
+	notePath := entry.NotePath
+	if !filepath.IsAbs(notePath) {
+		notePath = filepath.Join(cfg.VaultPath, entry.NotePath)
+	}
 	data, err := os.ReadFile(notePath)
 	if err != nil {
 		t.Fatalf("read note: %v", err)
@@ -214,5 +224,55 @@ func TestBatchCapture_TrivialThread(t *testing.T) {
 
 	if result.Skipped != 1 {
 		t.Errorf("Skipped = %d, want 1 (trivial session)", result.Skipped)
+	}
+}
+
+// TestBatchCapture_Phase2_StagingRoute is the v4-C2 entry-point lock:
+// with Cfg.Staging.Root set, Zed-imported notes land in the staging
+// dir and do NOT leak into the shared vault sessions/ subtree.
+func TestBatchCapture_Phase2_StagingRoute(t *testing.T) {
+	cfg := batchTestConfig(t)
+	t.Setenv("VIBE_VAULT_HOSTNAME", "testhost")
+
+	logger := log.New(os.Stderr, "", 0)
+	threads := []Thread{makeThread("phase2-zed-1", 6)}
+	result := BatchCapture(BatchCaptureOpts{
+		Threads: threads,
+		DBPath:  "/tmp/threads.db",
+		Cfg:     cfg,
+		Logger:  logger,
+	})
+	if result.Processed != 1 {
+		t.Fatalf("Processed = %d, want 1", result.Processed)
+	}
+
+	// File-in-staging?
+	stagingProj := filepath.Join(cfg.Staging.Root, "testproj")
+	entries, err := os.ReadDir(stagingProj)
+	if err != nil {
+		t.Fatalf("read staging dir: %v", err)
+	}
+	var stagingMD int
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".md" {
+			stagingMD++
+		}
+	}
+	if stagingMD == 0 {
+		t.Errorf("Phase 2 Zed batch route: no .md in staging dir %s", stagingProj)
+	}
+
+	// File-NOT-in-vault?
+	vaultSessions := filepath.Join(cfg.VaultPath, "Projects", "testproj", "sessions")
+	if vEntries, _ := os.ReadDir(vaultSessions); len(vEntries) > 0 {
+		var leaked []string
+		for _, e := range vEntries {
+			if !e.IsDir() && filepath.Ext(e.Name()) == ".md" {
+				leaked = append(leaked, e.Name())
+			}
+		}
+		if len(leaked) > 0 {
+			t.Errorf("Phase 2 Zed batch leaked into vault sessions/: %v", leaked)
+		}
 	}
 }

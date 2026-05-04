@@ -2,7 +2,7 @@
 
 How to roll out a new vibe-vault binary, refreshed templates, and schema migrations across every project on every workstation in a multi-host fleet.
 
-The piece-parts are documented elsewhere — DESIGN #41 (three-way baseline template sync), DESIGN #97 (MCPSurfaceVersion handshake), DESIGN #98 (worktree gc), and the README's `vv context sync` section. This file is the single workstation-fleet runbook that integrates them.
+The piece-parts are documented elsewhere — DESIGN #41 (three-way baseline template sync), DESIGN #97 (MCPSurfaceVersion handshake), DESIGN #98 (worktree gc), DESIGN #103 (two-tier vault: host-local staging + per-host wrap-time sync), and the README's `vv context sync` section. This file is the single workstation-fleet runbook that integrates them.
 
 ## When to run this
 
@@ -157,6 +157,152 @@ Mitigations operationally:
 2. Don't push wrap stamp commits across workstations simultaneously.
 3. Stamp-only wrap commits direct-push to main (DESIGN #102; see "Direct-pushing wrap commits to main" below). If a direct push is unexpectedly rejected, a hidden Ruleset, organization-level rule, or pre-receive hook is gating; capture the rejection message and pivot to a feature-branch PR for that wrap while the protection state is investigated.
 
+## Two-tier vault: staging + per-host sync
+
+`β2` (DESIGN #103) splits the shared vault into two substrates: hook-paced
+session writes land in a host-local staging git repo at
+`~/.local/state/vibe-vault/<project>/` (or `$XDG_STATE_HOME/vibe-vault/<project>/`
+when set); wrap-time `vv vault sync-sessions` mirrors each host's staging
+working tree into `<vault>/Projects/<p>/sessions/<host>/<date>/`. Per-host
+paths mean no two hosts ever write the same session-content path — merge
+conflicts on session content are structurally impossible.
+
+### `vv staging init <project>` — bootstrap the host-local staging dir
+
+Creates `<staging-root>/<project>/` as a fresh git repo with repo-local
+`user.email = vibe-vault@<sanitized-host>` and `user.name = vibe-vault`,
+then drops a `.init-done` sentinel. Idempotent: re-running on an already-
+initialized project reports status without re-initializing. The hook
+auto-inits in-process on first fire if the sentinel is absent, so this
+is rarely required by hand — explicit invocation is useful when
+provisioning a new workstation, when the staging root has been wiped, or
+when scripting a fleet rollout.
+
+### `vv staging status / path / gc <project>` — operator commands
+
+- `vv staging status <project>` — reports staging dir presence,
+  working-tree state, last commit timestamp.
+- `vv staging path <project>` — prints the resolved staging dir path.
+  Useful for `cd $(vv staging path foo)` to inspect the staging repo
+  directly.
+- `vv staging gc <project>` — wraps `git gc --auto` on the staging repo.
+  Hooks commit every fire, so the staging repo grows unbounded over
+  time; `vv staging gc` is documented as the operator-invoked
+  housekeeping path. Not invoked automatically.
+
+### `vv staging migrate [--all-projects | --project <p>]` — one-time pre-β2 migration
+
+Detects projects with committed sessions under
+`<vault>/Projects/<p>/sessions/*.md` (the pre-β2 flat layout) and moves
+them in-place to `<vault>/Projects/<p>/sessions/_pre-staging-archive/`
+via `git mv` so per-file history follows the rename. Splits commits
+per-project (one commit per project, not one ~800-file commit) for
+diffability and per-project revert. The `session-index.json` `note_path`
+entries are rewritten in-place to point at the new archive paths so MCP
+tools and `vv inject` keep working immediately.
+
+**`_pre-staging-archive/` is permanent vault history and must never be
+deleted.** It records every pre-β2 session and is the only path under
+which those notes exist post-migration. The walker treats it the same
+as any per-host subtree.
+
+### `vv vault sync-sessions [--project <p> | --all-projects]` — wrap-time mirror
+
+For each in-scope project, mirrors `<staging-root>/<project>/` into
+`<vault>/Projects/<p>/sessions/<host>/`, then commits the mirrored
+paths via `vaultsync.CommitAndPushPaths(..., push=false)` — local
+commit only, no network push. The terminal `vv vault push` performs
+the single network push for ALL pending vault commits (narrative +
+sessions), preserving the single-push wrap invariant.
+
+- **`--all-projects` is the default.** Projects are enumerated from
+  `<staging-root>/*/` (staging is the source of truth for "what has
+  unsynced changes"), NOT from `<vault>/Projects/*/`.
+- **Per-host conflict guarantee.** Each host writes only into
+  `<vault>/Projects/<p>/sessions/<host>/`; cross-host content never
+  shares a path. Merge conflicts on session content are structurally
+  impossible.
+- **Idempotent.** The mirror is a Go-native walk + content-hash
+  skip-if-equal copy. No staging changes → empty mirror diff → no
+  vault commit, no error.
+- **Push-deferred.** Sync-sessions commits land locally. The wrap
+  procedure already runs `vv vault push` as its terminal step; the
+  sync-sessions commit rides that single push.
+
+### Hostname rename + `VIBE_VAULT_HOSTNAME` escape hatch
+
+Sessions captured under an old hostname remain under that host's
+subtree forever. After a rename, new sessions land under the new
+hostname's subtree; the old subtree remains browsable but inert. To
+land mid-rename sessions under the original subtree (e.g., during a
+cutover window where some captures should still be attributed to the
+prior name), set:
+
+```bash
+export VIBE_VAULT_HOSTNAME=oldhost
+```
+
+This overrides `os.Hostname()` resolution at
+`internal/meta/provenance.go:68`. Documented as the supported
+rename-recovery path; unset the var when cutover is complete.
+
+### Migration recipe (zero-explicit-step path)
+
+After β2 ships, hook-routed captures emit absolute staging-dir paths
+into `session-index.json` until the first `vv vault sync-sessions`
+runs. The aggregator emits vault-relative paths and overwrites those
+absolute-path entries on the next `vv index` call. The expected order
+on a fresh-β2 workstation:
+
+1. Hook fires (absolute paths land in the index — transient state).
+2. `/wrap` runs `vv vault sync-sessions`, mirroring staging into the
+   per-host vault subtree.
+3. `vv index` (also part of `/wrap`'s post-sync sweep, or invoked
+   manually) walks per-host subtrees and rewrites entries to
+   vault-relative form.
+
+No explicit migration command is needed — the absolute-path entries
+are self-healing on the next index pass.
+
+### Staging vs vault commit identity
+
+Staging commits use the repo-local `vibe-vault@<sanitized-host>`
+identity written by `vv staging init`; vault commits use the
+operator's global git identity. This asymmetry is intentional:
+
+- Staging is a host-local commit substrate that records every hook
+  fire as durable debugging history. Attribution to the binary
+  identity makes the staging repo's log inspectable as
+  "what did the hook see?", independent of whoever was at the
+  keyboard.
+- The vault is operator-authored and remains so; sync-sessions
+  commits ride the operator's identity and appear in the vault log
+  alongside narrative commits.
+
+Hook never depends on global `git config --global user.email`; the
+repo-local identity from `vv staging init` is sufficient.
+
+### Cross-project SessionID collision WARN signal
+
+The aggregator hard-errors on intra-project SessionID collisions and
+WARNs (last-write-wins) on cross-project collisions. A cross-project
+WARN is almost always a project clone with overlapping captures — two
+project directories sharing the same git remote (and therefore the
+same project name) where both have routed captures into the same
+session log. Investigate; the right fix is usually to disambiguate one
+of the project identities via `.vibe-vault.toml`.
+
+### Integration tests + `VIBE_VAULT_DISABLE_STAGING=1`
+
+Integration tests that pre-date β2 still write directly into the
+shared vault under the legacy flat layout via the
+`VIBE_VAULT_DISABLE_STAGING=1` env shim. The shim is also a documented
+operator escape hatch for the migration window — set the env var to
+fall back to pre-β2 routing if a host's staging dir is wedged and the
+operator wants to capture a session before debugging the staging-side
+issue. Tests will grow `vv vault sync-sessions` steps as part of γ
+work; until then the shim is the supported back-compat path.
+
 ## Recovering Dropped Vault Narratives
 
 When `vv vault pull` rebases local commits onto upstream, file conflicts on Manual-class files (`iterations.md`, `resume.md`, `tasks/*`, `knowledge.md`) are auto-resolved by keeping the LOCAL side. This is the right policy operationally — local work is the most recent operator intent on this machine and the rebase target's content remains reachable from `main` — but the upstream-side file content is dropped from the working tree at that point. `vv vault pull` surfaces the drop on stderr:
@@ -300,7 +446,16 @@ vv vault push --paths <intended-path-1> --paths <intended-path-2>
 
 ### Forward note
 
-Under the planned `vault-two-tier-narrative-vs-sessions-split` (β2) work, the wrap-time vault push will use `--paths` mandatorily — the wrap orchestrator already knows the explicit narrative-file list it intends to publish. Today the flag remains opt-in for operators and any caller that wants contamination safety; β2 makes it load-bearing for the narrative-repo sync path.
+`--paths` is now load-bearing under β2's `vv vault sync-sessions` (DESIGN
+#103). The sync orchestrator names the per-host session subtree it just
+mirrored (`Projects/<p>/sessions/<host>`) explicitly — `vaultsync.CommitAndPushPaths(vault, msg, [<that path>], push=false)` —
+so its commit cannot accidentally sweep concurrent dirty content from
+other hosts' subtrees, narrative files, or another in-flight session's
+work. The opt-in operator flag and the β2-mandatory orchestrator path
+share the same `--paths`/`paths []string` plumbing; the contamination
+safety the flag offers operators is the same safety β2 relies on for
+the wrap-time mirror. Operators retain the opt-in behavior for ad-hoc
+pushes; β2 selects it unconditionally for sync-sessions.
 
 ## Automation: cron-based freshness (carried thread, not yet deployed)
 
@@ -315,6 +470,30 @@ Two cron lines per workstation deploy `vv-binary-freshness-guard` Mechanism F (D
 ```
 
 Adjust paths to match your shell's `$HOME` expansion. After deploy, verify with `tail /tmp/vv-vault-pull.log` after ≥ 30 min of clean idle.
+
+### Relationship to β2 sync-sessions
+
+β2 (DESIGN #103) wrap-time `vv vault sync-sessions` does NOT obviate the
+freshness-guard cron. The two address different concerns:
+
+- The cron is about **narrative-repo freshness** — keeping the shared
+  vault's `agentctx/`, `tasks/`, `iterations.md`, `resume.md`, etc.
+  in sync across machines on a 15-minute cadence so that bootstrap
+  context on host B reflects host A's recent narrative writes without
+  requiring an explicit `vv vault pull`.
+- `vv vault sync-sessions` is about **session-content publication** —
+  mirroring host-local staging into the shared vault under per-host
+  paths, on the wrap cadence.
+
+Both run against the same shared vault, but they cover non-overlapping
+file sets (narrative content lives outside `Projects/*/sessions/`;
+sessions live inside it). Under β2 the vault's working-tree change
+rate drops to wrap-paced (~3/day) regardless of per-host hook fire
+rate, so the cron's `[ -z "$(git status --porcelain)" ]` clean-idle
+gate fires far more often — making the freshness-guard cron *more*
+effective, not less. Re-evaluate the deployment if the
+`mcp-driven-vault-sync-residual` task surfaces a sharper bound; for
+now the cron remains the supported narrative-freshness mechanism.
 
 ## Inventory matrix (sample for a single host)
 
@@ -351,6 +530,7 @@ When a workstation joins the fleet:
 - DESIGN #98 — worktree gc lifecycle.
 - DESIGN #101 — vault rebase resolver policy + reachable-history recovery contract.
 - DESIGN #102 — drop `required_status_checks` on `main`; operator-discipline-gated direct push for stamp-only wrap commits.
+- DESIGN #103 — two-tier vault: narrative repo + host-local staging + per-host wrap-time mirror (β2). See `doc/SESSION-CAPTURE-ARCHITECTURE.md` for the long-running architectural reminder.
 - README §"Schema migrations" and §"`vv context sync`".
 - Carried-forward thread `cross-project-template-propagation` (in resume.md): the per-project sweep is mechanical via `vv context sync` once Phase 2 is done.
 - Carried-forward thread `freshness-guard-cron-deployment-pending`: the cron deployment in §Automation hardens this.

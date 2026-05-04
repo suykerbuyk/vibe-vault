@@ -44,6 +44,13 @@ type SessionEntry struct {
 	ParentUUID       string            `json:"parent_uuid,omitempty"` // external entry UUID (continuation)
 	Source           string            `json:"source,omitempty"`      // "zed", etc.; empty = "claude-code"
 	Context          *ContextAvailable `json:"context,omitempty"`     // what context was available at capture time
+	// Host records which sanitized hostname's per-host subtree owns this
+	// entry, e.g. `Projects/<p>/sessions/<host>/...`. Empty for legacy
+	// flat-layout / archive entries that pre-date Phase 4's per-host
+	// aggregation. Populated by AggregateProject; ignored on entries
+	// emitted by older code paths (Phase 2 hook routing leaves it empty
+	// because it has no shared-vault host context at write time).
+	Host string `json:"host,omitempty"`
 }
 
 // ContextAvailable records what project context existed when a session was captured.

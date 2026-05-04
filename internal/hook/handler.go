@@ -19,8 +19,16 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/llm"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
 	"github.com/suykerbuyk/vibe-vault/internal/sessionclaim"
+	"github.com/suykerbuyk/vibe-vault/internal/staging"
 	"github.com/suykerbuyk/vibe-vault/internal/synthesis"
 )
+
+// resolveStagingRoot is a thin shim over staging.ResolveRoot for the
+// hook handler. Delegates so all five session-write entry points share
+// one resolution rule.
+func resolveStagingRoot(cfg config.Config) string {
+	return staging.ResolveRoot(cfg.Staging.Root)
+}
 
 // Input is the JSON object Claude Code sends to hooks via stdin.
 type Input struct {
@@ -136,11 +144,19 @@ func handleStop(input *Input, cfg config.Config) error {
 	// inside session.Capture once it parses the transcript.
 	projectRoot := session.DetectProjectRoot(input.CWD)
 
+	// Phase 2: route session note into the host-local staging dir
+	// (cfg.Staging.Root override, else XDG default).
+	// CaptureFromParsed lazy-runs staging.EnsureInit once it has the
+	// resolved project name — keeping init colocated with the write
+	// avoids a project-mismatch race when input.CWD is empty.
+	stagingRoot := resolveStagingRoot(cfg)
+
 	result, err := session.Capture(session.CaptureOpts{
 		TranscriptPath: input.TranscriptPath,
 		CWD:            input.CWD,
 		SessionID:      input.SessionID,
 		ProjectRoot:    projectRoot,
+		StagingRoot:    stagingRoot,
 		Checkpoint:     true,
 		SkipEnrichment: true,
 	}, cfg)
@@ -172,11 +188,16 @@ func handleSessionEnd(input *Input, cfg config.Config) error {
 	// Resolve project root for sessionclaim integration (Phase 4 / M8).
 	projectRoot := session.DetectProjectRoot(input.CWD)
 
+	// Phase 2: same staging routing as handleStop. CaptureFromParsed
+	// lazy-runs staging.EnsureInit with the resolved project name.
+	stagingRoot := resolveStagingRoot(cfg)
+
 	result, err := session.Capture(session.CaptureOpts{
 		TranscriptPath: input.TranscriptPath,
 		CWD:            input.CWD,
 		SessionID:      input.SessionID,
 		ProjectRoot:    projectRoot,
+		StagingRoot:    stagingRoot,
 		Provider:       provider,
 	}, cfg)
 	if err != nil {

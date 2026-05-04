@@ -30,7 +30,21 @@ func testConfig(t *testing.T) config.Config {
 	cfg := config.DefaultConfig()
 	cfg.VaultPath = filepath.Join(t.TempDir(), "vault")
 	cfg.Enrichment.Enabled = false
+	// Phase 2 of vault-two-tier-narrative-vs-sessions-split: isolate
+	// the host-local staging dir per test so the global XDG path is
+	// never touched. Tests that need to inspect the staging dir read
+	// cfg.Staging.Root directly.
+	cfg.Staging.Root = filepath.Join(t.TempDir(), "staging")
 	return cfg
+}
+
+// stagingNotesFor returns the project staging dir for a given project
+// name. Test helper paired with testConfig — every test that wants to
+// confirm a hook-fire landed a note inspects this directory rather
+// than the historical vault sessions/ subtree (which Phase 2 retired
+// for hook-paced writes).
+func stagingNotesFor(cfg config.Config, project string) string {
+	return filepath.Join(cfg.Staging.Root, project)
 }
 
 func writeTranscript(t *testing.T, content string) string {
@@ -131,14 +145,21 @@ func TestHandleInput_StopEvent(t *testing.T) {
 		t.Fatalf("handleInput Stop: %v", err)
 	}
 
-	// Verify a checkpoint note was created
-	projDir := filepath.Join(cfg.VaultPath, "Projects")
-	entries, err := os.ReadDir(projDir)
+	// Phase 2: checkpoint notes land in the per-project staging dir,
+	// not the shared vault. Inspect the staging tree.
+	stagingProj := stagingNotesFor(cfg, "proj")
+	entries, err := os.ReadDir(stagingProj)
 	if err != nil {
-		t.Fatalf("read projects dir: %v", err)
+		t.Fatalf("read staging dir: %v", err)
 	}
-	if len(entries) == 0 {
-		t.Error("expected checkpoint note directory to be created")
+	var noteCount int
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".md" {
+			noteCount++
+		}
+	}
+	if noteCount == 0 {
+		t.Error("expected checkpoint note in staging dir")
 	}
 }
 
@@ -168,13 +189,12 @@ func TestHandleInput_StopThenSessionEnd(t *testing.T) {
 		t.Fatalf("SessionEnd: %v", err)
 	}
 
-	// Verify only one session note file exists (overwritten, not duplicated)
-	// Only count .md files inside sessions/ dirs (history.md is at project root)
-	projDir := filepath.Join(cfg.VaultPath, "Projects")
+	// Phase 2: notes land in the per-project staging dir.
+	// Verify only one session note file exists (overwritten, not duplicated).
+	stagingProj := stagingNotesFor(cfg, "proj")
 	var noteFiles []string
-	filepath.Walk(projDir, func(path string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() && filepath.Ext(path) == ".md" &&
-			filepath.Base(filepath.Dir(path)) == "sessions" {
+	_ = filepath.Walk(stagingProj, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && filepath.Ext(path) == ".md" {
 			noteFiles = append(noteFiles, path)
 		}
 		return nil

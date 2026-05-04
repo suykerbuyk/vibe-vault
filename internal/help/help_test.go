@@ -87,8 +87,10 @@ var expectedTerminal = map[string]string{
 		"\n" +
 		"Usage: vv index\n" +
 		"\n" +
-		"Walks Projects/*/sessions/*.md in the vault, parses frontmatter from each\n" +
-		"note, and rebuilds .vibe-vault/session-index.json. Preserves TranscriptPath\n" +
+		"Walks Projects/*/sessions/**/*.md in the vault, parses frontmatter from each\n" +
+		"note, and rebuilds .vibe-vault/session-index.json. The recursive ** glob\n" +
+		"covers the flat layout, the per-host subtree (sessions/<host>/<date>/),\n" +
+		"and the _pre-staging-archive/ migration archive. Preserves TranscriptPath\n" +
 		"values from the existing index. Generates a history.md document for\n" +
 		"each project with timeline, decisions, open threads, and key files.\n" +
 		"\n" +
@@ -335,10 +337,29 @@ var expectedTerminal = map[string]string{
 		"The vault repo is owned entirely by vv \u2014 all git operations are safe.\n" +
 		"\n" +
 		"Subcommands:\n" +
-		"  vv vault status    Show vault git state (clean/dirty, ahead/behind)\n" +
-		"  vv vault pull      Fetch + rebase with automatic conflict resolution\n" +
-		"  vv vault push      Commit all changes and push\n" +
-		"  vv vault recover   List upstream commits whose content was dropped on rebase\n",
+		"  vv vault status         Show vault git state (clean/dirty, ahead/behind)\n" +
+		"  vv vault pull           Fetch + rebase with automatic conflict resolution\n" +
+		"  vv vault sync-sessions  Mirror host-local staging into vault per-host subtree\n" +
+		"  vv vault push           Commit all changes and push\n" +
+		"  vv vault recover        List upstream commits whose content was dropped on rebase\n",
+
+	"staging": "vv staging \u2014 host-local session-capture staging dir\n" +
+		"\n" +
+		"Usage: vv staging <command>\n" +
+		"\n" +
+		"Manages the host-local staging dir for the two-tier vault layout.\n" +
+		"The staging dir lives outside the shared Obsidian vault \u2014 by default at\n" +
+		"$XDG_STATE_HOME/vibe-vault/<project>/ (or ~/.local/state/vibe-vault/<project>/).\n" +
+		"Hooks write session notes into the staging dir; a wrap-time mirror\n" +
+		"projects them into <vault>/Projects/<p>/sessions/<host>/ for cross-host\n" +
+		"browse.\n" +
+		"\n" +
+		"Subcommands:\n" +
+		"  vv staging init <p>      Initialize the staging dir for a project (idempotent)\n" +
+		"  vv staging status <p>    Report staging dir presence and worktree state\n" +
+		"  vv staging path <p>      Print the resolved staging dir path\n" +
+		"  vv staging gc <p>        Run git gc --auto on the staging repo\n" +
+		"  vv staging migrate ...   Archive flat-layout sessions into _pre-staging-archive/\n",
 
 	"zed": "vv zed \u2014 import Zed agent panel threads\n" +
 		"\n" +
@@ -504,6 +525,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv effectiveness [--project X]   Analyze context effectiveness on outcomes\n" +
 		"  vv memory [link | ...]           Link Claude Code auto-memory into vault\n" +
 		"  vv vault <command>               Vault git sync (pull, push, status, recover)\n" +
+		"  vv staging [init | ...]          Manage host-local staging dir (init, status, gc, migrate)\n" +
 		"  vv zed <subcommand>              Import Zed agent panel threads into vault\n" +
 		"  vv mcp [install | ...]           Start MCP server (JSON-RPC over stdio)\n" +
 		"  vv worktree [gc | ...]           Manage subagent worktrees (gc)\n" +
@@ -524,10 +546,29 @@ func TestFormatUsage(t *testing.T) {
 	}
 }
 
+// TestCmdIndex_GlobIsRecursive is the Phase 1.5 regression lock for the
+// help description at internal/help/commands.go:135. The β2 layout puts
+// session notes under `Projects/<p>/sessions/<host>/<date>/<file>.md` and
+// `Projects/<p>/sessions/_pre-staging-archive/<file>.md`; the description
+// must therefore advertise the recursive `**` glob, not the flat `*`
+// form, so operators reading `vv help index` understand the actual
+// walker semantics.
+func TestCmdIndex_GlobIsRecursive(t *testing.T) {
+	if !strings.Contains(CmdIndex.Description, "Projects/*/sessions/**/*.md") {
+		t.Errorf("CmdIndex.Description should advertise recursive glob form Projects/*/sessions/**/*.md; got:\n%s",
+			CmdIndex.Description)
+	}
+	if strings.Contains(CmdIndex.Description, "Projects/*/sessions/*.md\n") ||
+		strings.Contains(CmdIndex.Description, "Projects/*/sessions/*.md ") {
+		t.Errorf("CmdIndex.Description should NOT advertise the flat glob form (would mislead operators about per-host layout); got:\n%s",
+			CmdIndex.Description)
+	}
+}
+
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "context", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "memory", "vault", "zed", "mcp", "worktree", "config", "templates", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "memory", "vault", "staging", "zed", "mcp", "worktree", "config", "templates", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))

@@ -577,6 +577,134 @@ func TestRebuildSkipsNonSessionFiles(t *testing.T) {
 	}
 }
 
+// writeNoteAt is the path-flexible companion to writeNote. It writes a note
+// at an arbitrary subpath under the project's sessions/ tree so tests can
+// exercise per-host and _pre-staging-archive/ layouts without rewriting
+// directory bookkeeping in every case.
+func writeNoteAt(t *testing.T, dir, project, subpath, filename, content string) {
+	t.Helper()
+	full := filepath.Join(dir, project, "sessions", subpath)
+	if err := os.MkdirAll(full, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(full, filename), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRebuildMixedLayouts is the Phase 1.5 walker generalization lock. The
+// fixture mixes all three legitimate layouts plus rogue files outside
+// sessions/, and asserts:
+//
+//   - flat-archive notes (legacy `_pre-staging-archive/`) are indexed,
+//   - per-host notes (`<host>/<date>/`) are indexed,
+//   - rogue `*.md` outside any `/sessions/` segment is ignored,
+//   - a non-session-shape filename inside sessions/ (e.g. `README.md`) is
+//     ignored even though it would pass the path-containment check.
+//
+// This regresses the prior parent-name walker filter
+// (`filepath.Base(filepath.Dir(path)) != "sessions"`), which would skip
+// every per-host and archive note silently — exactly the failure mode
+// Phase 2's hook reroute would otherwise expose only at runtime.
+func TestRebuildMixedLayouts(t *testing.T) {
+	projectsDir := filepath.Join(t.TempDir(), "Projects")
+	stateDir := t.TempDir()
+
+	mkNote := func(sid, project string) string {
+		return fmt.Sprintf(`---
+date: 2026-05-02
+type: session
+project: %s
+domain: personal
+session_id: "%s"
+iteration: 1
+tags: [vv-session]
+summary: "Phase 1.5 mixed-layout fixture"
+---
+
+# Mixed-layout test
+`, project, sid)
+	}
+
+	// Per-host layout: Projects/myproj/sessions/host1/2026-05-02/<file>.md
+	writeNoteAt(t, projectsDir, "myproj", "host1/2026-05-02", "2026-05-02-143025123.md", mkNote("per-host-1", "myproj"))
+	// Per-host layout, second host: locks the multi-host case.
+	writeNoteAt(t, projectsDir, "myproj", "host2/2026-05-02", "2026-05-02-143025456.md", mkNote("per-host-2", "myproj"))
+	// Flat archive: Projects/myproj/sessions/_pre-staging-archive/<file>.md
+	writeNoteAt(t, projectsDir, "myproj", "_pre-staging-archive", "2026-04-15-01.md", mkNote("archive-1", "myproj"))
+	// Legacy flat layout: Projects/myproj/sessions/<file>.md
+	writeNote(t, projectsDir, "myproj", "2026-05-01-01.md", mkNote("flat-1", "myproj"))
+
+	// Rogue *.md outside any sessions/ segment — must be ignored.
+	rogueDir := filepath.Join(projectsDir, "myproj", "knowledge")
+	if err := os.MkdirAll(rogueDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rogueDir, "rogue.md"), []byte(mkNote("rogue-1", "myproj")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Non-session-shape filename inside sessions/ — must be ignored even
+	// though its path passes the containment check.
+	writeNoteAt(t, projectsDir, "myproj", "host1/2026-05-02", "README.md", "not a session note\n")
+
+	idx, count, err := Rebuild(projectsDir, stateDir)
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if count != 4 {
+		t.Errorf("count = %d, want 4 (per-host x2 + archive + flat; rogue + README excluded)", count)
+	}
+	for _, want := range []string{"per-host-1", "per-host-2", "archive-1", "flat-1"} {
+		if _, ok := idx.Entries[want]; !ok {
+			t.Errorf("expected entry %q to be indexed", want)
+		}
+	}
+	if _, ok := idx.Entries["rogue-1"]; ok {
+		t.Error("rogue *.md outside sessions/ should NOT be indexed")
+	}
+}
+
+// TestRebuildEmptyProjectFrontmatterSkipped is the Phase 1.5 regression
+// lock for the deleted grandparent-project fallback (rebuild.go:80-84). A
+// note whose frontmatter `project:` is empty must be log+skipped, NOT
+// fall back to a path-derived guess (which under the per-host layout
+// would resolve to the date or hostname directory, silently corrupting
+// the index).
+func TestRebuildEmptyProjectFrontmatterSkipped(t *testing.T) {
+	projectsDir := filepath.Join(t.TempDir(), "Projects")
+	stateDir := t.TempDir()
+
+	// project: empty intentionally — every legitimate writer emits this
+	// field unconditionally (render.SessionNote line 95). An empty value
+	// signals corruption or hand-edit; the walker logs and skips.
+	noProject := `---
+date: 2026-05-02
+type: session
+project:
+domain: personal
+session_id: "no-proj-1"
+iteration: 1
+tags: [vv-session]
+summary: "frontmatter project field empty"
+---
+
+# Empty project test
+`
+	writeNote(t, projectsDir, "myproj", "2026-05-02-01.md", noProject)
+
+	idx, count, err := Rebuild(projectsDir, stateDir)
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("count = %d, want 0 (empty project frontmatter must skip)", count)
+	}
+	if _, ok := idx.Entries["no-proj-1"]; ok {
+		t.Error("entry with empty project frontmatter should NOT be indexed")
+	}
+}
+
 // --- Related sessions tests ---
 
 func TestRelatedSharedFiles(t *testing.T) {

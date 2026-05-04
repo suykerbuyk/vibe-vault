@@ -272,13 +272,15 @@ func TestNoteFilename(t *testing.T) {
 	}
 }
 
-func TestNoteRelPath(t *testing.T) {
-	got := NoteRelPath("vibe-vault", "2026-02-22", 1)
-	want := "Projects/vibe-vault/sessions/2026-02-22-01.md"
-	if got != want {
-		t.Errorf("NoteRelPath = %q, want %q", got, want)
-	}
-}
+// NoteRelPath was deleted in Phase 1.5 of vault-two-tier — confirmed dead
+// via call-graph audit (only one test caller, and zero production callers).
+// Its sole purpose was the legacy YYYY-MM-DD-NN.md filename shape, which
+// the timestamp-based path helpers superseded in Phase 4 of
+// session-slot-multihost-disambiguation. The test that previously exercised
+// it (TestNoteRelPath) was removed alongside the function. Any future
+// regression that re-introduces NoteRelPath will fail to compile, since
+// its callers have been removed; this comment documents the intent so a
+// reviewer searching for "NoteRelPath" sees why it is gone.
 
 func TestSessionNote_ToolUsage(t *testing.T) {
 	d := NoteData{
@@ -639,17 +641,93 @@ func TestParseSessionFilename_LexSortIsChronological(t *testing.T) {
 	}
 }
 
-func TestNoteRelPathTimestamp(t *testing.T) {
+// TestNoteRelPathTimestamp_FlatLayout locks the Phase 1.5 back-compat shim:
+// when host == "" the helper emits the legacy flat layout used by the sole
+// remaining production caller in internal/session/capture.go. Phase 2 will
+// replace that caller and remove the empty-host branch.
+func TestNoteRelPathTimestamp_FlatLayout(t *testing.T) {
 	when := time.Date(2026, 5, 2, 14, 30, 25, 123_000_000, time.UTC)
-	got := NoteRelPathTimestamp("vibe-vault", "2026-05-02", when, 0)
+	got := NoteRelPathTimestamp("vibe-vault", "", "2026-05-02", when, 0)
 	want := "Projects/vibe-vault/sessions/2026-05-02-143025123.md"
 	if got != want {
-		t.Errorf("NoteRelPathTimestamp = %q, want %q", got, want)
+		t.Errorf("NoteRelPathTimestamp(flat) = %q, want %q", got, want)
 	}
-	gotSuffix := NoteRelPathTimestamp("vibe-vault", "2026-05-02", when, 3)
+	gotSuffix := NoteRelPathTimestamp("vibe-vault", "", "2026-05-02", when, 3)
 	wantSuffix := "Projects/vibe-vault/sessions/2026-05-02-143025123-3.md"
 	if gotSuffix != wantSuffix {
-		t.Errorf("NoteRelPathTimestamp suffix = %q, want %q", gotSuffix, wantSuffix)
+		t.Errorf("NoteRelPathTimestamp(flat) suffix = %q, want %q", gotSuffix, wantSuffix)
+	}
+}
+
+// TestNoteRelPathTimestamp_PerHostLayout tabular-tests the per-host
+// composition that the Phase 3 wrap-time mirror will use. The host segment
+// is treated as opaque path text — sanitization is the caller's job
+// (staging.SanitizeHostname); this test only locks the join order.
+func TestNoteRelPathTimestamp_PerHostLayout(t *testing.T) {
+	when := time.Date(2026, 5, 2, 14, 30, 25, 123_000_000, time.UTC)
+	cases := []struct {
+		project string
+		host    string
+		date    string
+		suffix  int
+		want    string
+	}{
+		{
+			project: "vibe-vault",
+			host:    "host1",
+			date:    "2026-05-02",
+			suffix:  0,
+			want:    "Projects/vibe-vault/sessions/host1/2026-05-02/2026-05-02-143025123.md",
+		},
+		{
+			project: "vibe-vault",
+			host:    "host1",
+			date:    "2026-05-02",
+			suffix:  3,
+			want:    "Projects/vibe-vault/sessions/host1/2026-05-02/2026-05-02-143025123-3.md",
+		},
+		{
+			project: "another-proj",
+			host:    "laptop.local",
+			date:    "2026-05-02",
+			suffix:  0,
+			want:    "Projects/another-proj/sessions/laptop.local/2026-05-02/2026-05-02-143025123.md",
+		},
+		{
+			project: "p",
+			host:    "_unknown",
+			date:    "2026-05-02",
+			suffix:  9,
+			want:    "Projects/p/sessions/_unknown/2026-05-02/2026-05-02-143025123-9.md",
+		},
+	}
+	for _, c := range cases {
+		got := NoteRelPathTimestamp(c.project, c.host, c.date, when, c.suffix)
+		if got != c.want {
+			t.Errorf("NoteRelPathTimestamp(%q,%q,%q,_,%d) = %q, want %q",
+				c.project, c.host, c.date, c.suffix, got, c.want)
+		}
+	}
+}
+
+// TestNoteRelPathTimestamp_RejectsUnsanitizedHost locks the path-escape
+// guard. Callers MUST pre-sanitize via staging.SanitizeHostname; the helper
+// defends against the most common path-traversal accidents but does not
+// silently accept them.
+func TestNoteRelPathTimestamp_RejectsUnsanitizedHost(t *testing.T) {
+	when := time.Date(2026, 5, 2, 14, 30, 25, 123_000_000, time.UTC)
+	rejects := []string{
+		"..",
+		".",
+		"host/with/slash",
+		"a/b",
+		"/abs",
+	}
+	for _, host := range rejects {
+		got := NoteRelPathTimestamp("p", host, "2026-05-02", when, 0)
+		if got != "" {
+			t.Errorf("NoteRelPathTimestamp(host=%q) = %q, want \"\" (rejected)", host, got)
+		}
 	}
 }
 

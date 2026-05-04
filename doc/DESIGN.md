@@ -29,7 +29,11 @@ Key architectural and design decisions in vibe-vault, with rationale.
    `Projects/{project}/sessions/YYYY-MM-DD-NN.md` rather than a date-based
    hierarchy. This keeps related sessions together in Obsidian's file explorer
    and separates session notes from project-level files (history.md,
-   knowledge.md, tasks/).
+   knowledge.md, tasks/). **As of β2 (DESIGN #103, iter 205),** sessions are
+   also segregated by host within each project's `sessions/` subtree
+   (`Projects/{project}/sessions/<host>/<date>/<file>.md`); the by-project
+   rationale above is preserved while host-isolation is layered on top to
+   eliminate cross-host merge surface overlap on session content.
 
 7. **Three direct dependencies (BurntSushi/toml, klauspost/compress,
    modernc.org/sqlite):** Minimal dependency tree for a tool that runs on every
@@ -3715,3 +3719,45 @@ Key architectural and design decisions in vibe-vault, with rationale.
      (β2 implementation, supersedes Draft v4
      `mcp-driven-vault-sync`), `session-source-interface`
      (γ implementation, deferred until β2 in flight).**
+
+     **Status as of iter 205 (β2 shipped).** Layout choice
+     diverged from the original `Projects/<p>/sessions/.git/`
+     (sessions-IS-staging-repo) proposal in v2/v3/v4 plan
+     revisions. Operator's iter-203 `/review-plan` chose
+     **`~/.local/state/vibe-vault/<project>/`** (XDG state
+     dir, `$XDG_STATE_HOME/vibe-vault` when set, fully
+     outside the vault tree) to eliminate three hazard
+     classes at once: no git-in-git nesting (no risk of
+     Obsidian git plugin recursing into a nested `.git`),
+     no vault-side `.gitignore` management for staging
+     content, and no Obsidian file-explorer visibility for
+     staging churn. Cross-host browse-ability is preserved
+     via the wrap-time mirror into
+     `<vault>/Projects/<p>/sessions/<host>/`, now the
+     canonical write path. Iter-204 `/review-plan v2`
+     surfaced additional fixes folded into Draft v4: delete
+     the dead grandparent-project fallback in
+     `internal/index/rebuild.go`, sanitize hostnames before
+     path use (`staging.SanitizeHostname`), repo-local
+     `vibe-vault@<host>` git identity written by
+     `vv staging init` (hook never depends on global
+     identity), per-project migration commits (~18 small
+     commits, not one ~800-file commit), in-place
+     `session-index.json` rewrite during migration, and
+     extended Phase 5 doc list to include
+     `doc/ARCHITECTURE.md` and
+     `doc/SESSION-CAPTURE-ARCHITECTURE.md` line-cited
+     references. Implementation phases shipped on the
+     `vault-two-tier` branch: Phase 1 staging-package
+     bootstrap (`30805ff`), Phase 1.5 walker
+     generalization (`7753ca6`), Phase 2 hook routing
+     centralization via `CaptureOpts.StagingRoot` across
+     all 5 entry points (`73fda8c`), Phase 3 wrap-time
+     `vv vault sync-sessions` + `CommitAndPushPaths
+     push=false` mode + per-host `index.json`
+     (`31fdaa2`), Phase 4 per-host session-index
+     aggregation via `internal/index/aggregator.go`
+     (`930aec3`). Phase 5 (this entry plus the rest of
+     the doc updates) shipped iter 205. Phase 6 (live
+     verification + retiring `mcp-driven-vault-sync`)
+     remains.**

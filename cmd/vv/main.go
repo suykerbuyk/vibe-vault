@@ -39,6 +39,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/meta"
 	"github.com/suykerbuyk/vibe-vault/internal/scaffold"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
+	"github.com/suykerbuyk/vibe-vault/internal/staging"
 	"github.com/suykerbuyk/vibe-vault/internal/stats"
 	"github.com/suykerbuyk/vibe-vault/internal/surface"
 	"github.com/suykerbuyk/vibe-vault/internal/templates"
@@ -113,6 +114,9 @@ func main() {
 
 	case "vault":
 		runVault()
+
+	case "staging":
+		runStaging()
 
 	case "worktree":
 		runWorktree(os.Args[2:])
@@ -429,8 +433,14 @@ func runProcess() {
 	}
 
 	path := os.Args[2]
+	// Phase 2 of vault-two-tier-narrative-vs-sessions-split: route the
+	// capture into the host-local staging dir so manual `vv process`
+	// invocations stay consistent with the hook + MCP entry points.
+	// Empty StagingRoot preserves the legacy flat-vault behavior for
+	// unconfigured environments.
 	result, err := session.Capture(session.CaptureOpts{
 		TranscriptPath: path,
+		StagingRoot:    staging.ResolveRoot(cfg.Staging.Root),
 		Provider:       provider,
 	}, cfg)
 	if err != nil {
@@ -909,6 +919,13 @@ func runVault() {
 		}
 		runVaultRecover(cfg, args[1:])
 
+	case "sync-sessions":
+		if wantsHelp(args[1:]) {
+			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVaultSyncSessions))
+			return
+		}
+		runVaultSyncSessions(cfg, args[1:])
+
 	case "push":
 		if wantsHelp(args[1:]) {
 			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVaultPush))
@@ -929,7 +946,7 @@ func runVault() {
 			err    error
 		)
 		if len(paths) > 0 {
-			result, err = vaultsync.CommitAndPushPaths(cfg.VaultPath, msg, paths)
+			result, err = vaultsync.CommitAndPushPaths(cfg.VaultPath, msg, paths, true)
 		} else {
 			result, err = vaultsync.CommitAndPush(cfg.VaultPath, msg)
 		}
@@ -958,6 +975,58 @@ func runVault() {
 		fmt.Fprintf(os.Stderr, "unknown vault command: %s\n", args[0])
 		fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdVault))
 		os.Exit(1)
+	}
+}
+
+// runVaultSyncSessions implements `vv vault sync-sessions
+// [--project <p>] [--all-projects]`. Mirrors host-local staging into
+// `<vault>/Projects/<p>/sessions/<host>/` for each in-scope project,
+// writes the per-host index.json, and commits each project locally.
+// The terminal `vv vault push` performs the single network push for
+// ALL pending vault commits (narrative + sessions).
+//
+// Default scope is `--all-projects` — staging is the source of truth
+// for "what has unsynced changes," so the orchestrator enumerates
+// `<staging-root>/*/` rather than walking the vault.
+func runVaultSyncSessions(cfg config.Config, args []string) {
+	allProjects := hasFlag(args, "--all-projects")
+	project := flagValue(args, "--project")
+
+	if project != "" && allProjects {
+		fatal("vault sync-sessions: --project and --all-projects are mutually exclusive")
+	}
+
+	opts := staging.SyncSessionsOpts{}
+	if project != "" {
+		opts.Projects = []string{project}
+	}
+	// When neither flag is set, default to --all-projects (empty
+	// Projects list → enumerate from staging root).
+
+	res, err := staging.SyncSessions(cfg.VaultPath, opts)
+	if err != nil {
+		fatal("vault sync-sessions: %v", err)
+	}
+
+	if res == nil || len(res.Projects) == 0 {
+		fmt.Println("vault sync-sessions: no staging projects found")
+		return
+	}
+
+	commits := 0
+	for _, p := range res.Projects {
+		if p.CommitSHA != "" {
+			commits++
+			fmt.Printf("vault sync-sessions: %s/%s mirrored %d file(s) — local commit %s\n",
+				p.Project, p.Hostname, p.FilesMirrored, p.CommitSHA)
+		} else {
+			fmt.Printf("vault sync-sessions: %s no changes\n", p.Project)
+		}
+	}
+	if commits == 0 {
+		fmt.Println("vault sync-sessions: nothing to commit (run `vv vault push` to publish any pending vault commits)")
+	} else {
+		fmt.Printf("vault sync-sessions: %d project(s) committed locally — run `vv vault push` to publish\n", commits)
 	}
 }
 
@@ -1577,8 +1646,12 @@ func runBackfill() {
 			continue
 		}
 
+		// Phase 2: backfill writes also honor the staging-root routing
+		// rule so backfilled notes land where future hook fires write,
+		// not in a divergent flat-vault layout.
 		result, err := session.Capture(session.CaptureOpts{
 			TranscriptPath: tf.Path,
+			StagingRoot:    staging.ResolveRoot(cfg.Staging.Root),
 		}, cfg)
 		if err != nil {
 			log.Printf("error processing %s: %v", tf.SessionID, err)
@@ -1841,10 +1914,13 @@ func runReprocess() {
 			continue
 		}
 
+		// Phase 2: reprocess writes honor the staging-root routing rule
+		// so reprocessed notes land where future hook fires write.
 		result, err := session.Capture(session.CaptureOpts{
 			TranscriptPath: transcriptPath,
 			Force:          true,
 			Provider:       provider,
+			StagingRoot:    staging.ResolveRoot(cfg.Staging.Root),
 		}, cfg)
 
 		if cleanup != nil {
@@ -1940,11 +2016,13 @@ func reprocessZedEntry(entry index.SessionEntry, cfg config.Config) (*session.Ca
 	narr := zed.ExtractNarrative(thread)
 	dialogue := zed.ExtractDialogue(thread)
 
+	// Phase 2: Zed reprocess single-thread path honors staging routing.
 	opts := session.CaptureOpts{
 		TranscriptPath: entry.TranscriptPath,
 		Source:         "zed",
 		Force:          true,
 		SkipEnrichment: true,
+		StagingRoot:    staging.ResolveRoot(cfg.Staging.Root),
 	}
 
 	return session.CaptureFromParsed(t, info, narr, dialogue, opts, cfg)

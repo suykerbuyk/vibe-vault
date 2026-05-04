@@ -56,7 +56,11 @@ type MigrateResult struct {
 //	  iterations.md                    — iteration history
 //	  commands/{restart,wrap}.md       — slash commands
 //	  tasks/, tasks/done/              — task tracking
-//	Projects/{project}/sessions/       — auto-generated (by vv hook)
+//	Projects/{project}/sessions/<host>/<date>/  — auto-generated (vv hook
+//	                                              writes to host-local
+//	                                              staging, wrap-time mirror
+//	                                              projects per-host into the
+//	                                              shared vault; β2 layout)
 //	Projects/{project}/history.md      — auto-generated (by vv index)
 //
 // Repo layout:
