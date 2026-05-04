@@ -150,6 +150,34 @@ func TestGitCommand_DelegatesToGitCmd(t *testing.T) {
 	}
 }
 
+// TestGitCmd_NoInteractiveEditor verifies that gitCmdRaw pins GIT_EDITOR
+// to a non-interactive command so operators with vim/nano configured as
+// core.editor don't see vaultsync hang during rebase-continue conflict
+// resolution. Regression guard for the s76-host hang: if a future change
+// drops GIT_EDITOR=true from gitCmdRaw's env, this test fails.
+func TestGitCmd_NoInteractiveEditor(t *testing.T) {
+	dir := gitx.InitTestRepo(t)
+	// Configure an interactive-looking core.editor that would block on
+	// stdin if actually invoked. With GIT_EDITOR=true pinned in
+	// gitCmdRaw, git ignores this setting.
+	gitx.GitRun(t, dir, "config", "core.editor", "cat")
+
+	// Create a commit so we can amend with implicit-editor invocation.
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	gitx.GitRun(t, dir, "add", "f.txt")
+	gitx.GitRun(t, dir, "commit", "-m", "seed")
+
+	// `git commit --amend` without -m would normally invoke the editor.
+	// With GIT_EDITOR=true short-circuiting, it must complete within the
+	// timeout rather than hang reading from `cat`'s stdin.
+	out, err := gitCmd(dir, 5*time.Second, "commit", "--amend", "--no-edit")
+	if err != nil {
+		t.Fatalf("commit --amend hung or failed: %v\n%s", err, out)
+	}
+}
+
 func TestGetStatus_CleanRepo(t *testing.T) {
 	dir := gitx.InitTestRepo(t)
 

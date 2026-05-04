@@ -845,8 +845,13 @@ func gitCmdRaw(dir string, timeout time.Duration, args ...string) (string, error
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
-	// Prevent interactive prompts
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	// Prevent interactive prompts. GIT_EDITOR=true short-circuits any
+	// editor invocation (e.g. rebase --continue composing a merge commit
+	// message) to /usr/bin/true — operators with an interactive
+	// core.editor (vim, nano) would otherwise see vaultsync hang waiting
+	// for stdin. All explicit commits in this package use `-m` already;
+	// rebase-continue falls through to the original commit message.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_EDITOR=true")
 
 	out, err := cmd.CombinedOutput()
 	return string(out), err
