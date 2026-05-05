@@ -4,6 +4,7 @@
 package zed
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/index"
 	"github.com/suykerbuyk/vibe-vault/internal/lockfile"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
+	"github.com/suykerbuyk/vibe-vault/internal/sessionsource"
 	"github.com/suykerbuyk/vibe-vault/internal/staging"
 )
 
@@ -34,8 +36,27 @@ type BatchResult struct {
 	Errors    int
 }
 
-// BatchCapture processes a batch of Zed threads through the capture pipeline.
+// BatchCapture processes a batch of Zed threads through the capture
+// pipeline. It is the back-compat entry point used by `vv zed
+// backfill` and the watcher loop in `vv zed watch`. Internally it
+// constructs a CaptureSink and delegates to batchCaptureViaSink, so
+// production paths share one code path with the SessionSource Sink.
 func BatchCapture(opts BatchCaptureOpts) BatchResult {
+	return batchCaptureViaSink(context.Background(), sessionsource.CaptureSink{}, opts)
+}
+
+// batchCaptureViaSink is the workhorse: it loads the index, parses
+// each thread into the canonical (transcript, info, narrative,
+// dialogue) tuple, then calls the supplied Sink with all four
+// pre-parsed inputs set. session.Capture's routing fork detects
+// the four-field set and runs CaptureFromParsed — preserving the
+// existing pipeline byte-identically.
+//
+// The sink seam is what makes the SessionSource interface
+// cohesive: both `vv zed watch` (registry-driven) and `vv zed
+// backfill` (registry-bypassing) land in the same Sink call so
+// the source-string plumbing is uniform regardless of entry point.
+func batchCaptureViaSink(ctx context.Context, sink sessionsource.Sink, opts BatchCaptureOpts) BatchResult {
 	logger := opts.Logger
 	if logger == nil {
 		logger = log.New(os.Stderr, "", log.LstdFlags)
@@ -93,17 +114,27 @@ func BatchCapture(opts BatchCaptureOpts) BatchResult {
 		narr := ExtractNarrative(&thread)
 		dialogue := ExtractDialogue(&thread)
 
+		// γ Phase 1: pass all four pre-parsed inputs so
+		// session.Capture's routing fork takes the
+		// CaptureFromParsed fast-path (byte-identical to the
+		// pre-γ direct call). Source plumbed as
+		// SourceCaptureSourceTag ("zed-acp") — registry name and
+		// note frontmatter `source` field now align.
 		captureOpts := session.CaptureOpts{
 			TranscriptPath: fmt.Sprintf("zed:%s#%s", opts.DBPath, thread.ID),
-			Source:         "zed",
+			Source:         SourceCaptureSourceTag,
 			Force:          opts.Force,
 			AutoCaptured:   opts.AutoCaptured,
 			SkipEnrichment: true,
 			Index:          idx,
 			StagingRoot:    stagingRoot,
+			Transcript:     t,
+			Info:           &info,
+			Narrative:      narr,
+			Dialogue:       dialogue,
 		}
 
-		captureResult, err := session.CaptureFromParsed(t, info, narr, dialogue, captureOpts, opts.Cfg)
+		captureResult, err := sink.Capture(ctx, captureOpts, opts.Cfg)
 		if err != nil {
 			logger.Printf("error processing thread %s: %v", thread.ID, err)
 			result.Errors++
