@@ -239,8 +239,30 @@ func TestConfigSetKey_UnknownProvider(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "supported: anthropic, openai, google") {
-		t.Errorf("error %q should list supported providers", msg)
+	if !strings.Contains(msg, "supported: anthropic, openai, google, grok") {
+		t.Errorf("error %q should list all four supported providers", msg)
+	}
+}
+
+// TestConfigSetKey_AddGrokProvider asserts the new "grok" provider name is
+// accepted by `vv config set-key` and lands as a [providers.grok] section
+// with the expected api_key value.
+func TestConfigSetKey_AddGrokProvider(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "vibe-vault", "config.toml")
+
+	if err := runConfigSetKey([]string{"grok", "xai-test-key"}, strings.NewReader(""), configPath); err != nil {
+		t.Fatalf("runConfigSetKey: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	got := string(data)
+	want := "[providers.grok]\napi_key = \"xai-test-key\"\n"
+	if got != want {
+		t.Errorf("config content mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 

@@ -95,14 +95,28 @@ timeout_seconds = 15
 # # [enrichment].provider = "anthropic". Bills against this key, NOT
 # # against your Claude Code subscription. Set via:
 # # vv config set-key anthropic <key>
+# # base_url is optional — overrides [enrichment].base_url for this
+# # provider only (regional endpoints, self-hosted mirrors, etc.).
+# # base_url = "https://api.anthropic.com"
 
 # [providers.openai]
 # api_key = "sk-..."
 # # Set via: vv config set-key openai <key>
+# # base_url = "https://api.openai.com/v1"
 
 # [providers.google]
 # api_key = "..."
 # # Set via: vv config set-key google <key>
+
+# [providers.grok]
+# api_key = "xai-..."
+# # xAI's API key (XAI_API_KEY env var). Required when
+# # [enrichment].provider = "grok". Set via:
+# # vv config set-key grok <key>
+# # base_url defaults to https://api.x.ai/v1; set here only to point at
+# # a regional endpoint or self-hosted mirror. When non-empty,
+# # [providers.grok].base_url overrides [enrichment].base_url.
+# # base_url = "https://api.x.ai/v1"
 `, portablePath)
 
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -201,14 +215,28 @@ func ProjectConfigTemplate() string {
 # # [enrichment].provider = "anthropic". Bills against this key, NOT
 # # against your Claude Code subscription. Set via:
 # # vv config set-key anthropic <key>
+# # base_url is optional — overrides [enrichment].base_url for this
+# # provider only (regional endpoints, self-hosted mirrors, etc.).
+# # base_url = "https://api.anthropic.com"
 
 # [providers.openai]
 # api_key = "sk-..."
 # # Set via: vv config set-key openai <key>
+# # base_url = "https://api.openai.com/v1"
 
 # [providers.google]
 # api_key = "..."
 # # Set via: vv config set-key google <key>
+
+# [providers.grok]
+# api_key = "xai-..."
+# # xAI's API key (XAI_API_KEY env var). Required when
+# # [enrichment].provider = "grok". Set via:
+# # vv config set-key grok <key>
+# # base_url defaults to https://api.x.ai/v1; set here only to point at
+# # a regional endpoint or self-hosted mirror. When non-empty,
+# # [providers.grok].base_url overrides [enrichment].base_url.
+# # base_url = "https://api.x.ai/v1"
 `
 }
 

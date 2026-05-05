@@ -17,7 +17,7 @@ import (
 
 // supportedProviders is the set of provider short names accepted by
 // `vv config set-key`. Order matches the user-facing error message.
-var supportedProviders = []string{"anthropic", "openai", "google"}
+var supportedProviders = []string{"anthropic", "openai", "google", "grok"}
 
 // runConfig dispatches the `vv config` subcommand group.
 func runConfig() {
