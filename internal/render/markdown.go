@@ -18,7 +18,7 @@ import (
 
 // SourceFallbackSummary returns the generic session fallback for a given source.
 func SourceFallbackSummary(source string) string {
-	if source == "zed" {
+	if source == "zed" || source == "zed-acp" {
 		return "Zed agent session"
 	}
 	return "Claude Code session"

@@ -87,6 +87,18 @@ type CaptureOpts struct {
 	// propagates: the markdown write itself succeeded and the next
 	// successful fire's commit will pick up the untracked file.
 	StagingRoot string
+
+	// Optional pre-parsed inputs. When all four are non-nil,
+	// session.Capture routes directly to CaptureFromParsed and skips
+	// JSONL parsing. When any are nil, session.Capture parses
+	// TranscriptPath as JSONL (today's path). Hook source leaves all
+	// nil (preserving today's behavior); Zed source sets all four
+	// (replaces today's direct CaptureFromParsed call). γ Phase 1
+	// (session-source-interface).
+	Transcript *transcript.Transcript
+	Info       *Info
+	Narrative  *narrative.Narrative
+	Dialogue   *prose.Dialogue
 }
 
 // CaptureResult holds the output of a capture operation.
@@ -106,7 +118,19 @@ type CaptureResult struct {
 
 // Capture processes a transcript and writes a session note.
 // This is the Claude Code entry point — it parses, detects, extracts, then delegates to CaptureFromParsed.
+//
+// γ Phase 1: when CaptureOpts has all four pre-parsed inputs set
+// (Transcript, Info, Narrative, Dialogue), Capture skips the JSONL
+// parse-and-build path and routes directly to CaptureFromParsed.
+// This is the SessionSource sink fast-path used by sources that have
+// already rendered their own transcript (e.g. zed-acp).
 func Capture(opts CaptureOpts, cfg config.Config) (*CaptureResult, error) {
+	if opts.Transcript != nil && opts.Info != nil &&
+		opts.Narrative != nil && opts.Dialogue != nil {
+		return CaptureFromParsed(opts.Transcript, *opts.Info,
+			opts.Narrative, opts.Dialogue, opts, cfg)
+	}
+
 	transcriptPath := opts.TranscriptPath
 	cwd := opts.CWD
 	sessionID := opts.SessionID
