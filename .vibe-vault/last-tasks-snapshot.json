@@ -1,12 +1,11 @@
 {
-  "iter_n": 223,
-  "anchor_sha": "4e40c4aeec73948a262e31eaedb19f4e2b469e61",
+  "iter_n": 224,
+  "anchor_sha": "acd63786d58f4debf75ce2d1caed5289e66b52ba",
   "active": [
     "classifier-writes-already-landed-fix",
     "claude-code-tool-selection-telemetry",
     "grok-provider-support",
-    "mcp-call-tracing",
-    "session-source-interface"
+    "mcp-call-tracing"
   ],
   "done": [
     "adaptive-hugging-hedgehog",
@@ -117,6 +116,7 @@
     "session-cost-estimation",
     "session-metadata-fields",
     "session-slot-multihost-disambiguation",
+    "session-source-interface",
     "session-start-context-injection",
     "session-synthesis-agent",
     "session-timeline",
