@@ -193,15 +193,17 @@ func TestGenerate_PathRelativeBinary(t *testing.T) {
 		t.Errorf(".mcp.json command = %q, want %q", cmd, "vv")
 	}
 
-	// env block must propagate ANTHROPIC_API_KEY, OPENAI_API_KEY, and
-	// GOOGLE_API_KEY so hook enrichment / synthesis and other LLM-backed
-	// handlers see the operator's live shell keys (env-fallback tier of
-	// ResolveAPIKey).
+	// env block must propagate ANTHROPIC_API_KEY, OPENAI_API_KEY,
+	// GOOGLE_API_KEY, and XAI_API_KEY so hook enrichment / synthesis and
+	// other LLM-backed handlers see the operator's live shell keys
+	// (env-fallback tier of ResolveAPIKey). XAI is required because the
+	// default config routes Grok via the OpenAI provider with
+	// APIKeyEnv=XAI_API_KEY.
 	env, ok := entry["env"].(map[string]any)
 	if !ok {
 		t.Fatal(".mcp.json missing env block")
 	}
-	for _, key := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY"} {
+	for _, key := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "XAI_API_KEY"} {
 		want := "${" + key + "}"
 		if got := env[key]; got != want {
 			t.Errorf("env.%s = %q, want %q", key, got, want)

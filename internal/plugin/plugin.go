@@ -28,16 +28,22 @@ const (
 // hook enrichment / synthesis (and other LLM-backed handlers) cannot reach
 // the provider.
 //
-// Three providers listed preemptively: ResolveAPIKey's env-fallback tier
-// needs the var to actually reach the MCP-server subprocess. With all three
-// present, an operator who switches providers (or sets any of the three keys
+// Four providers listed preemptively: ResolveAPIKey's env-fallback tier
+// needs the var to actually reach the MCP-server subprocess. With all four
+// present, an operator who switches providers (or sets any of the four keys
 // in their shell) gets the env-fallback path through Claude Code's plugin
-// spawn — no .mcp.json edit needed. Cost is two extra entries; harmless when
-// the env vars are unset (Claude Code expands ${VAR} to empty).
+// spawn — no .mcp.json edit needed. Cost is three extra entries; harmless
+// when the env vars are unset (Claude Code expands ${VAR} to empty).
+//
+// XAI_API_KEY: the default config since iter ~165 routes hook enrichment via
+// the OpenAI provider with APIKeyEnv = "XAI_API_KEY" and base_url
+// https://api.x.ai/v1, so omitting it from this list silently breaks Grok on
+// fresh installs.
 var mcpEnvPassthroughKeys = []string{
 	"ANTHROPIC_API_KEY",
 	"OPENAI_API_KEY",
 	"GOOGLE_API_KEY",
+	"XAI_API_KEY",
 }
 
 // mcpServerEntry returns the canonical .mcp.json entry for the vibe-vault
