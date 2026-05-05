@@ -219,12 +219,24 @@ func collectHistoryRows(cfg config.Config, project string, n int) ([]wraprender.
 	}
 
 	parsed := parseIterations(string(data))
-	rows := make([]wraprender.HistoryRow, 0, len(parsed))
-	// Use index-based loop so summarizeIterationNarrative receives a stable
-	// pointer to each parsed iteration (Go 1.22+ already scopes the range
-	// variable per-iteration, but the explicit form documents the intent).
+
+	// Dedupe by iteration Number — when revision blocks are present
+	// (DESIGN #106 idempotency path), one row per N is required by
+	// the project-history-tail contract. Last-wins on revision: the
+	// highest revision K for a given N replaces earlier entries. The
+	// original (Revision=0) is preferred only when no revision is
+	// present, so divergent narratives surface as the most recent
+	// authoritative version in the tail table.
+	byIter := make(map[int]*Iteration, len(parsed))
 	for i := range parsed {
 		it := &parsed[i]
+		prev, ok := byIter[it.Number]
+		if !ok || it.Revision > prev.Revision {
+			byIter[it.Number] = it
+		}
+	}
+	rows := make([]wraprender.HistoryRow, 0, len(byIter))
+	for _, it := range byIter {
 		rows = append(rows, wraprender.HistoryRow{
 			Iteration: it.Number,
 			Date:      it.Date,

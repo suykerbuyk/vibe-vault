@@ -344,34 +344,6 @@ func oldestRootCommit(ctx context.Context, projectDir string) (string, error) {
 	return "", nil
 }
 
-// iterationsMDHasIter reports whether the project's iterations.md file
-// already contains a `### Iteration N` header. The wrap pipeline uses
-// this to detect the "writes already landed" shape — when the iter-N-1
-// narrative made it into iterations.md but the surrounding commit did
-// not (vault-dirty).
-//
-// Returns false (no error) on missing/unreadable iterations.md.
-func iterationsMDHasIter(vaultPath, project string, iterN int) bool {
-	if vaultPath == "" || project == "" || iterN < 1 {
-		return false
-	}
-	path := filepath.Join(vaultPath, "Projects", project, "agentctx", "iterations.md")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	for _, m := range iterNarrativeRe.FindAllStringSubmatch(string(data), -1) {
-		if len(m) < 2 {
-			continue
-		}
-		n, err := strconv.Atoi(m[1])
-		if err == nil && n == iterN {
-			return true
-		}
-	}
-	return false
-}
-
 // collectWrapState assembles the full wrap-state record for a project.
 // Pure orchestration: every input is computed by a helper above, and
 // the resulting struct is the JSON shape returned by
@@ -392,12 +364,6 @@ func collectWrapState(ctx context.Context, cfg config.Config, project, cwd strin
 		return res, fmt.Errorf("last iter anchor sha: %w", err)
 	}
 	res.LastIterAnchorSha = anchorSHA
-
-	// iter-N-1 already in iterations.md? (Used by the writes-already-landed
-	// classifier.) Only meaningful when iter_n >= 2.
-	if n >= 2 {
-		res.IterNMinusOneAlreadyInIterationsMD = iterationsMDHasIter(cfg.VaultPath, project, n-1)
-	}
 
 	// commits/files since anchor — fall back to oldest root commit when
 	// no anchor exists (first wrap, project never stamped).
@@ -462,8 +428,8 @@ func collectWrapState(ctx context.Context, cfg config.Config, project, cwd strin
 	// vault and project dirty flags. The vault probe is scoped to
 	// `Projects/<project>/` so a sibling project's uncommitted writes
 	// (e.g. collateral from `vv context sync` regenerating other
-	// projects' agentctx/.surface files) does not falsely trip the
-	// writes-already-landed classifier for *this* project.
+	// projects' agentctx/.surface files) do not falsely trip the
+	// vault-dirty preflight warning for *this* project.
 	vaultDirty, err := vaultHasUncommittedWrites(cfg.VaultPath, project)
 	if err != nil {
 		return res, fmt.Errorf("vault git status: %w", err)
@@ -494,11 +460,11 @@ func NewCollectWrapStateTool(cfg config.Config) Tool {
 		Definition: ToolDef{
 			Name: "vv_collect_wrap_state",
 			Description: "Return the full wrap-state record for the current project: " +
-				"iter_n, branch, last_iter_anchor_sha, iter_n_minus_one_already_in_iterations_md, " +
-				"commits_since_last_iter, files_changed, task_deltas (added/retired/cancelled via " +
+				"iter_n, branch, last_iter_anchor_sha, commits_since_last_iter, " +
+				"files_changed, task_deltas (added/retired/cancelled via " +
 				"last-tasks-snapshot.json diff), test_counts (parsed from doc/TESTING.md headline), " +
 				"vault_has_uncommitted_writes, project_has_uncommitted_writes, and shape " +
-				"(fresh-feature | planning | bookkeeping | writes-already-landed). " +
+				"(fresh-feature | planning | bookkeeping). " +
 				"Used by /wrap to compose the iter narrative inline.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",

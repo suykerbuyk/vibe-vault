@@ -228,11 +228,30 @@ func buildIterationFrontmatterBlock(summary, shape string) string {
 }
 
 // NewAppendIterationTool creates the vv_append_iteration tool.
+//
+// Idempotency contract (DESIGN #106): the tool is content-addressable
+// idempotent. For an append targeting `### Iteration N`:
+//
+//  1. Heading absent → normal append (today's behavior).
+//  2. Heading present, body byte-identical (after trailing-newline
+//     normalization and provenance-trailer strip) → no-op. The
+//     existing entry's metadata is returned with `idempotent: true`.
+//     Zero LLM round-trips.
+//  3. Heading present, body differs → append a `### Iteration N
+//     (revision K)` block beneath the original with `revises: N` and
+//     `revised_at: <RFC3339>` front-matter. K auto-increments from
+//     the highest existing revision (or 2 on first divergence). The
+//     original heading and body are untouched.
+//
+// The contract replaces the legacy `iteration N already exists`
+// hard-error path. Operators issuing `iteration` explicitly now hit
+// the idempotency contract too: the explicit number takes the same
+// three-branch path as the auto-increment case.
 func NewAppendIterationTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
 			Name:        "vv_append_iteration",
-			Description: "Append a new iteration block to iterations.md for a project. Optional summary/shape arguments emit a YAML front-matter block between the heading and the body so vv_get_iterations(format=summary) can return a structured 1-sentence digest.",
+			Description: "Append a new iteration block to iterations.md for a project. Content-addressable idempotent: re-issuing with byte-identical body is a no-op; a divergent body appends a `### Iteration N (revision K)` block beneath the original. Optional summary/shape arguments emit a YAML front-matter block between the heading and the body so vv_get_iterations(format=summary) can return a structured 1-sentence digest.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -262,7 +281,7 @@ func NewAppendIterationTool(cfg config.Config) Tool {
 					},
 					"shape": {
 						"type": "string",
-						"description": "Optional shape classifier (e.g. fresh-feature | planning | bookkeeping | writes-already-landed). When set, emitted alongside summary in the front-matter block."
+						"description": "Optional shape classifier (e.g. fresh-feature | planning | bookkeeping). When set, emitted alongside summary in the front-matter block."
 					}
 				},
 				"required": ["title", "narrative"]
@@ -335,7 +354,10 @@ func NewAppendIterationTool(cfg config.Config) Tool {
 
 			existing := scanIterationNumbers(content)
 
-			// Determine iteration number
+			// Determine iteration number. When the caller passes an
+			// explicit number we honor it directly; the legacy
+			// "already exists" hard-error path is replaced by the
+			// idempotency contract below (resolveAppendIteration).
 			highest := 0
 			for _, n := range existing {
 				if n > highest {
@@ -345,43 +367,73 @@ func NewAppendIterationTool(cfg config.Config) Tool {
 			iterNum := highest + 1
 			if args.Iteration != nil {
 				iterNum = *args.Iteration
-				for _, n := range existing {
-					if n == iterNum {
-						return "", fmt.Errorf("iteration %d already exists", iterNum)
-					}
-				}
 			}
 
-			// Build the iteration block. When summary or shape is set,
-			// the front-matter block is prepended to the narrative body
-			// (D4: front-matter is part of the body, not the heading).
-			heading := iterationHeading(iterNum, args.Title, date)
+			// Build incoming body. The front-matter block (when set)
+			// is prepended to the narrative body (D4: front-matter is
+			// part of the body, not the heading).
 			narrative := strings.TrimRight(args.Narrative, "\n")
 			fmBlock := buildIterationFrontmatterBlock(args.Summary, args.Shape)
-			body := fmBlock + narrative
 			trailer := provenanceTrailer(meta.Stamp(), cfg.VaultPath)
-			block := fmt.Sprintf("\n%s\n\n%s%s\n", heading, body, trailer)
 
-			// Ensure content ends with newline before appending
-			if !strings.HasSuffix(content, "\n") {
-				content += "\n"
-			}
-			content += block
+			// Resolve the three-case idempotency contract.
+			outcome := resolveAppendIteration(
+				content,
+				iterNum,
+				args.Title, date,
+				fmBlock, narrative, trailer,
+				args.Summary, args.Shape,
+				nowFunc(),
+			)
 
-			if err := mdutil.AtomicWriteFile(absPath, []byte(content), 0o644); err != nil {
-				return "", fmt.Errorf("write iterations: %w", err)
+			if outcome.Action != "idempotent" {
+				if err := mdutil.AtomicWriteFile(absPath, []byte(outcome.NewContent), 0o644); err != nil {
+					return "", fmt.Errorf("write iterations: %w", err)
+				}
 			}
 
 			// D4b auto-heal: re-render marker-bounded state-derived
 			// sub-regions of resume.md from filesystem ground truth.
 			// Iteration counts and project history both pull from
 			// iterations.md, so the marker block converges with the
-			// freshly-appended iteration on every call.
-			if healErr := autoHealResumeStateBlocks(cfg, project); healErr != nil {
-				return "", fmt.Errorf("auto-heal: %w", healErr)
+			// freshly-appended iteration on every call. Skip the heal
+			// on the idempotent no-op path because nothing changed on
+			// disk and re-running the heal would be a wasted write.
+			if outcome.Action != "idempotent" {
+				if healErr := autoHealResumeStateBlocks(cfg, project); healErr != nil {
+					return "", fmt.Errorf("auto-heal: %w", healErr)
+				}
 			}
 
-			return fmt.Sprintf("Appended iteration %d to iterations.md for project %q", iterNum, project), nil
+			result := struct {
+				Action     string `json:"action"`
+				Iteration  int    `json:"iteration"`
+				Revision   int    `json:"revision,omitempty"`
+				Heading    string `json:"heading"`
+				Idempotent bool   `json:"idempotent"`
+				Project    string `json:"project"`
+				Message    string `json:"message"`
+			}{
+				Action:     outcome.Action,
+				Iteration:  outcome.Iteration,
+				Revision:   outcome.Revision,
+				Heading:    outcome.Heading,
+				Idempotent: outcome.IsIdempotent,
+				Project:    project,
+			}
+			switch outcome.Action {
+			case "appended":
+				result.Message = fmt.Sprintf("Appended iteration %d to iterations.md for project %q", iterNum, project)
+			case "idempotent":
+				result.Message = fmt.Sprintf("Iteration %d already present byte-identically in iterations.md for project %q (idempotent no-op)", iterNum, project)
+			case "revised":
+				result.Message = fmt.Sprintf("Appended revision %d of iteration %d to iterations.md for project %q (existing body diverged)", outcome.Revision, iterNum, project)
+			}
+			out, mErr := json.MarshalIndent(result, "", "  ")
+			if mErr != nil {
+				return "", fmt.Errorf("marshal: %w", mErr)
+			}
+			return string(out) + "\n", nil
 		},
 	}
 }

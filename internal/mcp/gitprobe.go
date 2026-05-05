@@ -40,8 +40,8 @@ var gitCmdRunner = func(ctx context.Context, dir string, args ...string) (string
 // subtree at `Projects/<project>/` — only uncommitted files inside that
 // subtree flip the result to true. This matches the per-project intent
 // of the wrap-state collector + preflight: a sibling project's dirty
-// state must not falsely trip the writes-already-landed classifier or
-// the vault-dirty preflight warning for *this* project.
+// state must not falsely trip the vault-dirty preflight warning for
+// *this* project.
 //
 // When project is empty, the probe degrades to whole-vault behavior
 // (back-compat for any non-wrap caller).
