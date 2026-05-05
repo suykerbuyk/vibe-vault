@@ -1,10 +1,11 @@
 {
-  "iter_n": 227,
-  "anchor_sha": "525466631e49ea0e62ebeab7b5ce34c222032e39",
+  "iter_n": 228,
+  "anchor_sha": "80232f97c8b1aee3b3010f73db123c9f28a98835",
   "active": [
     "claude-code-tool-selection-telemetry",
     "grok-provider-support",
-    "mcp-call-tracing"
+    "mcp-call-tracing",
+    "mcp-env-xai-passthrough"
   ],
   "done": [
     "adaptive-hugging-hedgehog",
