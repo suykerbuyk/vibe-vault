@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/suykerbuyk/vibe-vault/internal/index"
 	"github.com/suykerbuyk/vibe-vault/internal/testutil/gitx"
 )
 
@@ -411,6 +412,209 @@ func TestTestCountsFromTestingMD_EmptyPath(t *testing.T) {
 	u, i, l, warn := testCountsFromTestingMD("")
 	if u != 0 || i != 0 || l != 0 || warn == "" {
 		t.Errorf("empty path should yield zeros + warning, got (%d, %d, %d, %q)", u, i, l, warn)
+	}
+}
+
+// --- vv_collect_wrap_state integration tests --------------------------------
+//
+// These cases exercise the registered MCP tool against fixture repos.
+// They cover the equivalent semantics of the now-deleted
+// TestDescribeIterState_* tests (H2-v6 disposition: rewrite the 6
+// describe-iter-state cases against the new collector tool).
+
+// TestCollectWrapState_Basic covers a fresh project with a clean vault:
+// expect iter_n >= 1, branch populated, both dirty flags false, and
+// last_iter_anchor_sha empty.
+func TestCollectWrapState_Basic(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	initGitRepo(t, cfg.VaultPath)
+	commitAllInRepo(t, cfg.VaultPath, "initial vault state")
+
+	projDir := t.TempDir()
+	initGitRepo(t, projDir)
+	gitCommit(t, projDir, "initial commit", "")
+	t.Chdir(projDir)
+
+	tool := NewCollectWrapStateTool(cfg)
+	out, err := tool.Handler(json.RawMessage(`{"project":"myproj"}`))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	var res CollectWrapStateResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("invalid JSON: %v\nresult: %s", err, out)
+	}
+
+	if res.IterN < 1 {
+		t.Errorf("iter_n = %d, want >= 1", res.IterN)
+	}
+	if res.Branch == "" {
+		t.Errorf("branch should be non-empty in a git repo")
+	}
+	if res.VaultHasUncommittedWrites {
+		t.Errorf("clean vault should have vault_has_uncommitted_writes=false")
+	}
+	if res.ProjectHasUncommittedWrites {
+		t.Errorf("clean project should have project_has_uncommitted_writes=false")
+	}
+	if res.LastIterAnchorSha != "" {
+		t.Errorf("fresh project should have empty last_iter_anchor_sha; got %q", res.LastIterAnchorSha)
+	}
+	if res.Shape == "" {
+		t.Errorf("shape should be classified, got empty string")
+	}
+}
+
+// TestCollectWrapState_DirtyVault asserts vault_has_uncommitted_writes
+// flips to true when the vault has an uncommitted file.
+func TestCollectWrapState_DirtyVault(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	initGitRepo(t, cfg.VaultPath)
+	if err := os.WriteFile(filepath.Join(cfg.VaultPath, "dirty.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write dirty: %v", err)
+	}
+
+	projDir := t.TempDir()
+	initGitRepo(t, projDir)
+	gitCommit(t, projDir, "init", "")
+	t.Chdir(projDir)
+
+	tool := NewCollectWrapStateTool(cfg)
+	out, err := tool.Handler(json.RawMessage(`{"project":"myproj"}`))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	var res CollectWrapStateResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if !res.VaultHasUncommittedWrites {
+		t.Errorf("dirty vault should report vault_has_uncommitted_writes=true")
+	}
+}
+
+// TestCollectWrapState_PriorIterAnchorFound asserts that a project with
+// a stamped iter commit + an iterations.md narrative resolves the
+// anchor SHA and computes iter_n = max + 1.
+func TestCollectWrapState_PriorIterAnchorFound(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	initGitRepo(t, cfg.VaultPath)
+	commitAllInRepo(t, cfg.VaultPath, "initial vault state")
+
+	projDir := t.TempDir()
+	initGitRepo(t, projDir)
+	gitCommit(t, projDir, "chore: initial", "")
+	priorSHA := gitCommitStamp(t, projDir, 41, "feat: ship something (iter 41 stamp)")
+	gitCommit(t, projDir, "docs: update notes", "")
+	t.Chdir(projDir)
+
+	iterPath := filepath.Join(cfg.VaultPath, "Projects", "myproj", "agentctx", "iterations.md")
+	if err := os.MkdirAll(filepath.Dir(iterPath), 0o755); err != nil {
+		t.Fatalf("mkdir iterations.md parent: %v", err)
+	}
+	iterContent := "# Iterations\n\n## Iteration Narratives\n\n" +
+		"### Iteration 40 — earlier work (2026-04-26)\n\nbody\n\n" +
+		"### Iteration 41 — ship something (2026-04-27)\n\nbody\n"
+	if err := os.WriteFile(iterPath, []byte(iterContent), 0o644); err != nil {
+		t.Fatalf("write iterations.md: %v", err)
+	}
+
+	tool := NewCollectWrapStateTool(cfg)
+	out, err := tool.Handler(json.RawMessage(`{"project":"myproj"}`))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	var res CollectWrapStateResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if res.IterN != 42 {
+		t.Errorf("iter_n = %d, want 42", res.IterN)
+	}
+	if res.LastIterAnchorSha != priorSHA {
+		t.Errorf("last_iter_anchor_sha = %q, want %q", res.LastIterAnchorSha, priorSHA)
+	}
+	// iter_n_minus_one (= 41) IS in iterations.md, so the flag should
+	// be true.
+	if !res.IterNMinusOneAlreadyInIterationsMD {
+		t.Errorf("iter_n_minus_one_already_in_iterations_md = false, want true (### Iteration 41 present)")
+	}
+}
+
+// TestCollectWrapState_BranchDetection asserts the branch field reports
+// the active git branch.
+func TestCollectWrapState_BranchDetection(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	initGitRepo(t, cfg.VaultPath)
+
+	projDir := t.TempDir()
+	initGitRepo(t, projDir)
+	gitCommit(t, projDir, "init", "")
+
+	envs := []string{
+		"HOME=" + projDir,
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=t@t",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=t@t",
+		"PATH=" + os.Getenv("PATH"),
+	}
+	cb := exec.Command("git", "checkout", "-q", "-b", "feature/wibble")
+	cb.Dir = projDir
+	cb.Env = envs
+	if out, err := cb.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout: %s", out)
+	}
+	t.Chdir(projDir)
+
+	tool := NewCollectWrapStateTool(cfg)
+	out, err := tool.Handler(json.RawMessage(`{"project":"myproj"}`))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	var res CollectWrapStateResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if res.Branch != "feature/wibble" {
+		t.Errorf("branch = %q, want feature/wibble", res.Branch)
+	}
+}
+
+// TestCollectWrapState_InvalidProjectName asserts the resolveProject
+// validator gates path-traversal-style names.
+func TestCollectWrapState_InvalidProjectName(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+
+	tool := NewCollectWrapStateTool(cfg)
+	if _, err := tool.Handler(json.RawMessage(`{"project":"../etc"}`)); err == nil {
+		t.Fatal("want project-validation error, got nil")
+	}
+}
+
+// TestCollectWrapState_NoVaultGit asserts a vault that is not a git
+// repo degrades vault_has_uncommitted_writes to false (no signal
+// available is treated as clean).
+func TestCollectWrapState_NoVaultGit(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	// No git init on the vault.
+
+	projDir := t.TempDir()
+	initGitRepo(t, projDir)
+	gitCommit(t, projDir, "init", "")
+	t.Chdir(projDir)
+
+	tool := NewCollectWrapStateTool(cfg)
+	out, err := tool.Handler(json.RawMessage(`{"project":"myproj"}`))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	var res CollectWrapStateResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if res.VaultHasUncommittedWrites {
+		t.Errorf("non-git vault should report vault_has_uncommitted_writes=false")
 	}
 }
 

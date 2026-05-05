@@ -67,12 +67,12 @@ func TestMergeDriver_OursHigher(t *testing.T) {
 }
 
 func TestMergeDriver_TheirsHigher(t *testing.T) {
-	anc, ours, theirs := mergeDriverPaths(t, 10, 11, 15)
+	anc, ours, theirs := mergeDriverPaths(t, 10, 11, 16)
 	if got := mergeDriver(anc, ours, theirs); got != 0 {
 		t.Fatalf("exit = %d, want 0", got)
 	}
-	if got := readMergedSurface(t, ours); got != 15 {
-		t.Fatalf("merged surface = %d, want 15", got)
+	if got := readMergedSurface(t, ours); got != 16 {
+		t.Fatalf("merged surface = %d, want 16", got)
 	}
 }
 

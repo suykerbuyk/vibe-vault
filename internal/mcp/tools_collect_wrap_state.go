@@ -3,10 +3,14 @@
 
 package mcp
 
-// Helpers backing vv_collect_wrap_state. Tool registration lands in
-// Commit 2; this file is helpers-only in Commit 1 to keep the MCP surface
-// untouched while letting tests and downstream code reference the
-// machinery.
+// vv_collect_wrap_state is the server-side state collector that backs
+// /wrap. The slash command calls this once before composing the iter
+// narrative; the tool returns every mechanically-computable fact the
+// orchestrator needs (iter_n, branch, anchor SHA, commits/files since
+// anchor, task deltas via snapshot diff, test counts, dirty-state flags)
+// plus a wrap-shape classification. Registered in Commit 2 of the
+// wrap-mcp-offload PR (atomic surface 15→16); helpers were relocated in
+// Commit 1.
 
 import (
 	"context"
@@ -18,6 +22,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
 
 // lastTasksSnapshot is the on-disk format of
@@ -303,5 +310,204 @@ func oldestRootCommit(ctx context.Context, projectDir string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// iterationsMDHasIter reports whether the project's iterations.md file
+// already contains a `### Iteration N` header. The wrap pipeline uses
+// this to detect the "writes already landed" shape — when the iter-N-1
+// narrative made it into iterations.md but the surrounding commit did
+// not (vault-dirty).
+//
+// Returns false (no error) on missing/unreadable iterations.md.
+func iterationsMDHasIter(vaultPath, project string, iterN int) bool {
+	if vaultPath == "" || project == "" || iterN < 1 {
+		return false
+	}
+	path := filepath.Join(vaultPath, "Projects", project, "agentctx", "iterations.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, m := range iterNarrativeRe.FindAllStringSubmatch(string(data), -1) {
+		if len(m) < 2 {
+			continue
+		}
+		n, err := strconv.Atoi(m[1])
+		if err == nil && n == iterN {
+			return true
+		}
+	}
+	return false
+}
+
+// collectWrapState assembles the full wrap-state record for a project.
+// Pure orchestration: every input is computed by a helper above, and
+// the resulting struct is the JSON shape returned by
+// vv_collect_wrap_state.
+func collectWrapState(ctx context.Context, cfg config.Config, project, cwd string) (CollectWrapStateResult, error) {
+	res := CollectWrapStateResult{}
+
+	n, err := nextIterFromIterationsMD(cfg.VaultPath, project)
+	if err != nil {
+		return res, fmt.Errorf("next iter from iterations.md: %w", err)
+	}
+	res.IterN = n
+
+	res.Branch = detectBranch(cwd)
+
+	anchorSHA, err := lastIterAnchorSha(cwd)
+	if err != nil {
+		return res, fmt.Errorf("last iter anchor sha: %w", err)
+	}
+	res.LastIterAnchorSha = anchorSHA
+
+	// iter-N-1 already in iterations.md? (Used by the writes-already-landed
+	// classifier.) Only meaningful when iter_n >= 2.
+	if n >= 2 {
+		res.IterNMinusOneAlreadyInIterationsMD = iterationsMDHasIter(cfg.VaultPath, project, n-1)
+	}
+
+	// commits/files since anchor — fall back to oldest root commit when
+	// no anchor exists (first wrap, project never stamped).
+	scanFrom := anchorSHA
+	if scanFrom == "" {
+		root, rerr := oldestRootCommit(ctx, cwd)
+		if rerr != nil {
+			return res, fmt.Errorf("oldest root commit: %w", rerr)
+		}
+		scanFrom = root
+	}
+	commits, err := commitsSinceAnchor(ctx, cwd, scanFrom)
+	if err != nil {
+		return res, fmt.Errorf("commits since anchor: %w", err)
+	}
+	if commits == nil {
+		commits = []CommitInfo{}
+	}
+	res.CommitsSinceLastIter = commits
+
+	files, err := filesChangedSinceAnchor(ctx, cwd, scanFrom)
+	if err != nil {
+		return res, fmt.Errorf("files changed since anchor: %w", err)
+	}
+	if files == nil {
+		files = []string{}
+	}
+	res.FilesChanged = files
+
+	// task_deltas — set-difference of last-tasks-snapshot.json against
+	// the live tasks/ tree. Bootstraps gracefully when the snapshot is
+	// absent (empty snapshot ⇒ all live active reads as added).
+	snapshot, err := readLastTasksSnapshot(cwd)
+	if err != nil {
+		return res, fmt.Errorf("read last tasks snapshot: %w", err)
+	}
+	tasksDir := filepath.Join(cfg.VaultPath, "Projects", project, "agentctx", "tasks")
+	active, done, cancelled, err := enumerateLiveTasksFS(tasksDir)
+	if err != nil {
+		return res, fmt.Errorf("enumerate live tasks: %w", err)
+	}
+	res.TaskDeltas = computeTaskDeltas(snapshot, active, done, cancelled)
+	if res.TaskDeltas.Added == nil {
+		res.TaskDeltas.Added = []string{}
+	}
+	if res.TaskDeltas.Retired == nil {
+		res.TaskDeltas.Retired = []string{}
+	}
+	if res.TaskDeltas.Cancelled == nil {
+		res.TaskDeltas.Cancelled = []string{}
+	}
+
+	// test counts — best-effort parse of doc/TESTING.md headline.
+	u, i, l, warn := testCountsFromTestingMD(filepath.Join(cwd, "doc", "TESTING.md"))
+	res.TestCounts = TestCounts{
+		Unit:        u,
+		Integration: i,
+		Lint:        l,
+		Warning:     warn,
+	}
+
+	// vault and project dirty flags.
+	vaultDirty, err := vaultHasUncommittedWrites(cfg.VaultPath)
+	if err != nil {
+		return res, fmt.Errorf("vault git status: %w", err)
+	}
+	res.VaultHasUncommittedWrites = vaultDirty
+
+	projectDirty, err := projectHasUncommittedWrites(cwd)
+	if err != nil {
+		return res, fmt.Errorf("project git status: %w", err)
+	}
+	res.ProjectHasUncommittedWrites = projectDirty
+
+	// shape: classifier runs on the fully-populated state.
+	res.Shape = ClassifyWrapShape(res)
+
+	return res, nil
+}
+
+// NewCollectWrapStateTool creates the vv_collect_wrap_state MCP tool.
+//
+// The tool is the C3-v6 server-side counterpart to the wrap pipeline:
+// every mechanically-computable fact /wrap needs lives here, so the
+// slash command becomes a thin orchestrator that composes prose around
+// the returned record. Replaces the four-field vv_describe_iter_state
+// tool retired in surface v15→v16.
+func NewCollectWrapStateTool(cfg config.Config) Tool {
+	return Tool{
+		Definition: ToolDef{
+			Name: "vv_collect_wrap_state",
+			Description: "Return the full wrap-state record for the current project: " +
+				"iter_n, branch, last_iter_anchor_sha, iter_n_minus_one_already_in_iterations_md, " +
+				"commits_since_last_iter, files_changed, task_deltas (added/retired/cancelled via " +
+				"last-tasks-snapshot.json diff), test_counts (parsed from doc/TESTING.md headline), " +
+				"vault_has_uncommitted_writes, project_has_uncommitted_writes, and shape " +
+				"(fresh-feature | planning | bookkeeping | writes-already-landed). " +
+				"Used by /wrap to compose the iter narrative inline.",
+			InputSchema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"project": {
+						"type": "string",
+						"description": "Project name. If omitted, detected from working directory."
+					}
+				}
+			}`),
+		},
+		Handler: func(params json.RawMessage) (string, error) {
+			var args struct {
+				Project string `json:"project"`
+			}
+			if len(params) > 0 {
+				if err := json.Unmarshal(params, &args); err != nil {
+					return "", fmt.Errorf("invalid arguments: %w", err)
+				}
+			}
+
+			project, err := resolveProject(args.Project)
+			if err != nil {
+				return "", err
+			}
+
+			cwd, err := os.Getwd()
+			if err != nil {
+				return "", fmt.Errorf("get working directory: %w", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			res, err := collectWrapState(ctx, cfg, project, cwd)
+			if err != nil {
+				return "", err
+			}
+
+			out, err := json.MarshalIndent(res, "", "  ")
+			if err != nil {
+				return "", fmt.Errorf("marshal: %w", err)
+			}
+			return string(out) + "\n", nil
+		},
+	}
 }
 

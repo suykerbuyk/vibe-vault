@@ -129,7 +129,7 @@ trivial (skipped), different project, UUID-named backfill, checkpoint session, n
 
 In addition to `TestIntegration`, the file holds 21 top-level `TestIntegration_Vault*` tests covering the eight `vv_vault_*` MCP tools through the same subprocess-driven harness: read/list/exists/sha256/write/edit/delete/move plus path-traversal, symlink-escape, `.git`-segment refusal (case-insensitive and substring-allowed), compare-and-set semantics, ambiguous-edit detection, and an end-to-end auto-memory shared-storage acceptance test that creates the host-side symlink and writes through the MCP surface.
 
-The `mcp` subtest's `tools/list` check uses an **exact-set assertion**: the test enumerates all 42
+The `mcp` subtest's `tools/list` check uses an **exact-set assertion**: the test enumerates all 43
 expected tool names by name and compares against the server's reported list bidirectionally. A
 tool missing from the expected list fails with `"unexpected tool %q"`, and a tool missing from the
 server's list fails with `"missing expected tool %q"`. The old numeric `len(tools) != 20` check has
@@ -141,12 +141,15 @@ which (plus `vv_render_commit_msg`, plus the two `vv_synthesize_wrap_bundle` /
 `vv_apply_wrap_bundle_by_handle` handle-based replacements) retired in DESIGN #92's
 Direction-C collapse. Direction-C added two new tools (`vv_describe_iter_state`,
 `vv_render_wrap_text`); DESIGN #98 added `vv_worktree_gc`; DESIGN #100 added
-`vv_check_toolchain` (surface bump 14→15), bringing the current count to 42.
+`vv_check_toolchain` (surface bump 14→15), bringing the count to 42.
 DESIGN #104 retired the `vv_render_wrap_text` renderer in favor of
 orchestrator-inline narrative composition; the tool entry remains as a
 deprecation shim for one binary release (returns an actionable error
-pointing at `vv context sync`), so the tool count stays at 42 and the
-surface version stays at 15.
+pointing at `vv context sync`), so the tool count stayed at 42 and the
+surface version stayed at 15. The `wrap-mcp-offload` PR retired
+`vv_describe_iter_state` and added `vv_collect_wrap_state` +
+`vv_preflight_wrap` in a single atomic commit (surface bump 15→16,
+bringing the current count to 43).
 
 ## HOME-Sandbox Classification
 
