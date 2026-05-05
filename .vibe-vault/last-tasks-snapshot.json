@@ -1,6 +1,6 @@
 {
-  "iter_n": 220,
-  "anchor_sha": "59e9d6159e7bad935491b7faae7fde01623b644d",
+  "iter_n": 221,
+  "anchor_sha": "4d977a2c70ba348958e118836e02a2ae07632e0c",
   "active": [
     "claude-code-tool-selection-telemetry",
     "grok-provider-support",
