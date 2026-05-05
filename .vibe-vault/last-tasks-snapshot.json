@@ -1,8 +1,7 @@
 {
-  "iter_n": 226,
-  "anchor_sha": "7c54dcbfedeb604998684c03092b9ee6d5c8f8d3",
+  "iter_n": 227,
+  "anchor_sha": "525466631e49ea0e62ebeab7b5ce34c222032e39",
   "active": [
-    "classifier-writes-already-landed-fix",
     "claude-code-tool-selection-telemetry",
     "grok-provider-support",
     "mcp-call-tracing"
@@ -16,6 +15,7 @@
     "ci-bypass-for-administrative-commits",
     "ci-restore-green-state-follow-ups",
     "ci-restore-green-state",
+    "classifier-writes-already-landed-fix",
     "claude-code-plugin-mode",
     "context-commands-require-init",
     "context-effectiveness-backfill-analysis",
