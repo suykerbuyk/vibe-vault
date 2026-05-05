@@ -4125,3 +4125,54 @@ Key architectural and design decisions in vibe-vault, with rationale.
      `internal/mcp/tools_iterations.go` (the new
      `appendIterationIdempotent` path), and
      `templates/agentctx/commands/wrap.md`.
+
+107. **Grok as a first-class provider name + per-provider
+     `base_url` override.** Promotes Grok (xAI) from "operator
+     runs the OpenAI provider with an xAI base_url" to a
+     first-class provider name. `[enrichment].provider = "grok"`
+     is now accepted, `vv config set-key grok <key>` writes a
+     `[providers.grok]` section, and `XAI_API_KEY` is the
+     conventional env-var fallback (matching xAI's official
+     docs). The OpenAI provider already covers Grok at the
+     wire level, so `internal/llm/grok.go` is a ~5-line
+     factory wrapping `NewOpenAI` with
+     `GrokDefaultBaseURL = "https://api.x.ai/v1"`. The
+     factory-wrapper shape (vs Google's full provider type) is
+     deliberate: there is no behavioral divergence to
+     encapsulate — Grok speaks the OpenAI chat-completions
+     wire format unchanged.
+
+     **`BaseURL` on shared `ProviderConfig`.** A
+     `[providers.<P>].base_url` field is added to
+     `ProviderConfig` uniformly; only Grok defaults to a
+     non-empty value, but Anthropic / OpenAI / Google pick up
+     the same field for regional-endpoint, self-hosted-mirror,
+     and test-server cases. Precedence:
+     `providers.<P>.base_url` (when non-empty) overrides
+     `[enrichment].base_url`. The legacy
+     `[enrichment].base_url` field is retained, NOT
+     deprecated — operators on the default config (provider =
+     "openai" + `[enrichment].base_url = ".../x.ai/..."`) keep
+     working unchanged because the legacy field is the
+     fallback. Resolution lives in `resolveBaseURL` in
+     `internal/llm/provider.go`.
+
+     **Why a single PR, ~80 LoC.** v1 (iter 165) drafted a
+     two-PR plan around an `OpenAIAgentic` multi-turn loop;
+     v2 (iter 168) collapsed under Direction-C / DESIGN #92
+     after `AgenticProvider` retirement; v3 (iter 228, this
+     entry's source) reframed scope from "add Grok" to
+     "promote Grok to first-class provider name" because the
+     default config since iter ~165 already routes Grok via
+     the OpenAI provider with `XAI_API_KEY`. The remaining
+     work is purely ergonomic: 4 switch cases (`envVarFor`,
+     `configKeyFor`, `DefaultAPIKeyEnv`, `NewProvider`), 5
+     new `Overlay()` rules (`providers.grok.api_key` +
+     `base_url` for all 4 providers), and the
+     `supportedProviders` / template / set-key plumbing.
+
+     Source: `internal/llm/grok.go`, `internal/llm/provider.go`
+     (the new `resolveBaseURL` helper), `internal/llm/keyresolver.go`,
+     `internal/config/config.go`, `internal/config/write.go`,
+     `cmd/vv/config_setkey.go`. Task spec:
+     `agentctx/tasks/grok-provider-support.md` (Draft v3).
