@@ -1,11 +1,10 @@
 {
-  "iter_n": 228,
-  "anchor_sha": "80232f97c8b1aee3b3010f73db123c9f28a98835",
+  "iter_n": 229,
+  "anchor_sha": "adcc502047e77d6b69c4e625be2041465f949412",
   "active": [
     "claude-code-tool-selection-telemetry",
     "grok-provider-support",
-    "mcp-call-tracing",
-    "mcp-env-xai-passthrough"
+    "mcp-call-tracing"
   ],
   "done": [
     "adaptive-hugging-hedgehog",
@@ -81,6 +80,7 @@
     "man-pages",
     "mcp-defensive-protocol-fixes",
     "mcp-driven-vault-sync",
+    "mcp-env-xai-passthrough",
     "mcp-first-context-gateway",
     "mcp-server-improvements",
     "mcp-server-inject",
