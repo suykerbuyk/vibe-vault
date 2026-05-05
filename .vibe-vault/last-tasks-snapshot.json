@@ -1,7 +1,8 @@
 {
-  "iter_n": 221,
-  "anchor_sha": "4d977a2c70ba348958e118836e02a2ae07632e0c",
+  "iter_n": 223,
+  "anchor_sha": "4e40c4aeec73948a262e31eaedb19f4e2b469e61",
   "active": [
+    "classifier-writes-already-landed-fix",
     "claude-code-tool-selection-telemetry",
     "grok-provider-support",
     "mcp-call-tracing",
