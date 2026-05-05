@@ -320,3 +320,118 @@ func TestProjectHasUncommittedWrites_EmptyPath(t *testing.T) {
 		t.Errorf("empty path should be reported clean")
 	}
 }
+
+// --- vaultHasUncommittedWrites ---------------------------------------------
+//
+// The probe accepts an optional project arg; when non-empty the probe
+// scopes `git status --porcelain` to Projects/<project>/. These cases
+// exercise both the project-scoped and back-compat (empty-project,
+// whole-vault) modes, plus the regression-lock for the
+// collect-wrap-state-vault-dirty-scoping carried thread.
+
+// TestVaultHasUncommittedWrites_ProjectScope_DirtyInside asserts that an
+// uncommitted file under Projects/<project>/ trips the project-scoped
+// probe.
+func TestVaultHasUncommittedWrites_ProjectScope_DirtyInside(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	commitAllInRepo(t, dir, "init")
+	projSub := filepath.Join(dir, "Projects", "myproj")
+	if err := os.MkdirAll(projSub, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projSub, "dirty.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write dirty: %v", err)
+	}
+
+	dirty, err := vaultHasUncommittedWrites(dir, "myproj")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !dirty {
+		t.Errorf("dirty file inside Projects/myproj/ must trip the project-scoped probe")
+	}
+}
+
+// TestVaultHasUncommittedWrites_ProjectScope_DirtyOutside asserts that an
+// uncommitted file outside Projects/<project>/ (in a sibling project, at
+// vault root, or anywhere else) does NOT trip the project-scoped probe.
+// This is the bug iter 219 hit two-machine.
+func TestVaultHasUncommittedWrites_ProjectScope_DirtyOutside(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	commitAllInRepo(t, dir, "init")
+	// Sibling project dirty.
+	siblingDir := filepath.Join(dir, "Projects", "other-project")
+	if err := os.MkdirAll(siblingDir, 0o755); err != nil {
+		t.Fatalf("mkdir sibling: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(siblingDir, "dirty.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write sibling dirty: %v", err)
+	}
+	// Vault-root dirty (outside Projects/).
+	if err := os.WriteFile(filepath.Join(dir, "vault-root.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write vault-root dirty: %v", err)
+	}
+
+	dirty, err := vaultHasUncommittedWrites(dir, "myproj")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dirty {
+		t.Errorf("dirt outside Projects/myproj/ must NOT trip the project-scoped probe (regression!)")
+	}
+}
+
+// TestVaultHasUncommittedWrites_EmptyProject_WholeVault asserts the
+// back-compat path: empty project preserves whole-vault behavior, so any
+// dirty file anywhere in the vault flips the result.
+func TestVaultHasUncommittedWrites_EmptyProject_WholeVault(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	commitAllInRepo(t, dir, "init")
+	if err := os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write dirty: %v", err)
+	}
+
+	dirty, err := vaultHasUncommittedWrites(dir, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !dirty {
+		t.Errorf("empty-project (whole-vault) probe must trip on any dirty file in the vault")
+	}
+}
+
+// TestVaultHasUncommittedWrites_EmptyVaultPath asserts the empty-path
+// guard returns clean for both modes.
+func TestVaultHasUncommittedWrites_EmptyVaultPath(t *testing.T) {
+	dirty, err := vaultHasUncommittedWrites("", "myproj")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dirty {
+		t.Errorf("empty vault path with project should be reported clean")
+	}
+	dirty, err = vaultHasUncommittedWrites("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dirty {
+		t.Errorf("empty vault path without project should be reported clean")
+	}
+}
+
+// TestVaultHasUncommittedWrites_NotARepo asserts a non-git vault path is
+// treated as clean (no signal available) — same semantics as the
+// per-project-helper.
+func TestVaultHasUncommittedWrites_NotARepo(t *testing.T) {
+	dir := t.TempDir()
+	dirty, err := vaultHasUncommittedWrites(dir, "myproj")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dirty {
+		t.Errorf("non-git vault path should be treated as clean, got dirty")
+	}
+}

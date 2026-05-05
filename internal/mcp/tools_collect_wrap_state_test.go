@@ -365,12 +365,18 @@ func TestFilesChangedSinceAnchor_EmptyAnchor(t *testing.T) {
 }
 
 // --- testCountsFromTestingMD ------------------------------------------------
+//
+// The headline parser tolerates the actual doc/TESTING.md format:
+//   `**~2291 tests** across 48 test packages + **1 integration test** ...`
+// plus the simpler variants without `**` bold and/or `~` approximation
+// prefix. Carried thread: testcounts-parser-headline-format.
 
-func TestTestCountsFromTestingMD_HappyPath(t *testing.T) {
+func TestTestCountsFromTestingMD_PlainHappyPath(t *testing.T) {
+	// The simplest form: no markdown bold, no approximation prefix.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "TESTING.md")
 	body := "# Testing\n\nSome prose.\n\n" +
-		"**Test counts: 2291 unit + 32 integration + 0 lint = 2323 tests**\n\nMore prose.\n"
+		"2291 tests across 48 test packages + 1 integration test (32 subtests).\n\nMore prose.\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -378,8 +384,96 @@ func TestTestCountsFromTestingMD_HappyPath(t *testing.T) {
 	if warn != "" {
 		t.Errorf("warning should be empty on happy path, got %q", warn)
 	}
-	if u != 2291 || i != 32 || l != 0 {
-		t.Errorf("got (%d, %d, %d), want (2291, 32, 0)", u, i, l)
+	if u != 2291 || i != 1 || l != 0 {
+		t.Errorf("got (%d, %d, %d), want (2291, 1, 0)", u, i, l)
+	}
+}
+
+func TestTestCountsFromTestingMD_BoldHappyPath(t *testing.T) {
+	// Markdown bold around both counts, no approximation prefix.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "TESTING.md")
+	body := "# Testing\n\n" +
+		"**2291 tests** across 48 test packages + **1 integration test** (32 subtests).\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	u, i, l, warn := testCountsFromTestingMD(path)
+	if warn != "" {
+		t.Errorf("warning should be empty on bold path, got %q", warn)
+	}
+	if u != 2291 || i != 1 || l != 0 {
+		t.Errorf("got (%d, %d, %d), want (2291, 1, 0)", u, i, l)
+	}
+}
+
+func TestTestCountsFromTestingMD_TildeNoBold(t *testing.T) {
+	// Approximation prefix without bold wrapper.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "TESTING.md")
+	body := "# Testing\n\n" +
+		"~2291 tests across 48 test packages + 1 integration test.\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	u, i, l, warn := testCountsFromTestingMD(path)
+	if warn != "" {
+		t.Errorf("warning should be empty on tilde-no-bold path, got %q", warn)
+	}
+	if u != 2291 || i != 1 || l != 0 {
+		t.Errorf("got (%d, %d, %d), want (2291, 1, 0)", u, i, l)
+	}
+}
+
+func TestTestCountsFromTestingMD_BoldAndTilde_RealHeadlineShape(t *testing.T) {
+	// The actual doc/TESTING.md:5 form (iter 219) — bold + ~prefix +
+	// the trailing "21 vault-accessor integration tests" token that
+	// must NOT shadow the canonical "1 integration test" match.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "TESTING.md")
+	body := "# Test Suite\n\nExtracted from agentctx/resume.md.\n\n" +
+		"**~2291 tests** across 48 test packages + **1 integration test** (32 subtests) + **21 vault-accessor integration tests**.\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	u, i, l, warn := testCountsFromTestingMD(path)
+	if warn != "" {
+		t.Errorf("warning should be empty on real-headline path, got %q", warn)
+	}
+	if u != 2291 || i != 1 || l != 0 {
+		t.Errorf("got (%d, %d, %d), want (2291, 1, 0); first integration match must win", u, i, l)
+	}
+}
+
+// TestTestCountsFromTestingMD_LiveDocFile is the regression-lock that
+// asserts the parser succeeds against the actual repo doc/TESTING.md.
+// Per the carried-thread definition-of-done, unit count must be >= 2000
+// when parsed from the live file. This catches any future headline
+// format change before it silently zeros out the wrap-state record.
+func TestTestCountsFromTestingMD_LiveDocFile(t *testing.T) {
+	// Find the repo root by walking up from this test file's directory
+	// until we hit a doc/TESTING.md sibling. internal/mcp/ is two
+	// levels deep, so the live file is at ../../doc/TESTING.md.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	livePath := filepath.Join(cwd, "..", "..", "doc", "TESTING.md")
+	if _, err := os.Stat(livePath); err != nil {
+		t.Skipf("live doc/TESTING.md not reachable from %s: %v", cwd, err)
+	}
+	u, i, l, warn := testCountsFromTestingMD(livePath)
+	if warn != "" {
+		t.Errorf("live doc/TESTING.md should parse cleanly, got warning %q", warn)
+	}
+	if u < 2000 {
+		t.Errorf("unit count from live doc/TESTING.md = %d, want >= 2000", u)
+	}
+	if i < 1 {
+		t.Errorf("integration count from live doc/TESTING.md = %d, want >= 1", i)
+	}
+	if l != 0 {
+		t.Errorf("lint count from live doc/TESTING.md = %d, want 0 (not in headline)", l)
 	}
 }
 
@@ -466,11 +560,20 @@ func TestCollectWrapState_Basic(t *testing.T) {
 }
 
 // TestCollectWrapState_DirtyVault asserts vault_has_uncommitted_writes
-// flips to true when the vault has an uncommitted file.
+// flips to true when the project's own subtree under
+// Projects/<project>/ has an uncommitted file. Per the C4-followup fix,
+// the probe is per-project: a dirty file inside the project's subtree
+// must trip the flag.
 func TestCollectWrapState_DirtyVault(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
 	initGitRepo(t, cfg.VaultPath)
-	if err := os.WriteFile(filepath.Join(cfg.VaultPath, "dirty.txt"), []byte("x"), 0o644); err != nil {
+	commitAllInRepo(t, cfg.VaultPath, "initial vault state")
+	// Drop a dirty file inside the project's own subtree.
+	projInVault := filepath.Join(cfg.VaultPath, "Projects", "myproj")
+	if err := os.MkdirAll(projInVault, 0o755); err != nil {
+		t.Fatalf("mkdir project subtree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projInVault, "dirty.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("write dirty: %v", err)
 	}
 
@@ -489,7 +592,78 @@ func TestCollectWrapState_DirtyVault(t *testing.T) {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if !res.VaultHasUncommittedWrites {
-		t.Errorf("dirty vault should report vault_has_uncommitted_writes=true")
+		t.Errorf("dirty file in project subtree should report vault_has_uncommitted_writes=true")
+	}
+}
+
+// TestCollectWrapState_OtherProjectDirty_NoFalsePositive is the
+// regression-lock for the collect-wrap-state-vault-dirty-scoping
+// carried thread. A dirty file under a SIBLING project's subtree
+// (Projects/other/...) must NOT trip vault_has_uncommitted_writes for
+// the project we're wrapping. This is the bug iter 219 hit two-machine
+// when `vv context sync` regenerated 57 OTHER projects' agentctx files
+// after `make install`, none of which were under Projects/vibe-vault/.
+func TestCollectWrapState_OtherProjectDirty_NoFalsePositive(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	initGitRepo(t, cfg.VaultPath)
+	commitAllInRepo(t, cfg.VaultPath, "initial vault state")
+	// Dirty a sibling project's subtree, NOT the project under wrap.
+	otherDir := filepath.Join(cfg.VaultPath, "Projects", "other-project")
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatalf("mkdir other project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "dirty.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write dirty in other project: %v", err)
+	}
+
+	projDir := t.TempDir()
+	initGitRepo(t, projDir)
+	gitCommit(t, projDir, "init", "")
+	t.Chdir(projDir)
+
+	tool := NewCollectWrapStateTool(cfg)
+	out, err := tool.Handler(json.RawMessage(`{"project":"myproj"}`))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	var res CollectWrapStateResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if res.VaultHasUncommittedWrites {
+		t.Errorf("sibling-project dirt must NOT trip vault_has_uncommitted_writes for myproj; got true (regression!)")
+	}
+}
+
+// TestCollectWrapState_VaultRootDirty_NoFalsePositive asserts that an
+// uncommitted file at the vault ROOT (outside any Projects/<x>/
+// subtree) does not trip the per-project probe either. Pairs with the
+// sibling-project regression-lock above.
+func TestCollectWrapState_VaultRootDirty_NoFalsePositive(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	initGitRepo(t, cfg.VaultPath)
+	commitAllInRepo(t, cfg.VaultPath, "initial vault state")
+	// Dirty at the vault root, outside Projects/.
+	if err := os.WriteFile(filepath.Join(cfg.VaultPath, "vault-root-dirty.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write dirty: %v", err)
+	}
+
+	projDir := t.TempDir()
+	initGitRepo(t, projDir)
+	gitCommit(t, projDir, "init", "")
+	t.Chdir(projDir)
+
+	tool := NewCollectWrapStateTool(cfg)
+	out, err := tool.Handler(json.RawMessage(`{"project":"myproj"}`))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	var res CollectWrapStateResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if res.VaultHasUncommittedWrites {
+		t.Errorf("vault-root dirt outside Projects/ must NOT trip vault_has_uncommitted_writes; got true")
 	}
 }
 

@@ -243,18 +243,43 @@ func filesChangedSinceAnchor(ctx context.Context, projectDir, anchorSHA string) 
 	return files, nil
 }
 
-// testCountsHeadlineRe matches the headline test-count line in
-// doc/TESTING.md. Format (verified iter 216):
-// "**Test counts: 2291 unit + 32 integration + 0 lint = 2323 tests**"
-// Capture groups: unit, integration, lint.
-var testCountsHeadlineRe = regexp.MustCompile(
-	`(?i)test counts?:\s*(\d+)\s+unit\s*\+\s*(\d+)\s+integration\s*\+\s*(\d+)\s+lint`,
-)
+// testCountsUnitRe matches the unit-count token in doc/TESTING.md's
+// headline. Tolerant of:
+//
+//   - optional `**` markdown bold wrapper around the count
+//     (e.g. `**2291 tests**`)
+//   - optional `~` approximation prefix on the number
+//     (e.g. `~2291` or `**~2291 tests**`)
+//   - the singular/plural `test|tests` suffix
+//
+// Capture group 1: the integer count.
+//
+// The actual doc/TESTING.md:5 form (iter 219) is:
+// `**~2291 tests** across 48 test packages + **1 integration test** ...`
+// The previous regex assumed `Test counts: 2291 unit + ...`, which the
+// real file never emitted — the parser was never tested against the
+// live headline.
+var testCountsUnitRe = regexp.MustCompile(`\*{0,2}~?(\d+)\s+tests?\*{0,2}`)
+
+// testCountsIntegrationRe matches the integration-test token in the
+// headline. Same forgiveness rules as testCountsUnitRe; capture group 1
+// is the integer count.
+//
+// We anchor on the literal word `integration` to avoid confusion with
+// the unit-count match. The "21 vault-accessor integration tests" token
+// also matches this pattern; the FindStringSubmatch (vs. FindAll) call
+// site picks the FIRST match, which is the canonical "1 integration
+// test" headline token.
+var testCountsIntegrationRe = regexp.MustCompile(`\*{0,2}~?(\d+)\s+integration\s+tests?\*{0,2}`)
 
 // testCountsFromTestingMD parses doc/TESTING.md's headline counts. On
 // missing file or unparseable content, returns zeros and a non-empty
 // warning string explaining why — never an error in the Go sense, since
 // stale counts are advisory and shouldn't fail the wrap.
+//
+// `lint` is not in the doc/TESTING.md headline; it stays at 0. If a
+// future headline format adds a lint count, extend this helper with a
+// dedicated regex.
 func testCountsFromTestingMD(testingMDPath string) (unit, integration, lint int, warning string) {
 	if testingMDPath == "" {
 		return 0, 0, 0, "doc/TESTING.md path empty"
@@ -266,23 +291,30 @@ func testCountsFromTestingMD(testingMDPath string) (unit, integration, lint int,
 		}
 		return 0, 0, 0, fmt.Sprintf("read doc/TESTING.md: %v", err)
 	}
-	m := testCountsHeadlineRe.FindStringSubmatch(string(data))
-	if len(m) < 4 {
-		return 0, 0, 0, "doc/TESTING.md headline not found"
+
+	body := string(data)
+	mu := testCountsUnitRe.FindStringSubmatch(body)
+	if len(mu) < 2 {
+		return 0, 0, 0, "doc/TESTING.md headline unit-count not found"
 	}
-	u, err := strconv.Atoi(m[1])
+	u, err := strconv.Atoi(mu[1])
 	if err != nil {
 		return 0, 0, 0, fmt.Sprintf("parse unit count: %v", err)
 	}
-	i, err := strconv.Atoi(m[2])
-	if err != nil {
-		return 0, 0, 0, fmt.Sprintf("parse integration count: %v", err)
+
+	// Integration count is best-effort: a TESTING.md without an
+	// integration token still yields a parseable unit count.
+	var i int
+	mi := testCountsIntegrationRe.FindStringSubmatch(body)
+	if len(mi) >= 2 {
+		i, err = strconv.Atoi(mi[1])
+		if err != nil {
+			return u, 0, 0, fmt.Sprintf("parse integration count: %v", err)
+		}
 	}
-	l, err := strconv.Atoi(m[3])
-	if err != nil {
-		return 0, 0, 0, fmt.Sprintf("parse lint count: %v", err)
-	}
-	return u, i, l, ""
+
+	// `lint` not in the headline — leave at 0.
+	return u, i, 0, ""
 }
 
 // oldestRootCommit returns the SHA of the oldest root commit reachable
@@ -427,8 +459,12 @@ func collectWrapState(ctx context.Context, cfg config.Config, project, cwd strin
 		Warning:     warn,
 	}
 
-	// vault and project dirty flags.
-	vaultDirty, err := vaultHasUncommittedWrites(cfg.VaultPath)
+	// vault and project dirty flags. The vault probe is scoped to
+	// `Projects/<project>/` so a sibling project's uncommitted writes
+	// (e.g. collateral from `vv context sync` regenerating other
+	// projects' agentctx/.surface files) does not falsely trip the
+	// writes-already-landed classifier for *this* project.
+	vaultDirty, err := vaultHasUncommittedWrites(cfg.VaultPath, project)
 	if err != nil {
 		return res, fmt.Errorf("vault git status: %w", err)
 	}

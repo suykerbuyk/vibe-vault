@@ -42,7 +42,12 @@ var surfaceCheckCompatible = surface.CheckCompatible
 
 // runPreflight assembles the result. Pure orchestration, no I/O beyond
 // the three helper invocations — all I/O is delegated.
-func runPreflight(cfg config.Config, cwd string) (PreflightWrapResult, error) {
+//
+// project, when non-empty, scopes the vault-dirty probe to
+// `Projects/<project>/` so a sibling project's uncommitted writes do
+// not falsely trip the vault_dirty warning. Empty project degrades to
+// whole-vault behavior (matches the historical preflight semantics).
+func runPreflight(cfg config.Config, cwd, project string) (PreflightWrapResult, error) {
 	res := PreflightWrapResult{
 		Warnings: []PreflightCheckItem{},
 		Errors:   []PreflightCheckItem{},
@@ -68,8 +73,10 @@ func runPreflight(cfg config.Config, cwd string) (PreflightWrapResult, error) {
 	}
 
 	// 2. Vault dirty (warning, never error). vaultHasUncommittedWrites
-	// already degrades to false on missing/non-git vault paths.
-	vaultDirty, err := vaultHasUncommittedWrites(cfg.VaultPath)
+	// already degrades to false on missing/non-git vault paths. The
+	// probe is scoped to Projects/<project>/ when project is non-empty
+	// so unrelated projects' dirt does not trigger the warning here.
+	vaultDirty, err := vaultHasUncommittedWrites(cfg.VaultPath, project)
 	if err != nil {
 		res.Warnings = append(res.Warnings, PreflightCheckItem{
 			Check:  "vault_dirty",
@@ -105,26 +112,57 @@ func runPreflight(cfg config.Config, cwd string) (PreflightWrapResult, error) {
 // Returns {ok, warnings[], errors[]}; the orchestrator uses ok as a
 // gate (false = halt, surface needs upgrade), and prepends each
 // warning to the iter narrative as advisory notes.
+//
+// The optional project argument scopes the vault_dirty check to
+// Projects/<project>/ so a sibling project's uncommitted writes (e.g.
+// collateral from `vv context sync` regenerating other projects'
+// agentctx/.surface) do not falsely warn here. When omitted, the
+// project is detected from the working directory; if detection fails
+// the probe degrades to whole-vault behavior (legacy semantics).
 func NewPreflightWrapTool(cfg config.Config) Tool {
 	return Tool{
 		Definition: ToolDef{
 			Name: "vv_preflight_wrap",
 			Description: "Run /wrap's readiness probe: " +
 				"surface compatibility (error if binary < vault stamp), " +
-				"vault dirty (warning), project dirty (warning). " +
+				"vault dirty (warning, scoped to Projects/<project>/), project dirty (warning). " +
 				"Returns {ok, warnings[], errors[]}. ok=false halts the wrap " +
 				"so the operator can resolve the incompat.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
-				"properties": {}
+				"properties": {
+					"project": {
+						"type": "string",
+						"description": "Project name. If omitted, detected from working directory; if detection fails the vault_dirty probe degrades to whole-vault scope."
+					}
+				}
 			}`),
 		},
-		Handler: func(_ json.RawMessage) (string, error) {
+		Handler: func(params json.RawMessage) (string, error) {
+			var args struct {
+				Project string `json:"project"`
+			}
+			if len(params) > 0 {
+				if err := json.Unmarshal(params, &args); err != nil {
+					return "", fmt.Errorf("invalid arguments: %w", err)
+				}
+			}
+
 			cwd, err := os.Getwd()
 			if err != nil {
 				return "", fmt.Errorf("get working directory: %w", err)
 			}
-			res, err := runPreflight(cfg, cwd)
+
+			// Best-effort project resolution. A failure here must not
+			// fail the preflight — degrade to empty project (whole-vault
+			// scope, legacy behavior). The wrap orchestrator will pass
+			// the project explicitly in the common path.
+			project, perr := resolveProject(args.Project)
+			if perr != nil {
+				project = ""
+			}
+
+			res, err := runPreflight(cfg, cwd, project)
 			if err != nil {
 				return "", err
 			}
