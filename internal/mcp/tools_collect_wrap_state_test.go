@@ -466,11 +466,20 @@ func TestCollectWrapState_Basic(t *testing.T) {
 }
 
 // TestCollectWrapState_DirtyVault asserts vault_has_uncommitted_writes
-// flips to true when the vault has an uncommitted file.
+// flips to true when the project's own subtree under
+// Projects/<project>/ has an uncommitted file. Per the C4-followup fix,
+// the probe is per-project: a dirty file inside the project's subtree
+// must trip the flag.
 func TestCollectWrapState_DirtyVault(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
 	initGitRepo(t, cfg.VaultPath)
-	if err := os.WriteFile(filepath.Join(cfg.VaultPath, "dirty.txt"), []byte("x"), 0o644); err != nil {
+	commitAllInRepo(t, cfg.VaultPath, "initial vault state")
+	// Drop a dirty file inside the project's own subtree.
+	projInVault := filepath.Join(cfg.VaultPath, "Projects", "myproj")
+	if err := os.MkdirAll(projInVault, 0o755); err != nil {
+		t.Fatalf("mkdir project subtree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projInVault, "dirty.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("write dirty: %v", err)
 	}
 
@@ -489,7 +498,78 @@ func TestCollectWrapState_DirtyVault(t *testing.T) {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if !res.VaultHasUncommittedWrites {
-		t.Errorf("dirty vault should report vault_has_uncommitted_writes=true")
+		t.Errorf("dirty file in project subtree should report vault_has_uncommitted_writes=true")
+	}
+}
+
+// TestCollectWrapState_OtherProjectDirty_NoFalsePositive is the
+// regression-lock for the collect-wrap-state-vault-dirty-scoping
+// carried thread. A dirty file under a SIBLING project's subtree
+// (Projects/other/...) must NOT trip vault_has_uncommitted_writes for
+// the project we're wrapping. This is the bug iter 219 hit two-machine
+// when `vv context sync` regenerated 57 OTHER projects' agentctx files
+// after `make install`, none of which were under Projects/vibe-vault/.
+func TestCollectWrapState_OtherProjectDirty_NoFalsePositive(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	initGitRepo(t, cfg.VaultPath)
+	commitAllInRepo(t, cfg.VaultPath, "initial vault state")
+	// Dirty a sibling project's subtree, NOT the project under wrap.
+	otherDir := filepath.Join(cfg.VaultPath, "Projects", "other-project")
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatalf("mkdir other project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "dirty.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write dirty in other project: %v", err)
+	}
+
+	projDir := t.TempDir()
+	initGitRepo(t, projDir)
+	gitCommit(t, projDir, "init", "")
+	t.Chdir(projDir)
+
+	tool := NewCollectWrapStateTool(cfg)
+	out, err := tool.Handler(json.RawMessage(`{"project":"myproj"}`))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	var res CollectWrapStateResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if res.VaultHasUncommittedWrites {
+		t.Errorf("sibling-project dirt must NOT trip vault_has_uncommitted_writes for myproj; got true (regression!)")
+	}
+}
+
+// TestCollectWrapState_VaultRootDirty_NoFalsePositive asserts that an
+// uncommitted file at the vault ROOT (outside any Projects/<x>/
+// subtree) does not trip the per-project probe either. Pairs with the
+// sibling-project regression-lock above.
+func TestCollectWrapState_VaultRootDirty_NoFalsePositive(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	initGitRepo(t, cfg.VaultPath)
+	commitAllInRepo(t, cfg.VaultPath, "initial vault state")
+	// Dirty at the vault root, outside Projects/.
+	if err := os.WriteFile(filepath.Join(cfg.VaultPath, "vault-root-dirty.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write dirty: %v", err)
+	}
+
+	projDir := t.TempDir()
+	initGitRepo(t, projDir)
+	gitCommit(t, projDir, "init", "")
+	t.Chdir(projDir)
+
+	tool := NewCollectWrapStateTool(cfg)
+	out, err := tool.Handler(json.RawMessage(`{"project":"myproj"}`))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	var res CollectWrapStateResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if res.VaultHasUncommittedWrites {
+		t.Errorf("vault-root dirt outside Projects/ must NOT trip vault_has_uncommitted_writes; got true")
 	}
 }
 

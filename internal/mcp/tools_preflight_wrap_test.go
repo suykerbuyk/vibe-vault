@@ -58,13 +58,20 @@ func TestPreflightWrap_AllClean(t *testing.T) {
 	}
 }
 
-// TestPreflightWrap_VaultDirty covers surface-pass + vault-dirty.
-// Expect ok=true, exactly one warning (vault_dirty), no errors.
+// TestPreflightWrap_VaultDirty covers surface-pass + vault-dirty for the
+// project under wrap. Per the C4-followup fix, the vault-dirty probe is
+// scoped to Projects/<project>/ — drop the dirty file inside that
+// subtree and pass project explicitly.
 func TestPreflightWrap_VaultDirty(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
 	initGitRepo(t, cfg.VaultPath)
-	// Leave an uncommitted file in the vault.
-	if err := os.WriteFile(filepath.Join(cfg.VaultPath, "dirty.txt"), []byte("x"), 0o644); err != nil {
+	commitAllInRepo(t, cfg.VaultPath, "initial vault state")
+	// Dirty file inside the project's own subtree.
+	projInVault := filepath.Join(cfg.VaultPath, "Projects", "myproj")
+	if err := os.MkdirAll(projInVault, 0o755); err != nil {
+		t.Fatalf("mkdir project subtree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projInVault, "dirty.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("write dirty: %v", err)
 	}
 
@@ -76,7 +83,7 @@ func TestPreflightWrap_VaultDirty(t *testing.T) {
 	withSurfaceCheck(t, func(_ string) error { return nil })
 
 	tool := NewPreflightWrapTool(cfg)
-	out, err := tool.Handler(json.RawMessage(`{}`))
+	out, err := tool.Handler(json.RawMessage(`{"project":"myproj"}`))
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
@@ -92,6 +99,49 @@ func TestPreflightWrap_VaultDirty(t *testing.T) {
 	}
 	if len(res.Warnings) != 1 || res.Warnings[0].Check != "vault_dirty" {
 		t.Errorf("warnings = %v, want exactly one vault_dirty entry", res.Warnings)
+	}
+}
+
+// TestPreflightWrap_OtherProjectDirty_NoFalsePositive is the
+// regression-lock for the collect-wrap-state-vault-dirty-scoping
+// carried thread on the preflight side. A dirty file under a SIBLING
+// project's subtree must not trip vault_dirty for the project under
+// wrap.
+func TestPreflightWrap_OtherProjectDirty_NoFalsePositive(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	initGitRepo(t, cfg.VaultPath)
+	commitAllInRepo(t, cfg.VaultPath, "initial vault state")
+	otherDir := filepath.Join(cfg.VaultPath, "Projects", "other-project")
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatalf("mkdir other project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "dirty.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write dirty: %v", err)
+	}
+
+	projDir := t.TempDir()
+	initGitRepo(t, projDir)
+	gitCommit(t, projDir, "init", "")
+	t.Chdir(projDir)
+
+	withSurfaceCheck(t, func(_ string) error { return nil })
+
+	tool := NewPreflightWrapTool(cfg)
+	out, err := tool.Handler(json.RawMessage(`{"project":"myproj"}`))
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	var res PreflightWrapResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if !res.OK {
+		t.Errorf("ok = false, want true; res = %+v", res)
+	}
+	for _, w := range res.Warnings {
+		if w.Check == "vault_dirty" {
+			t.Errorf("sibling-project dirt must NOT trip vault_dirty warning for myproj; got %v", w)
+		}
 	}
 }
 
@@ -133,11 +183,17 @@ func TestPreflightWrap_ProjectDirty(t *testing.T) {
 }
 
 // TestPreflightWrap_BothDirty covers surface-pass + vault-dirty +
-// project-dirty. Expect ok=true with both warnings present.
+// project-dirty. Per the C4-followup fix, the vault-dirty file must
+// live inside the project's own subtree to trip the warning.
 func TestPreflightWrap_BothDirty(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
 	initGitRepo(t, cfg.VaultPath)
-	if err := os.WriteFile(filepath.Join(cfg.VaultPath, "dirty.txt"), []byte("x"), 0o644); err != nil {
+	commitAllInRepo(t, cfg.VaultPath, "initial vault state")
+	projInVault := filepath.Join(cfg.VaultPath, "Projects", "myproj")
+	if err := os.MkdirAll(projInVault, 0o755); err != nil {
+		t.Fatalf("mkdir project subtree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projInVault, "dirty.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("write dirty: %v", err)
 	}
 
@@ -152,7 +208,7 @@ func TestPreflightWrap_BothDirty(t *testing.T) {
 	withSurfaceCheck(t, func(_ string) error { return nil })
 
 	tool := NewPreflightWrapTool(cfg)
-	out, err := tool.Handler(json.RawMessage(`{}`))
+	out, err := tool.Handler(json.RawMessage(`{"project":"myproj"}`))
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}

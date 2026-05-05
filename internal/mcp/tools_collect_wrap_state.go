@@ -427,8 +427,12 @@ func collectWrapState(ctx context.Context, cfg config.Config, project, cwd strin
 		Warning:     warn,
 	}
 
-	// vault and project dirty flags.
-	vaultDirty, err := vaultHasUncommittedWrites(cfg.VaultPath)
+	// vault and project dirty flags. The vault probe is scoped to
+	// `Projects/<project>/` so a sibling project's uncommitted writes
+	// (e.g. collateral from `vv context sync` regenerating other
+	// projects' agentctx/.surface files) does not falsely trip the
+	// writes-already-landed classifier for *this* project.
+	vaultDirty, err := vaultHasUncommittedWrites(cfg.VaultPath, project)
 	if err != nil {
 		return res, fmt.Errorf("vault git status: %w", err)
 	}

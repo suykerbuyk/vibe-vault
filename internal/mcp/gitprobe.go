@@ -35,7 +35,17 @@ var gitCmdRunner = func(ctx context.Context, dir string, args ...string) (string
 // vaultHasUncommittedWrites returns true iff `git status --porcelain` in
 // vaultPath produces any output. Returns false and a nil error when
 // vaultPath is empty or not a git repo.
-func vaultHasUncommittedWrites(vaultPath string) (bool, error) {
+//
+// When project is non-empty, the probe is scoped to the project's own
+// subtree at `Projects/<project>/` — only uncommitted files inside that
+// subtree flip the result to true. This matches the per-project intent
+// of the wrap-state collector + preflight: a sibling project's dirty
+// state must not falsely trip the writes-already-landed classifier or
+// the vault-dirty preflight warning for *this* project.
+//
+// When project is empty, the probe degrades to whole-vault behavior
+// (back-compat for any non-wrap caller).
+func vaultHasUncommittedWrites(vaultPath, project string) (bool, error) {
 	if vaultPath == "" {
 		return false, nil
 	}
@@ -46,7 +56,14 @@ func vaultHasUncommittedWrites(vaultPath string) (bool, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
-	out, err := gitCmdRunner(ctx, vaultPath, "status", "--porcelain")
+	args := []string{"status", "--porcelain"}
+	if project != "" {
+		// `--` separates pathspec from refs and forces git to interpret
+		// the trailing arg as a path. Trailing slash limits the match to
+		// the subtree.
+		args = append(args, "--", "Projects/"+project+"/")
+	}
+	out, err := gitCmdRunner(ctx, vaultPath, args...)
 	if err != nil {
 		return false, err
 	}
