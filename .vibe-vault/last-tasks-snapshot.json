@@ -1,6 +1,6 @@
 {
-  "iter_n": 224,
-  "anchor_sha": "acd63786d58f4debf75ce2d1caed5289e66b52ba",
+  "iter_n": 225,
+  "anchor_sha": "a7979b41e130a8595acf98f968977e903d499988",
   "active": [
     "classifier-writes-already-landed-fix",
     "claude-code-tool-selection-telemetry",
