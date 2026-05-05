@@ -365,12 +365,18 @@ func TestFilesChangedSinceAnchor_EmptyAnchor(t *testing.T) {
 }
 
 // --- testCountsFromTestingMD ------------------------------------------------
+//
+// The headline parser tolerates the actual doc/TESTING.md format:
+//   `**~2291 tests** across 48 test packages + **1 integration test** ...`
+// plus the simpler variants without `**` bold and/or `~` approximation
+// prefix. Carried thread: testcounts-parser-headline-format.
 
-func TestTestCountsFromTestingMD_HappyPath(t *testing.T) {
+func TestTestCountsFromTestingMD_PlainHappyPath(t *testing.T) {
+	// The simplest form: no markdown bold, no approximation prefix.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "TESTING.md")
 	body := "# Testing\n\nSome prose.\n\n" +
-		"**Test counts: 2291 unit + 32 integration + 0 lint = 2323 tests**\n\nMore prose.\n"
+		"2291 tests across 48 test packages + 1 integration test (32 subtests).\n\nMore prose.\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -378,8 +384,96 @@ func TestTestCountsFromTestingMD_HappyPath(t *testing.T) {
 	if warn != "" {
 		t.Errorf("warning should be empty on happy path, got %q", warn)
 	}
-	if u != 2291 || i != 32 || l != 0 {
-		t.Errorf("got (%d, %d, %d), want (2291, 32, 0)", u, i, l)
+	if u != 2291 || i != 1 || l != 0 {
+		t.Errorf("got (%d, %d, %d), want (2291, 1, 0)", u, i, l)
+	}
+}
+
+func TestTestCountsFromTestingMD_BoldHappyPath(t *testing.T) {
+	// Markdown bold around both counts, no approximation prefix.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "TESTING.md")
+	body := "# Testing\n\n" +
+		"**2291 tests** across 48 test packages + **1 integration test** (32 subtests).\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	u, i, l, warn := testCountsFromTestingMD(path)
+	if warn != "" {
+		t.Errorf("warning should be empty on bold path, got %q", warn)
+	}
+	if u != 2291 || i != 1 || l != 0 {
+		t.Errorf("got (%d, %d, %d), want (2291, 1, 0)", u, i, l)
+	}
+}
+
+func TestTestCountsFromTestingMD_TildeNoBold(t *testing.T) {
+	// Approximation prefix without bold wrapper.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "TESTING.md")
+	body := "# Testing\n\n" +
+		"~2291 tests across 48 test packages + 1 integration test.\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	u, i, l, warn := testCountsFromTestingMD(path)
+	if warn != "" {
+		t.Errorf("warning should be empty on tilde-no-bold path, got %q", warn)
+	}
+	if u != 2291 || i != 1 || l != 0 {
+		t.Errorf("got (%d, %d, %d), want (2291, 1, 0)", u, i, l)
+	}
+}
+
+func TestTestCountsFromTestingMD_BoldAndTilde_RealHeadlineShape(t *testing.T) {
+	// The actual doc/TESTING.md:5 form (iter 219) — bold + ~prefix +
+	// the trailing "21 vault-accessor integration tests" token that
+	// must NOT shadow the canonical "1 integration test" match.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "TESTING.md")
+	body := "# Test Suite\n\nExtracted from agentctx/resume.md.\n\n" +
+		"**~2291 tests** across 48 test packages + **1 integration test** (32 subtests) + **21 vault-accessor integration tests**.\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	u, i, l, warn := testCountsFromTestingMD(path)
+	if warn != "" {
+		t.Errorf("warning should be empty on real-headline path, got %q", warn)
+	}
+	if u != 2291 || i != 1 || l != 0 {
+		t.Errorf("got (%d, %d, %d), want (2291, 1, 0); first integration match must win", u, i, l)
+	}
+}
+
+// TestTestCountsFromTestingMD_LiveDocFile is the regression-lock that
+// asserts the parser succeeds against the actual repo doc/TESTING.md.
+// Per the carried-thread definition-of-done, unit count must be >= 2000
+// when parsed from the live file. This catches any future headline
+// format change before it silently zeros out the wrap-state record.
+func TestTestCountsFromTestingMD_LiveDocFile(t *testing.T) {
+	// Find the repo root by walking up from this test file's directory
+	// until we hit a doc/TESTING.md sibling. internal/mcp/ is two
+	// levels deep, so the live file is at ../../doc/TESTING.md.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	livePath := filepath.Join(cwd, "..", "..", "doc", "TESTING.md")
+	if _, err := os.Stat(livePath); err != nil {
+		t.Skipf("live doc/TESTING.md not reachable from %s: %v", cwd, err)
+	}
+	u, i, l, warn := testCountsFromTestingMD(livePath)
+	if warn != "" {
+		t.Errorf("live doc/TESTING.md should parse cleanly, got warning %q", warn)
+	}
+	if u < 2000 {
+		t.Errorf("unit count from live doc/TESTING.md = %d, want >= 2000", u)
+	}
+	if i < 1 {
+		t.Errorf("integration count from live doc/TESTING.md = %d, want >= 1", i)
+	}
+	if l != 0 {
+		t.Errorf("lint count from live doc/TESTING.md = %d, want 0 (not in headline)", l)
 	}
 }
 
