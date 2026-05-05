@@ -35,15 +35,25 @@ func NewProvider(enrich config.EnrichmentConfig, providers config.ProvidersConfi
 		return nil, err
 	}
 
+	// Resolve the effective base URL for the provider per Decision C of
+	// grok-provider-support v3: providers.<P>.base_url (when non-empty)
+	// overrides enrichment.base_url. Operators on the legacy default config
+	// (provider = "openai" + enrichment.base_url = ".../x.ai/...") keep
+	// working unchanged because enrichment.base_url is still consulted as
+	// the fallback.
+	baseURL := resolveBaseURL(provider, enrich.BaseURL, providers)
+
 	var base Provider
 
 	switch enrich.Provider {
 	case "openai", "":
-		base, err = NewOpenAI(enrich.BaseURL, apiKey, enrich.Model)
+		base, err = NewOpenAI(baseURL, apiKey, enrich.Model)
 	case "anthropic":
-		base, err = NewAnthropic(enrich.BaseURL, apiKey, enrich.Model)
+		base, err = NewAnthropic(baseURL, apiKey, enrich.Model)
 	case "google":
 		base, err = NewGoogle(apiKey, enrich.Model)
+	case "grok":
+		base, err = NewGrok(baseURL, apiKey, enrich.Model)
 	default:
 		return nil, fmt.Errorf("unknown LLM provider: %q", enrich.Provider)
 	}
@@ -53,6 +63,32 @@ func NewProvider(enrich config.EnrichmentConfig, providers config.ProvidersConfi
 
 	// Wrap with retry logic for transient failures.
 	return WithRetry(base), nil
+}
+
+// resolveBaseURL implements the Decision C precedence rule:
+// providers.<P>.base_url > enrichment.base_url > "" (let each NewX
+// constructor fall back to its own canonical URL).
+//
+// Per the v3 plan: enrichment.base_url is retained, NOT deprecated; legacy
+// operators on the default config (provider = "openai" + enrichment.base_url
+// pointing at xAI) keep working unchanged. The new providers.<P>.base_url
+// field is the preferred location for per-provider overrides going forward.
+func resolveBaseURL(provider, enrichBaseURL string, providers config.ProvidersConfig) string {
+	var perProvider string
+	switch provider {
+	case "anthropic":
+		perProvider = providers.Anthropic.BaseURL
+	case "openai", "":
+		perProvider = providers.OpenAI.BaseURL
+	case "google":
+		perProvider = providers.Google.BaseURL
+	case "grok":
+		perProvider = providers.Grok.BaseURL
+	}
+	if perProvider != "" {
+		return perProvider
+	}
+	return enrichBaseURL
 }
 
 // Available reports the availability state of LLM enrichment.
