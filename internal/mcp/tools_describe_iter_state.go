@@ -4,16 +4,9 @@
 package mcp
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/suykerbuyk/vibe-vault/internal/config"
 )
@@ -23,28 +16,20 @@ import (
 // the server returns only the four mechanically-computable facts; the
 // slash command computes commits_since_last_iter, files_changed,
 // task_deltas, and test_counts itself via git/filesystem.
+//
+// Note (Commit 1 of wrap-mcp-offload): the lower-level helpers used by
+// describeIterState() — gitCmdRunner, vaultHasUncommittedWrites,
+// lastIterAnchorSha, nextIterFromIterationsMD, iterNarrativeRe — have
+// been relocated to gitprobe.go and wrapstate.go. They remain in the
+// same package (internal/mcp), so identifiers resolve here without
+// import changes. This file (and its test counterpart) will be deleted
+// in Commit 2 when the surface bumps and the tool retires.
 type describeIterStateResult struct {
 	IterN                     int    `json:"iter_n"`
 	Branch                    string `json:"branch"`
 	VaultHasUncommittedWrites bool   `json:"vault_has_uncommitted_writes"`
 	LastIterAnchorSha         string `json:"last_iter_anchor_sha,omitempty"`
 }
-
-// gitCmdRunner runs a git command in dir and returns its stdout. Test seam.
-var gitCmdRunner = func(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
-}
-
-// iterNarrativeRe matches the H3 narrative header used in iterations.md
-// (e.g., "### Iteration 168 — title (date)"). The capture group is the
-// project-wide iteration number.
-var iterNarrativeRe = regexp.MustCompile(`(?m)^### Iteration (\d+)\b`)
 
 // describeIterState computes the four-field state record for a project.
 // It is the single source of truth for the vv_describe_iter_state tool.
@@ -84,81 +69,6 @@ func describeIterState(cfg config.Config, project string) (describeIterStateResu
 	res.LastIterAnchorSha = sha
 
 	return res, nil
-}
-
-// nextIterFromIterationsMD parses iterations.md for a project and returns
-// max(### Iteration N) + 1. Returns 1 when the file is missing, unreadable,
-// or contains no matching headers — the canonical "fresh project" signal.
-func nextIterFromIterationsMD(vaultPath, project string) (int, error) {
-	if vaultPath == "" || project == "" {
-		return 1, nil
-	}
-	path := filepath.Join(vaultPath, "Projects", project, "agentctx", "iterations.md")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 1, nil
-		}
-		return 0, err
-	}
-	max := 0
-	for _, m := range iterNarrativeRe.FindAllStringSubmatch(string(data), -1) {
-		if len(m) < 2 {
-			continue
-		}
-		n, err := strconv.Atoi(m[1])
-		if err == nil && n > max {
-			max = n
-		}
-	}
-	return max + 1, nil
-}
-
-// vaultHasUncommittedWrites returns true iff `git status --porcelain` in
-// vaultPath produces any output.  Returns false and a nil error when
-// vaultPath is empty or not a git repo.
-func vaultHasUncommittedWrites(vaultPath string) (bool, error) {
-	if vaultPath == "" {
-		return false, nil
-	}
-	if _, err := os.Stat(filepath.Join(vaultPath, ".git")); err != nil {
-		// Not a git repo (or unreadable); treat as clean — matches the
-		// "no signal available" interpretation in D6.
-		return false, nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-	out, err := gitCmdRunner(ctx, vaultPath, "status", "--porcelain")
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(out) != "", nil
-}
-
-// lastIterAnchorSha returns the SHA of the most recent commit that
-// touched the project's iter stamp file (.vibe-vault/last-iter).
-// Empty string when the file is not yet tracked — the canonical
-// "no prior wrap" signal handled by the wrap.md fallback.
-//
-// This replaces the deprecated commit-body footer search (DESIGN
-// #93). The stamp file is written every wrap by vv_stamp_iter, so
-// `git log -n 1 -- .vibe-vault/last-iter` is the canonical anchor.
-func lastIterAnchorSha(cwd string) (string, error) {
-	if cwd == "" {
-		return "", nil
-	}
-	if _, err := os.Stat(filepath.Join(cwd, ".git")); err != nil {
-		return "", nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	out, err := gitCmdRunner(ctx, cwd,
-		"log", "-n", "1", "--format=%H", "--",
-		".vibe-vault/last-iter")
-	if err != nil {
-		return "", nil
-	}
-	return strings.TrimSpace(out), nil
 }
 
 // NewDescribeIterStateTool creates the vv_describe_iter_state MCP tool.
