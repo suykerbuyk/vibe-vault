@@ -307,6 +307,9 @@ slash command (templates/agentctx/commands/wrap.md)
     │     vv_thread_{insert,replace,remove}
     │     vv_carried_{add,remove,promote_to_task}
     │     vv_set_commit_msg
+    │     vv_stamp_iter      (writes .vibe-vault/last-iter +
+    │                        .vibe-vault/last-tasks-snapshot.json
+    │                        atomically; DESIGN #93 / #105)
     │     vv_capture_session
     │
     └── mechanical plumbing:
@@ -675,7 +678,8 @@ repo/
 ├── commit.msg             Regular file (working commit message)
 ├── .vibe-vault.toml       Project identity (committed to repo)
 ├── .vibe-vault/
-│   └── last-iter          Iter anchor stamp file written by vv_stamp_iter; git log of this path is the canonical wrap anchor (DESIGN #93)
+│   ├── last-iter                    Iter anchor stamp file written by vv_stamp_iter; git log of this path is the canonical wrap anchor (DESIGN #93)
+│   └── last-tasks-snapshot.json     Slug-set snapshot of vault-side tasks/{,done/,cancelled/} written by vv_stamp_iter alongside last-iter; vv_collect_wrap_state diffs this against live FS state to compute task_deltas (DESIGN #105 / C3-v6)
 └── .claude/
     ├── commands/          Regular directory (deployed from vault agentctx/)
     ├── rules/             Regular directory
