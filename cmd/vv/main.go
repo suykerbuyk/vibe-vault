@@ -17,7 +17,6 @@ import (
 
 	"context"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	"github.com/suykerbuyk/vibe-vault/internal/archive"
@@ -39,6 +38,7 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/meta"
 	"github.com/suykerbuyk/vibe-vault/internal/scaffold"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
+	"github.com/suykerbuyk/vibe-vault/internal/sessionsource"
 	"github.com/suykerbuyk/vibe-vault/internal/staging"
 	"github.com/suykerbuyk/vibe-vault/internal/stats"
 	"github.com/suykerbuyk/vibe-vault/internal/surface"
@@ -1310,38 +1310,25 @@ func runZedWatch(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	// Mutex to prevent concurrent callback invocations
-	var mu sync.Mutex
-
-	err := zed.Watch(ctx, zed.WatcherConfig{
-		DBPath:   dbPath,
-		Debounce: debounce,
-		Logger:   log.Default(),
-	}, func() {
-		mu.Lock()
-		defer mu.Unlock()
-
-		window := debounce + time.Minute
-		since := time.Now().Add(-window)
-
-		threads, err := zed.ParseDB(dbPath, zed.ParseOpts{Since: since})
-		if err != nil {
-			log.Printf("error reading threads: %v", err)
-			return
-		}
-
-		if len(threads) == 0 {
-			return
-		}
-
-		processed, skipped, errors := captureZedThreads(threads, dbPath, projectFilter, false, cfg)
-		if processed > 0 || errors > 0 {
-			fmt.Printf("[%s] captured: %d, skipped: %d, errors: %d\n",
-				time.Now().Format("15:04:05"), processed, skipped, errors)
-		}
+	// γ Phase 1 (session-source-interface): drive the Zed watcher
+	// through the SessionSource registry rather than calling
+	// zed.Watch directly. The registry owns the goroutine lifecycle
+	// and the double-Start guard; the source's Start() body is the
+	// fsnotify-watch loop. runZedBackfill remains registry-bypassing
+	// (operational tooling that calls captureZedThreads directly).
+	registry := sessionsource.NewRegistry()
+	zedSource := zed.NewSource(zed.SourceConfig{
+		DBPath:        dbPath,
+		Debounce:      debounce,
+		ProjectFilter: projectFilter,
+		Cfg:           cfg,
+		Logger:        log.Default(),
 	})
+	if err := registry.Register(zedSource); err != nil {
+		fatal("register zed source: %v", err)
+	}
 
-	if err != nil && err != context.Canceled {
+	if err := registry.Start(ctx, zed.SourceName, sessionsource.CaptureSink{}); err != nil && err != context.Canceled {
 		fatal("watcher: %v", err)
 	}
 }
