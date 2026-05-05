@@ -50,12 +50,18 @@ type ProvidersConfig struct {
 	Anthropic ProviderConfig `toml:"anthropic"`
 	OpenAI    ProviderConfig `toml:"openai"`
 	Google    ProviderConfig `toml:"google"`
+	Grok      ProviderConfig `toml:"grok"`
 }
 
 // ProviderConfig is one provider's settings. APIKey is empty when the operator
-// relies on the env-var fallback path.
+// relies on the env-var fallback path. BaseURL is an optional per-provider
+// endpoint override; when non-empty it takes precedence over
+// EnrichmentConfig.BaseURL (see internal/llm.NewProvider for the precedence
+// rule). Empty BaseURL means the provider's NewX constructor falls back to
+// its own canonical URL.
 type ProviderConfig struct {
-	APIKey string `toml:"api_key"`
+	APIKey  string `toml:"api_key"`
+	BaseURL string `toml:"base_url"`
 }
 
 // SynthesisConfig controls the end-of-session synthesis agent.
@@ -74,6 +80,8 @@ func DefaultAPIKeyEnv(provider string) string {
 		return "ANTHROPIC_API_KEY"
 	case "google":
 		return "GOOGLE_API_KEY"
+	case "grok":
+		return "XAI_API_KEY"
 	default:
 		return ""
 	}
@@ -365,6 +373,24 @@ func (c Config) Overlay(projectConfigPath string) Config {
 	}
 	if md.IsDefined("providers", "google", "api_key") {
 		c.Providers.Google.APIKey = overlay.Providers.Google.APIKey
+	}
+	if md.IsDefined("providers", "grok", "api_key") {
+		c.Providers.Grok.APIKey = overlay.Providers.Grok.APIKey
+	}
+	// Per-provider base_url — takes precedence over EnrichmentConfig.BaseURL
+	// when non-empty (see internal/llm.NewProvider). Field-by-field merge so
+	// an overlay touching one provider's URL leaves the others untouched.
+	if md.IsDefined("providers", "anthropic", "base_url") {
+		c.Providers.Anthropic.BaseURL = overlay.Providers.Anthropic.BaseURL
+	}
+	if md.IsDefined("providers", "openai", "base_url") {
+		c.Providers.OpenAI.BaseURL = overlay.Providers.OpenAI.BaseURL
+	}
+	if md.IsDefined("providers", "google", "base_url") {
+		c.Providers.Google.BaseURL = overlay.Providers.Google.BaseURL
+	}
+	if md.IsDefined("providers", "grok", "base_url") {
+		c.Providers.Grok.BaseURL = overlay.Providers.Grok.BaseURL
 	}
 
 	return c

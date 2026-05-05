@@ -11,7 +11,7 @@ import (
 )
 
 // providersWithKey returns a ProvidersConfig with the named provider's
-// api_key set to the given value and the other two providers empty.
+// api_key set to the given value and the other providers empty.
 func providersWithKey(t *testing.T, provider, key string) config.ProvidersConfig {
 	t.Helper()
 	var p config.ProvidersConfig
@@ -22,6 +22,8 @@ func providersWithKey(t *testing.T, provider, key string) config.ProvidersConfig
 		p.OpenAI.APIKey = key
 	case "google":
 		p.Google.APIKey = key
+	case "grok":
+		p.Grok.APIKey = key
 	default:
 		t.Fatalf("providersWithKey: unknown provider %q", provider)
 	}
@@ -36,6 +38,7 @@ func TestResolveAPIKey_ConfigWins(t *testing.T) {
 		{"anthropic", "ANTHROPIC_API_KEY"},
 		{"openai", "OPENAI_API_KEY"},
 		{"google", "GOOGLE_API_KEY"},
+		{"grok", "XAI_API_KEY"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.provider, func(t *testing.T) {
@@ -60,6 +63,7 @@ func TestResolveAPIKey_EnvFallback(t *testing.T) {
 		{"anthropic", "ANTHROPIC_API_KEY"},
 		{"openai", "OPENAI_API_KEY"},
 		{"google", "GOOGLE_API_KEY"},
+		{"grok", "XAI_API_KEY"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.provider, func(t *testing.T) {
@@ -83,6 +87,7 @@ func TestResolveAPIKey_BothEmpty_ActionableError(t *testing.T) {
 		{"anthropic", "ANTHROPIC_API_KEY"},
 		{"openai", "OPENAI_API_KEY"},
 		{"google", "GOOGLE_API_KEY"},
+		{"grok", "XAI_API_KEY"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.provider, func(t *testing.T) {
@@ -113,7 +118,7 @@ func TestResolveAPIKey_UnknownProvider(t *testing.T) {
 	if !strings.Contains(msg, "unknown provider") {
 		t.Errorf("error %q should say 'unknown provider'", msg)
 	}
-	for _, want := range []string{"anthropic", "openai", "google"} {
+	for _, want := range []string{"anthropic", "openai", "google", "grok"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q should list supported provider %q", msg, want)
 		}

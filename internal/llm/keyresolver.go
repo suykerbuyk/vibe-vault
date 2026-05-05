@@ -14,7 +14,7 @@ import (
 // env-fallback / actionable-error precedence.
 //
 // Provider names are the lowercase short forms used by `[enrichment].provider`:
-// "anthropic", "openai", "google". Tier order:
+// "anthropic", "openai", "google", "grok". Tier order:
 //
 //  1. providers.<P>.APIKey (from config.toml) wins if non-empty.
 //  2. os.Getenv(envVarFor(provider)) — fallback for operators with env-var
@@ -29,7 +29,7 @@ import (
 func ResolveAPIKey(provider string, providers config.ProvidersConfig) (string, error) {
 	envVar := envVarFor(provider)
 	if envVar == "" {
-		return "", fmt.Errorf("unknown provider %q; supported: anthropic, openai, google", provider)
+		return "", fmt.Errorf("unknown provider %q; supported: anthropic, openai, google, grok", provider)
 	}
 
 	if k := configKeyFor(provider, providers); k != "" {
@@ -54,6 +54,8 @@ func envVarFor(provider string) string {
 		return "OPENAI_API_KEY"
 	case "google":
 		return "GOOGLE_API_KEY"
+	case "grok":
+		return "XAI_API_KEY"
 	default:
 		return ""
 	}
@@ -69,6 +71,8 @@ func configKeyFor(provider string, providers config.ProvidersConfig) string {
 		return providers.OpenAI.APIKey
 	case "google":
 		return providers.Google.APIKey
+	case "grok":
+		return providers.Grok.APIKey
 	default:
 		return ""
 	}
