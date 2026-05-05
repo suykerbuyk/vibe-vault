@@ -51,6 +51,7 @@ func TestDefaultAPIKeyEnv(t *testing.T) {
 		{"", "OPENAI_API_KEY"},
 		{"anthropic", "ANTHROPIC_API_KEY"},
 		{"google", "GOOGLE_API_KEY"},
+		{"grok", "XAI_API_KEY"},
 		{"unknown", ""},
 	}
 	for _, tc := range cases {
@@ -549,6 +550,136 @@ api_key = "Y"
 	}
 	if got := result.Providers.Google.APIKey; got != "" {
 		t.Errorf("Google.APIKey = %q, want empty (untouched)", got)
+	}
+}
+
+// TestOverlay_ProvidersGrokMerge asserts that an overlay setting
+// [providers.grok].api_key flows through to the merged config — the new
+// provider section gets the same field-by-field treatment as the existing
+// three.
+func TestOverlay_ProvidersGrokMerge(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`[providers.grok]
+api_key = "xai-overlay"
+`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	base := DefaultConfig()
+	base.Providers.Anthropic.APIKey = "ANT"
+	base.Providers.OpenAI.APIKey = "OAI"
+
+	result := base.Overlay(cfgPath)
+
+	if got := result.Providers.Grok.APIKey; got != "xai-overlay" {
+		t.Errorf("Grok.APIKey = %q, want xai-overlay", got)
+	}
+	// Other providers untouched.
+	if got := result.Providers.Anthropic.APIKey; got != "ANT" {
+		t.Errorf("Anthropic.APIKey = %q, want ANT (preserved)", got)
+	}
+	if got := result.Providers.OpenAI.APIKey; got != "OAI" {
+		t.Errorf("OpenAI.APIKey = %q, want OAI (preserved)", got)
+	}
+	if got := result.Providers.Google.APIKey; got != "" {
+		t.Errorf("Google.APIKey = %q, want empty (untouched)", got)
+	}
+	// Base unchanged.
+	if base.Providers.Grok.APIKey != "" {
+		t.Error("base config Providers.Grok was mutated")
+	}
+}
+
+// TestOverlay_ProviderBaseURLOverride asserts that the new
+// [providers.<P>].base_url field is merged field-by-field for all 4
+// providers — the same Wrap.Tiers / api_key pattern. Per Decision C of
+// grok-provider-support v3, this lets operators override per-provider
+// endpoints without leaking across provider switches.
+func TestOverlay_ProviderBaseURLOverride(t *testing.T) {
+	cases := []struct {
+		name     string
+		toml     string
+		check    func(t *testing.T, c Config)
+		baseSeed func(c *Config)
+	}{
+		{
+			name: "anthropic",
+			toml: `[providers.anthropic]
+base_url = "https://anthropic-mirror.test/v1"
+`,
+			check: func(t *testing.T, c Config) {
+				if got := c.Providers.Anthropic.BaseURL; got != "https://anthropic-mirror.test/v1" {
+					t.Errorf("Anthropic.BaseURL = %q", got)
+				}
+			},
+		},
+		{
+			name: "openai",
+			toml: `[providers.openai]
+base_url = "https://openai-mirror.test/v1"
+`,
+			check: func(t *testing.T, c Config) {
+				if got := c.Providers.OpenAI.BaseURL; got != "https://openai-mirror.test/v1" {
+					t.Errorf("OpenAI.BaseURL = %q", got)
+				}
+			},
+		},
+		{
+			name: "google",
+			toml: `[providers.google]
+base_url = "https://google-mirror.test/v1"
+`,
+			check: func(t *testing.T, c Config) {
+				if got := c.Providers.Google.BaseURL; got != "https://google-mirror.test/v1" {
+					t.Errorf("Google.BaseURL = %q", got)
+				}
+			},
+		},
+		{
+			name: "grok",
+			toml: `[providers.grok]
+base_url = "https://grok-mirror.test/v1"
+`,
+			check: func(t *testing.T, c Config) {
+				if got := c.Providers.Grok.BaseURL; got != "https://grok-mirror.test/v1" {
+					t.Errorf("Grok.BaseURL = %q", got)
+				}
+			},
+		},
+		{
+			name: "preserves base BaseURL when overlay omits the field",
+			toml: `[providers.openai]
+api_key = "Y"
+`,
+			baseSeed: func(c *Config) {
+				c.Providers.OpenAI.BaseURL = "https://kept.test/v1"
+			},
+			check: func(t *testing.T, c Config) {
+				if got := c.Providers.OpenAI.BaseURL; got != "https://kept.test/v1" {
+					t.Errorf("OpenAI.BaseURL = %q, want preserved base value", got)
+				}
+				if got := c.Providers.OpenAI.APIKey; got != "Y" {
+					t.Errorf("OpenAI.APIKey = %q, want Y", got)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "config.toml")
+			if err := os.WriteFile(cfgPath, []byte(tc.toml), 0o644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			base := DefaultConfig()
+			if tc.baseSeed != nil {
+				tc.baseSeed(&base)
+			}
+			result := base.Overlay(cfgPath)
+			tc.check(t, result)
+		})
 	}
 }
 
