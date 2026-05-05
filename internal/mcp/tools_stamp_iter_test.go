@@ -208,6 +208,118 @@ func TestStampIter_AtomicReplace(t *testing.T) {
 	}
 }
 
+// TestStampIter_WritesTasksSnapshot verifies that vv_stamp_iter writes
+// .vibe-vault/last-tasks-snapshot.json alongside .vibe-vault/last-iter
+// (C3-v6 fix in the wrap-mcp-offload PR). The snapshot's slug sets must
+// reflect the live state of <vault>/Projects/<project>/agentctx/tasks/{,
+// done/, cancelled/} at stamp time; vv_collect_wrap_state diffs the
+// next wrap's live FS against this snapshot to compute task_deltas.
+func TestStampIter_WritesTasksSnapshot(t *testing.T) {
+	// Seed the vault-side tasks/ tree partitioned by directory so we
+	// can verify each partition's slug set landed in the snapshot.
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	tasksDir := filepath.Join(cfg.VaultPath, "Projects", "myproj", "agentctx", "tasks")
+	if err := os.MkdirAll(filepath.Join(tasksDir, "done"), 0o755); err != nil {
+		t.Fatalf("mkdir done: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tasksDir, "cancelled"), 0o755); err != nil {
+		t.Fatalf("mkdir cancelled: %v", err)
+	}
+	for path, body := range map[string]string{
+		filepath.Join(tasksDir, "active-one.md"):              "x",
+		filepath.Join(tasksDir, "active-two.md"):              "x",
+		filepath.Join(tasksDir, "done", "shipped-one.md"):     "x",
+		filepath.Join(tasksDir, "cancelled", "killed-one.md"): "x",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	projectRoot := t.TempDir()
+	tool := NewStampIterTool(cfg)
+	resultJSON, err := tool.Handler(stampIterArgs(t, "myproj", projectRoot, 218))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The handler's response must include both file paths and byte counts.
+	var got map[string]any
+	if unmarshalErr := json.Unmarshal([]byte(resultJSON), &got); unmarshalErr != nil {
+		t.Fatalf("invalid JSON: %v\n%s", unmarshalErr, resultJSON)
+	}
+	wantSnapshotPath := filepath.Join(projectRoot, ".vibe-vault", "last-tasks-snapshot.json")
+	if got["snapshot_path"] != wantSnapshotPath {
+		t.Errorf("snapshot_path = %v, want %q", got["snapshot_path"], wantSnapshotPath)
+	}
+	if sb, ok := got["snapshot_bytes"].(float64); !ok || int(sb) <= 0 {
+		t.Errorf("snapshot_bytes = %v, want > 0", got["snapshot_bytes"])
+	}
+
+	// last-iter still landed (cohabitation with the snapshot).
+	lastIterPath := filepath.Join(projectRoot, ".vibe-vault", "last-iter")
+	lastIterData, err := os.ReadFile(lastIterPath)
+	if err != nil {
+		t.Fatalf("read last-iter: %v", err)
+	}
+	if string(lastIterData) != "218\n" {
+		t.Errorf("last-iter = %q, want %q", string(lastIterData), "218\n")
+	}
+
+	// The snapshot exists and parses as the C3-v6 schema.
+	snapshotData, err := os.ReadFile(wantSnapshotPath)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	var snap lastTasksSnapshot
+	if err := json.Unmarshal(snapshotData, &snap); err != nil {
+		t.Fatalf("parse snapshot: %v\n%s", err, snapshotData)
+	}
+	if snap.IterN != 218 {
+		t.Errorf("snap.IterN = %d, want 218", snap.IterN)
+	}
+	if !equalUnordered(snap.Active, []string{"active-one", "active-two"}) {
+		t.Errorf("snap.Active = %v, want [active-one active-two]", snap.Active)
+	}
+	if !equalUnordered(snap.Done, []string{"shipped-one"}) {
+		t.Errorf("snap.Done = %v, want [shipped-one]", snap.Done)
+	}
+	if !equalUnordered(snap.Cancelled, []string{"killed-one"}) {
+		t.Errorf("snap.Cancelled = %v, want [killed-one]", snap.Cancelled)
+	}
+}
+
+// TestStampIter_SnapshotMissingTasksDir verifies that vv_stamp_iter
+// degrades gracefully when the vault-side tasks/ tree is missing —
+// first-bootstrap projects must not fail their first wrap on this. The
+// snapshot is still written, just with empty slug arrays.
+func TestStampIter_SnapshotMissingTasksDir(t *testing.T) {
+	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
+	projectRoot := t.TempDir()
+
+	tool := NewStampIterTool(cfg)
+	if _, err := tool.Handler(stampIterArgs(t, "bootstrap-proj", projectRoot, 1)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	snapshotPath := filepath.Join(projectRoot, ".vibe-vault", "last-tasks-snapshot.json")
+	data, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	var snap lastTasksSnapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
+		t.Fatalf("parse snapshot: %v\n%s", err, data)
+	}
+	if snap.IterN != 1 {
+		t.Errorf("snap.IterN = %d, want 1", snap.IterN)
+	}
+	if len(snap.Active) != 0 || len(snap.Done) != 0 || len(snap.Cancelled) != 0 {
+		t.Errorf("expected empty slug sets, got active=%v done=%v cancelled=%v",
+			snap.Active, snap.Done, snap.Cancelled)
+	}
+}
+
 func TestStampIter_ContentExactlyIntegerNewline(t *testing.T) {
 	cfg := writeTestVault(t, map[string]index.SessionEntry{}, nil)
 

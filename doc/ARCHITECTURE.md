@@ -224,10 +224,18 @@ Claude Code / AI agent
         ├─── vv_carried_add          → mdutil.AddCarriedBullet() on resume.md
         ├─── vv_carried_remove       → mdutil.RemoveCarriedBullet() on resume.md
         ├─── vv_carried_promote_to_task → remove bullet + create task file
-        ├─── vv_describe_iter_state  → minimal iter-state record (DESIGN #92):
-        │                              {iter_n, branch,
+        ├─── vv_collect_wrap_state   → full wrap-state record (wrap-mcp-offload,
+        │                              surface v16): {iter_n, branch,
+        │                               last_iter_anchor_sha,
+        │                               iter_n_minus_one_already_in_iterations_md,
+        │                               commits_since_last_iter, files_changed,
+        │                               task_deltas, test_counts,
         │                               vault_has_uncommitted_writes,
-        │                               last_iter_anchor_sha}
+        │                               project_has_uncommitted_writes, shape}
+        ├─── vv_preflight_wrap       → readiness probe (wrap-mcp-offload, surface v16):
+        │                              {ok, warnings[], errors[]}; surface
+        │                              compatibility gates the wrap; vault/project
+        │                              dirty flags are advisory warnings.
         ├─── vv_render_wrap_text     → [RETIRED v15 / shim only] (DESIGN #104):
         │                              returns actionable error pointing at
         │                              `vv context sync`; orchestrator now
@@ -264,20 +272,20 @@ operator: /wrap
     ▼
 slash command (templates/agentctx/commands/wrap.md)
     │
-    ├── vv_describe_iter_state(project?)
-    │     → server-minimal record: {iter_n, branch,
+    ├── vv_preflight_wrap()
+    │     → {ok, warnings[], errors[]}; halt if ok=false (surface incompat)
+    │
+    ├── vv_collect_wrap_state(project?)
+    │     → server computes the full record: {iter_n, branch,
+    │                               last_iter_anchor_sha,
+    │                               iter_n_minus_one_already_in_iterations_md,
+    │                               commits_since_last_iter, files_changed,
+    │                               task_deltas, test_counts,
     │                               vault_has_uncommitted_writes,
-    │                               last_iter_anchor_sha}
+    │                               project_has_uncommitted_writes, shape}
     │
-    ├── slash command computes via git/filesystem:
-    │     - commits_since_last_iter (git log <anchor>..HEAD)
-    │     - files_changed           (git diff --name-only <anchor>..HEAD)
-    │     - task_deltas             (walk agentctx/tasks/ vs <anchor>:tasks/)
-    │     - test_counts             (TESTING.md or `go test -list .`)
-    │
-    ├── shape detection (slash-command pattern-match):
-    │     fresh-feature   | planning | reconciliation
-    │     vault-only      | writes-already-landed
+    ├── shape (server-classified by ClassifyWrapShape):
+    │     fresh-feature | planning | bookkeeping | writes-already-landed
     │
     ├── if shape needs prose:
     │     parallel-fetch context bundle:
@@ -299,6 +307,9 @@ slash command (templates/agentctx/commands/wrap.md)
     │     vv_thread_{insert,replace,remove}
     │     vv_carried_{add,remove,promote_to_task}
     │     vv_set_commit_msg
+    │     vv_stamp_iter      (writes .vibe-vault/last-iter +
+    │                        .vibe-vault/last-tasks-snapshot.json
+    │                        atomically; DESIGN #93 / #105)
     │     vv_capture_session
     │
     └── mechanical plumbing:
@@ -306,21 +317,31 @@ slash command (templates/agentctx/commands/wrap.md)
           vv vault push   (force-with-lease convergence per DESIGN #81)
 ```
 
-**`vv_describe_iter_state` schema (server side).**
+**`vv_collect_wrap_state` schema (server side, surface v16).**
 
 ```
 input:  {project?: string}                # optional explicit project
 output: {
-  iter_n:                       int,      # index.NextIteration()
-  branch:                       string,   # git rev-parse --abbrev-ref HEAD
-  vault_has_uncommitted_writes: bool,     # git status --porcelain in vault
-  last_iter_anchor_sha:         string|null  # git log -n 1 --format=%H -- .vibe-vault/last-iter; null if file not yet tracked (DESIGN #93)
+  iter_n:                                int,        # max(### Iteration N) + 1 in iterations.md
+  branch:                                string,     # git rev-parse --abbrev-ref HEAD
+  last_iter_anchor_sha:                  string|"",  # git log -n 1 --format=%H -- .vibe-vault/last-iter; empty if file not yet tracked (DESIGN #93)
+  iter_n_minus_one_already_in_iterations_md: bool,   # ### Iteration N-1 present in iterations.md
+  commits_since_last_iter:               []CommitInfo,  # git log <anchor>..HEAD; empty-anchor falls back to oldest root commit
+  files_changed:                         []string,   # git diff --name-only <anchor>..HEAD
+  task_deltas:                           {added,retired,cancelled},  # set diff vs .vibe-vault/last-tasks-snapshot.json
+  test_counts:                           {unit,integration,lint,warning},  # parsed from doc/TESTING.md headline
+  vault_has_uncommitted_writes:          bool,       # git status --porcelain in vault
+  project_has_uncommitted_writes:        bool,       # git status --porcelain in project
+  shape:                                 string      # fresh-feature | planning | bookkeeping | writes-already-landed
 }
 ```
 
-The slash command computes the rest itself (commits, files, task
-deltas, test counts) so shape detection lives in editable markdown,
-not Go.
+Replaces the four-field `vv_describe_iter_state` (DESIGN #92) retired in
+the wrap-mcp-offload PR (atomic surface 15→16). The slash command's job
+narrows to: call `vv_preflight_wrap`, call `vv_collect_wrap_state`,
+compose narrative inline, hand off to mechanical surgical-apply tools.
+The shape classifier is now server-side (`ClassifyWrapShape` in
+`internal/mcp/wrapshape.go`).
 
 **`vv_render_wrap_text` (retired, deprecation shim only).** The
 unified-renderer schema described in earlier revisions of this
@@ -535,7 +556,8 @@ for design rationale and options weighed, and `doc/OPERATIONS.md`
 | `mcp` | `tools_commit_msg.go` | `vv_set_commit_msg` — writes `commit.msg` at an explicit `project_path` or falls back to a vault-side path; `subject` is required |
 | `mcp` | `tools_thread.go` | `vv_thread_insert`, `vv_thread_replace`, `vv_thread_remove` — surgical Open Threads subsection edits on `resume.md` using `mdutil` subsection family; rejects the reserved "Carried forward" slug |
 | `mcp` | `tools_carried.go` | `vv_carried_add`, `vv_carried_remove`, `vv_carried_promote_to_task` — manage `Carried forward` bullet list in resume.md via `mdutil.CarriedBullet` helpers; promote creates a task file and removes the bullet atomically |
-| `mcp` | `tools_describe_iter_state.go` | `vv_describe_iter_state` — minimal iter-state record (DESIGN #92). Returns `{iter_n, branch, vault_has_uncommitted_writes, last_iter_anchor_sha}`. Server-computable fields only; the slash command computes `commits_since_last_iter` / `files_changed` / `task_deltas` / `test_counts` itself via git/filesystem anchored by `last_iter_anchor_sha`. |
+| `mcp` | `tools_collect_wrap_state.go` | `vv_collect_wrap_state` — full wrap-state record (`wrap-mcp-offload`). Returns `{iter_n, branch, last_iter_anchor_sha, iter_n_minus_one_already_in_iterations_md, commits_since_last_iter, files_changed, task_deltas, test_counts, vault_has_uncommitted_writes, project_has_uncommitted_writes, shape}`. Replaces the four-field `vv_describe_iter_state` (DESIGN #92) retired in surface v15→v16; the orchestrator now consumes one record instead of stitching the missing fields itself via git/filesystem. |
+| `mcp` | `tools_preflight_wrap.go` | `vv_preflight_wrap` — readiness probe (`wrap-mcp-offload`). Three checks: surface compatibility (gating, errors flip `ok=false`), vault dirty (warning), project dirty (warning). Returns `{ok, warnings[], errors[]}`. The orchestrator runs this before composing the iter narrative. |
 | `mcp` | `tools_render_wrap_text.go` | `vv_render_wrap_text` — deprecation shim (DESIGN #104). The original unified context-aware renderer retired in surface v15 after a 22-iter surgical-fallback streak demonstrated zero production usage; orchestrator-inline narrative composition is now canonical. The handler returns an actionable error directing operators to `vv context sync` to refresh wrap.md. Tool registration kept for one binary release as a migration affordance for consumer projects whose wrap.md still calls this tool. |
 | `mcp` | `resume_state_blocks.go` | D4b auto-heal hook (DESIGN #92). Helpers `collectActiveTasks` / `computeCurrentState` / `collectHistoryRows` extracted from the deleted `tools_apply_wrap_bundle.go`. Called from `NewAppendIterationTool` and `NewUpdateResumeTool` after their primary write succeeds: re-renders the three marker-bounded resume.md sub-regions (active-tasks, current-state, project-history-tail) from filesystem ground truth via `wraprender.ApplyMarkerBlocks`. Byte-identity regression-locked against the pre-Direction-C Step-9 output. |
 | `wraprender` | `markers.go` | Renderer for resume.md state-derived sub-regions (DESIGN #90 mechanism preserved by DESIGN #92 D4b). Public API: `RenderActiveTasks`, `RenderCurrentState`, `RenderProjectHistoryTail`, `ApplyMarkerBlocks`. The latter is **self-healing** — it replaces marker-pair contents in place when the pair is present, OR inserts the pair at a sensible default location relative to existing H2/H3 anchors when absent. Now driven by the D4b post-write hooks in `vv_append_iteration` and `vv_update_resume` (formerly Step 9 of the retired `ApplyBundle`). |
@@ -656,7 +678,8 @@ repo/
 ├── commit.msg             Regular file (working commit message)
 ├── .vibe-vault.toml       Project identity (committed to repo)
 ├── .vibe-vault/
-│   └── last-iter          Iter anchor stamp file written by vv_stamp_iter; git log of this path is the canonical wrap anchor (DESIGN #93)
+│   ├── last-iter                    Iter anchor stamp file written by vv_stamp_iter; git log of this path is the canonical wrap anchor (DESIGN #93)
+│   └── last-tasks-snapshot.json     Slug-set snapshot of vault-side tasks/{,done/,cancelled/} written by vv_stamp_iter alongside last-iter; vv_collect_wrap_state diffs this against live FS state to compute task_deltas (DESIGN #105 / C3-v6)
 └── .claude/
     ├── commands/          Regular directory (deployed from vault agentctx/)
     ├── rules/             Regular directory

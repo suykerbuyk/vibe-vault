@@ -12,15 +12,17 @@ This is **the** wrap path. There is no fallback.
 
 ## Work-unit shapes
 
-Pattern-match on `vv_describe_iter_state` output plus four
-slash-command-computed fields:
+Pattern-match on the `shape` field returned by `vv_collect_wrap_state`
+(server-classified per `ClassifyWrapShape`). The classifier rules are
+documented here for reference; the orchestrator does not re-implement
+them.
 
 | Shape | Match rule |
 |---|---|
 | `fresh-feature` | `commits_since_last_iter` non-empty |
 | `planning` | `commits_since_last_iter` empty AND `task_deltas.added` non-empty |
 | `bookkeeping` | `commits_since_last_iter` empty AND `task_deltas.added` empty |
-| `writes-already-landed` | `vault_has_uncommitted_writes` true AND `iterations.md` already contains the entry for `iter_n+1` |
+| `writes-already-landed` | `vault_has_uncommitted_writes` true AND `iter_n_minus_one_already_in_iterations_md` true (i.e., `### Iteration N` already in `iterations.md` where `N == iter_n - 1`; the iter we're about to write was appended in a prior partial wrap but the surrounding commit didn't land) |
 
 The four `(commits-empty, task-added-empty)` Cartesian cells partition
 cleanly: any commits → `fresh-feature` (new task in the same iter is
@@ -31,7 +33,7 @@ is the orthogonal short-circuit and wins on tie via the existing
 
 The `vault_has_uncommitted_writes` field drops out of three of the
 four rules. After always-stamps, vault dirty/clean is purely about
-when in the wrap sequence the describe-iter-state call happens, not
+when in the wrap sequence the state-collector call happens, not
 about the iter's shape.
 
 `bookkeeping` (empty window + no new task) covers two cases that
@@ -47,64 +49,72 @@ wrapped feature branch land naturally in `bookkeeping` because the
 merge produces no project work between anchor (the rebased/squashed
 wrap commit) and HEAD.
 
-## Pre-flight
-
-0. **Surface handshake (DESIGN #97).** Run `vv check --json` and
-   parse the `surface` check. If `status` is `"fail"`, the vault is
-   ahead of this host's binary — halt and report the actionable
-   error; do not wrap with a stale binary. The standard remediation
-   is `cd ~/code/vibe-vault && git pull && make install`.
-1. `make pre-commit` clean before wrapping. Wrapping over a dirty
-   pre-commit produces a misleading iter record.
-2. **Merge-pattern timing.** When the project uses a feature-branch
-   merge pattern, run `/wrap` on the feature branch BEFORE merging.
-   Wrapping after merge produces `bookkeeping` instead of
-   `fresh-feature`, losing the per-decision narrative.
-
 ## Procedure
+
+### Stage 0 — Pre-flight
+
+Call `vv_preflight_wrap()` once. The response shape is
+`{ok, warnings[], errors[]}`:
+
+- If `errors` is non-empty (currently: vault is ahead of this host's
+  binary per the DESIGN #97 surface handshake) — halt and report the
+  actionable error verbatim. The standard remediation is
+  `cd ~/code/vibe-vault && git pull && make install`. Do not wrap
+  with a stale binary.
+- If `warnings` is non-empty (currently: `vault_dirty` and/or
+  `project_dirty` advisories) — surface them to the operator and
+  proceed. `project_dirty` typically means the operator should run
+  `make pre-commit` before staging if lint/test infra changed;
+  `vault_dirty` may indicate a writes-already-landed situation that
+  Stage 1's classifier will pick up.
+
+**Merge-pattern timing.** When the project uses a feature-branch
+merge pattern, run `/wrap` on the feature branch BEFORE merging.
+Wrapping after merge produces `bookkeeping` instead of
+`fresh-feature`, losing the per-decision narrative. Pre-flight does
+not enforce this — it is operator discipline.
 
 ### Stage 1 — State collection
 
-Call `vv_describe_iter_state` for `iter_n`, `branch`,
-`vault_has_uncommitted_writes`, `last_iter_anchor_sha`. Then compute
-four slash-command fields, anchored by `last_iter_anchor_sha`:
+Call `vv_collect_wrap_state(project)` once. The response is the full
+wrap-state record; every field is server-computed and ready to
+consume:
 
-- `last_iter_anchor_sha` is `git log -n 1 --format=%H --
-  .vibe-vault/last-iter` — the SHA of the most recent commit that
-  wrote the iter stamp file. Empty when the project hasn't run a
-  post-DESIGN-#93 wrap yet; the orchestrator then substitutes the
-  output of:
-
-      git rev-list --max-parents=0 HEAD | tail -1
-
-  which is the project's oldest root commit. Deterministic, single
-  command, no operator judgment. The resulting `commits_since_
-  last_iter` window spans the project's entire history; shape
-  classification falls naturally into `fresh-feature` (or
-  `planning` if the only delta is a new task file). One-time
-  transition per project — the wrap that lands under this fallback
-  writes the stamp, and every subsequent wrap anchors mechanically.
-
-- `commits_since_last_iter` — `git log --format="%H %s"
-  <anchor>..HEAD`. Parse into `[{sha, subject}]`.
+- `iter_n` — `max(### Iteration N) + 1` from `iterations.md`.
+- `branch` — `git rev-parse --abbrev-ref HEAD` in the project dir.
+- `last_iter_anchor_sha` — the SHA of the most recent commit that
+  wrote `.vibe-vault/last-iter`. Empty when the project hasn't run a
+  post-DESIGN-#93 wrap yet; the server substitutes the project's
+  oldest root commit (deterministic, no operator judgment).
+- `iter_n_minus_one_already_in_iterations_md` — boolean used by the
+  classifier's `writes-already-landed` rule (see shape table above).
+- `commits_since_last_iter` — `[{sha, subject}]` between the anchor
+  and HEAD.
 - `files_changed` — `git diff --name-only <anchor>..HEAD`.
-- `task_deltas` — walk `agentctx/tasks/` against `git show
-  <anchor>:agentctx/tasks/`:
-  - `added` — slugs present at HEAD but absent at the anchor
-  - `retired` — slugs whose `status:` at HEAD is `shipped`/`retired`
-    and was not at the anchor
-  - `cancelled` — slugs whose `status:` at HEAD is `cancelled` and
-    was not at the anchor
-- `test_counts` — read `doc/TESTING.md` headline
-  (`<unit> unit / <integration> integration / <lint> lint`) when
-  present; otherwise enumerate via the project's test runner. Use `0`
-  for any counter that does not apply.
+- `task_deltas` — `{added, retired, cancelled}` slug arrays computed
+  by diffing the live vault FS state of
+  `<vault>/Projects/<project>/agentctx/tasks/{,done/,cancelled/}`
+  against `<projectRoot>/.vibe-vault/last-tasks-snapshot.json` (the
+  C3-v6 snapshot mechanism). The snapshot is rewritten by
+  `vv_stamp_iter` at every successful wrap (see Stage 4); a missing
+  or empty snapshot file (first-wrap-since-PR-A bootstrap) degrades
+  gracefully with all current active slugs marked `added`.
+- `test_counts` — `{unit, integration, lint, warning}` parsed from
+  `doc/TESTING.md`'s headline counts. Stale or missing counts emit a
+  `warning` string but never fail the wrap.
+- `vault_has_uncommitted_writes` and `project_has_uncommitted_writes`
+  — `git status --porcelain` flags for the vault and project repos.
+- `shape` — the work-unit classification (`fresh-feature` |
+  `planning` | `bookkeeping` | `writes-already-landed`); see the
+  shape table.
 
 ### Stage 2 — Shape classification
 
-Apply the rules from "Work-unit shapes" above. Exactly one shape must
-match; if zero or more match, prefer the more restrictive (e.g.
-`writes-already-landed` over `bookkeeping`) and proceed.
+The `shape` field of Stage 1's response IS the classification. No
+orchestrator-side re-derivation: the server applies
+`ClassifyWrapShape` to the same record returned in Stage 1, with
+short-circuit precedence `writes-already-landed > fresh-feature >
+planning > bookkeeping`. Proceed to Stage 3 with the returned shape.
 
 ### Stage 3 — Compose narrative inline
 
@@ -163,12 +173,18 @@ session capture.
    `commit.msg` at project root. Single `content` field; markdown
    verbatim.
 5. **`vv_stamp_iter`** — write the iter number to
-   `.vibe-vault/last-iter`. Required for every wrap shape. The
-   file is the canonical project-side anchor used by Stage 1 of
-   the next wrap; skipping it leaves the next wrap's anchor
-   pointing at this iter's predecessor and produces incorrect
-   `commits_since_last_iter` windows. Stage 5 git-add must include
-   `.vibe-vault/last-iter`.
+   `.vibe-vault/last-iter` AND the slug-set snapshot to
+   `.vibe-vault/last-tasks-snapshot.json`. Both files are written
+   atomically by the same call; required for every wrap shape. The
+   stamp file is the canonical project-side anchor used by Stage 1
+   of the next wrap; the snapshot is the anchor for the next wrap's
+   `task_deltas` computation (see Stage 1's `task_deltas` description
+   for the C3-v6 mechanism). Skipping the stamp leaves the next
+   wrap's anchor pointing at this iter's predecessor and produces
+   incorrect `commits_since_last_iter` windows; skipping the
+   snapshot would re-create the inherited bug C3-v6 fixes. Stage 5
+   git-add must include BOTH `.vibe-vault/last-iter` AND
+   `.vibe-vault/last-tasks-snapshot.json`.
 6. **`vv_capture_session`** — record summary, tag, decisions,
    files_changed, open_threads.
 
@@ -178,8 +194,9 @@ session capture.
   the agentctx files actually modified by Stage 4
   (`agentctx/iterations.md`, `agentctx/resume.md`, any
   `agentctx/tasks/*.md` written during the iter), plus the project
-  iter stamp file `.vibe-vault/last-iter`. Never use `git add -A`
-  or `git add .`.
+  iter stamp files `.vibe-vault/last-iter` AND
+  `.vibe-vault/last-tasks-snapshot.json` (both written by Stage 4's
+  `vv_stamp_iter`). Never use `git add -A` or `git add .`.
 - `git commit -F commit.msg` — uses the file written by
   `vv_set_commit_msg`.
 - **Pre-push gate (operator-mandatory).** After `git commit -F
@@ -189,10 +206,11 @@ session capture.
 
   The output dictates the push path:
 
-  - **Output is exactly `.vibe-vault/last-iter`** → safe to direct-
-    push: `git push github main`. The `detect-admin-commit`
-    workflow short-circuits Lint+Test to ~20s green post-push,
-    leaving main green.
+  - **Output is exactly `.vibe-vault/last-iter` +
+    `.vibe-vault/last-tasks-snapshot.json`** → safe to direct-push:
+    `git push github main`. The `detect-admin-commit` workflow
+    short-circuits Lint+Test to ~20s green post-push, leaving main
+    green. Both stamp files are administrative-commit-eligible.
   - **Output contains ANYTHING else** → DO NOT direct-push. Open
     a PR via the standard feature-branch flow. The operator
     visually confirms green Lint+Test on the PR before merging.

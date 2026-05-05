@@ -3858,3 +3858,204 @@ Key architectural and design decisions in vibe-vault, with rationale.
      auto-heal marker-block re-renderer from DESIGN #90 —
      different package, despite the name); all non-
      renderer MCP tools.
+
+105. **PR-A wrap-state offload + corrected
+     `writes-already-landed` and `task_deltas` rules +
+     project-repo snapshot mechanism (DESIGN #105, iter
+     218).** The /wrap slash command's Stage 0 (pre-flight)
+     and Stage 1 (state collection) collapse from a
+     mechanical orchestrator-side bash sequence (~5 git
+     subprocess invocations + LLM-side parsing + shape
+     classification) onto two MCP tools that return
+     ready-to-consume structured records. Two inherited
+     bugs in the pre-PR /wrap procedure are fixed in the
+     same change because their materialization point
+     moves from prose into Go code. Atomic surface bump
+     v15→v16; `vv_describe_iter_state` retired.
+
+     **New tools (surface v16).** `vv_collect_wrap_state`
+     returns the full 11-field record `{iter_n, branch,
+     last_iter_anchor_sha,
+     iter_n_minus_one_already_in_iterations_md,
+     commits_since_last_iter, files_changed, task_deltas,
+     test_counts, vault_has_uncommitted_writes,
+     project_has_uncommitted_writes, shape}` with the
+     work-unit shape classified server-side via
+     `ClassifyWrapShape`. `vv_preflight_wrap` returns
+     `{ok, warnings[], errors[]}` against three checks —
+     surface compatibility (gating; flips `ok=false`),
+     vault dirty (warning), project dirty (warning). No
+     `tier?` parameter (M2-v6) since the `[wrap]` config
+     section retired with the LLM renderer in DESIGN
+     #104.
+
+     **Tool retirement.** `vv_describe_iter_state` is
+     retired in the same PR (no deprecation alias). Its
+     four-field record is a strict subset of
+     `vv_collect_wrap_state`'s output; the consumer
+     (`templates/agentctx/commands/wrap.md`) is rewritten
+     in the same PR to call the new tool. Surface count
+     is 42 → 41 (retire) → 43 (add two), final 43.
+
+     **C1–C4 inherited fixes (review-plan v3).**
+     C1 corrects the v2 git-shelling-precedent citation
+     (the precedent is `tools_describe_iter_state.go`'s
+     own `gitCmdRunner`, not `vv_check_toolchain`); on
+     retire, the helper relocates to `internal/mcp/
+     gitprobe.go`. C2 corrects the
+     `writes-already-landed` rule: pre-PR wrap.md fires
+     iff `iterations.md` contains `### Iteration <iter_n
+     + 1>`, but `iter_n` is `max(N) + 1` (the NEXT iter
+     to write), so reading `iter_n + 1` queries an iter
+     two ahead — vacuously false. The rule never fires.
+     PR-A's corrected rule reads `iter_n - 1` (the iter
+     about to be written, already appended in a prior
+     partial wrap). The new field
+     `iter_n_minus_one_already_in_iterations_md`
+     materializes the boolean so the classifier stays a
+     pure function. C3 corrects `task_deltas`: pre-PR
+     walks `git show <anchor>:agentctx/tasks/` against
+     the project repo, but vibe-vault and every consumer
+     project store tasks vault-only — `agentctx/` does
+     not exist in any project repo. The walker silently
+     produces empty deltas forever. PR-A's corrected
+     mechanism is the project-repo snapshot file (see
+     C2-v6 / D5 below). C4 splits cleanliness probes
+     into `vault_dirty` and `project_dirty`; both surface
+     as warnings.
+
+     **C2-v6 / C3-v6 / H1-v6 / H2-v6 / M2-v6 v6
+     corrections (review-plan v3, iter 216).** v3/v4
+     proposed cross-directory move detection via
+     project-repo git history; v6 commits to a
+     project-repo snapshot file at
+     `<projectRoot>/.vibe-vault/last-tasks-snapshot.json`
+     instead. The snapshot is rewritten by
+     `vv_stamp_iter` at every successful wrap and stored
+     under git; `vv_collect_wrap_state` reads it and
+     diffs against the live FS state of
+     `<vault>/Projects/<p>/agentctx/tasks/{,done/,
+     cancelled/}` to compute `{added, retired,
+     cancelled}`. Empty/missing snapshot bootstraps
+     gracefully (all current active slugs read as
+     `added`). H1-v6 hardens the relocated `gitCmdRunner`
+     with `GIT_TERMINAL_PROMPT=0` and `GIT_EDITOR=true`
+     env-var pinning, mirroring the iter-216 vaultsync
+     fix in commit `8df6e09` and preventing hangs on
+     hosts with interactive `core.editor`. H2-v6
+     dispositions the 11 tests in
+     `tools_describe_iter_state_test.go`: 5 helper tests
+     move to `gitprobe_test.go` / `wrapstate_test.go`,
+     6 collector tests rewrite into
+     `tools_collect_wrap_state_test.go`, 1 surface-shape
+     test deletes (the integration test's
+     `expectedTools` exact-set assertion catches drift).
+     M2-v6 drops the `tier?` parameter from
+     `vv_preflight_wrap` since `[wrap.tiers]` retired
+     with the renderer in DESIGN #104.
+
+     **β2 reconciliation (Path A, v7/v8).** β2 (DESIGN
+     #103, `vault-two-tier-narrative-vs-sessions-split`)
+     shipped before this PR dispatched;
+     `doc/SESSION-CAPTURE-ARCHITECTURE.md:242` directed
+     "re-scope on top of β2 OR retire if β2's wrap-time
+     orchestration absorbs it." Audit (iter 218) found
+     β2 ships storage refactoring (XDG host-local
+     staging, per-host paths in
+     `<vault>/Projects/<p>/sessions/<host>/`, Go-native
+     mirror) but not a wrap-state collector or pre-flight
+     tool. Path A applies: PR-A proceeds unchanged in
+     substance with three reconciliation points:
+     (1) Stage 6's `vv vault sync-sessions` invocation is
+     preserved byte-identical between pre-PR and post-PR
+     wrap.md (DoD checkbox `v8-β2-stage6-verbatim`
+     anchors on `### Stage 6` … `## Flags`);
+     (2) `vv_preflight_wrap` does NOT probe staging-repo
+     cleanliness — `vv vault sync-sessions` IS the
+     wrap-time mirror, so surfacing "staging dirty" or
+     "staging unsynced" as a pre-flight warning would
+     fire on every wrap and contradict the by-design
+     wrap-paced rhythm (H1-v8); (3) `task_deltas`
+     snapshot mechanism is unaffected by β2 because tasks
+     remained vault-side at
+     `<vault>/Projects/<p>/agentctx/tasks/`. PR-A
+     consumes `cfg.VaultPath` only; `cfg.Staging.*` is
+     not read (M1-v8).
+
+     **O1 / O2 adoptions.** O1 extracts the shape
+     classifier as a standalone pure function
+     `ClassifyWrapShape` in `internal/mcp/wrapshape.go`
+     with its own dedicated test file; the classifier is
+     I/O-free, takes a fully-populated state record, and
+     returns a `WrapShape` enum value. Short-circuit
+     precedence is `writes-already-landed >
+     fresh-feature > planning > bookkeeping`. O2 adopts
+     same-PR retirement of `vv_describe_iter_state`
+     rather than the v4 deprecation-alias approach (see
+     "Why same-PR retirement is safe post-iter-216"
+     below).
+
+     **Why this isn't a DESIGN #92 regression.** #92
+     retired the sandboxed-executor agentic
+     wrap-dispatch pipeline because the executor was
+     forbidden context access — the `WrapSkeleton`
+     carried slug-IDs and file paths but no commit SHAs
+     or decision text, and the QC layer demanded
+     citations the executor could not produce.
+     `vv_collect_wrap_state` and `vv_preflight_wrap` are
+     the OPPOSITE shape: pure functions called by the
+     orchestrator LLM directly. No sandboxed
+     sub-executor; no QC gate; no `AgenticProvider`
+     interface; no multi-turn loop. The orchestrator
+     already has full context access (it's the same
+     Claude Code session that composes the iter
+     narrative inline and calls the apply tools). #92's
+     re-open condition ("future agentic-tool-use
+     features must demonstrate executor access to every
+     input the quality gate demands") does not apply —
+     there is no agentic executor and no quality gate.
+     #92's stated principle, "/wrap records history; it
+     does not interpret history," argues directly FOR
+     this offload: every git command and pre-flight
+     check the orchestrator currently runs as bash
+     subprocesses is "record" work, not "interpret"
+     work.
+
+     **Why same-PR retirement of `vv_describe_iter_state`
+     is safe post-iter-216.** The v4 deprecation-alias
+     scope was insurance for the cross-project
+     template-vs-binary skew window — consumer projects
+     (rezbldr, vibe-palace, proteus-hvpc-support,
+     RezBldrVault, etc.) running an upgraded binary but
+     a stale wrap.md still calling
+     `vv_describe_iter_state`. Iter 216's renderer-retire
+     PR (DESIGN #104) forced every consumer project to
+     run `vv context sync` to recover /wrap functionality
+     — the renderer's deprecation shim returns an
+     actionable error pointing at exactly that command.
+     PR-A's `vv_collect_wrap_state` rolls into that same
+     sync wave: whatever sync makes wrap.md call the
+     orchestrator-inline procedure also picks up
+     wrap.md's `vv_collect_wrap_state` call. Consumer
+     projects that have not yet synced post-iter-216
+     already see the renderer-retire actionable error;
+     they fix once, pick up both updates. The skew
+     window collapsed; the alias's projection-handler
+     implementation is dead code in the new world.
+
+     **Phasing (3 commits).** Commit 1 (`1564ce1`) lands
+     pure additions: helper relocations to
+     `internal/mcp/gitprobe.go` +
+     `internal/mcp/wrapstate.go`, classifier in
+     `internal/mcp/wrapshape.go`, snapshot helpers in
+     `internal/mcp/tools_collect_wrap_state.go` (no tool
+     registration), test moves. Commit 2 (`8b9bcff`) is
+     the atomic surface change: registers the two new
+     tools, drops `vv_describe_iter_state`, bumps
+     `MCPSurfaceVersion` 15→16, regenerates the golden
+     manifest, updates `expectedTools` to 43 entries.
+     Commit 3 rewrites `templates/agentctx/commands/
+     wrap.md` to call the new tools, extends
+     `vv_stamp_iter` to write
+     `.vibe-vault/last-tasks-snapshot.json` alongside
+     `.vibe-vault/last-iter`, and adds this DESIGN entry.

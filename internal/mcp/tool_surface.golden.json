@@ -1,5 +1,5 @@
 {
-  "surface_version": 15,
+  "surface_version": 16,
   "tools": [
     {
       "name": "vv_append_iteration",
@@ -43,7 +43,7 @@
       "required_inputs": null
     },
     {
-      "name": "vv_describe_iter_state",
+      "name": "vv_collect_wrap_state",
       "required_inputs": null
     },
     {
@@ -123,6 +123,10 @@
         "action",
         "task"
       ]
+    },
+    {
+      "name": "vv_preflight_wrap",
+      "required_inputs": null
     },
     {
       "name": "vv_refresh_index",
