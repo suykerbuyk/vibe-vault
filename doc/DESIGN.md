@@ -4059,3 +4059,69 @@ Key architectural and design decisions in vibe-vault, with rationale.
      `vv_stamp_iter` to write
      `.vibe-vault/last-tasks-snapshot.json` alongside
      `.vibe-vault/last-iter`, and adds this DESIGN entry.
+
+106. **Retire `writes-already-landed` shape; idempotency moves
+     to `vv_append_iteration` (post-iter-225).** The
+     `ShapeWritesAlreadyLanded` rule introduced alongside the
+     PR-A wrap-state offload (DESIGN #105) misfired four times
+     in six iters (220, 222, 223, 225). It ANDed
+     `vault_has_uncommitted_writes` with
+     `iter_n_minus_one_already_in_iterations_md`, but the
+     latter predicate is trivially true by construction once
+     `iter_n` is computed by `nextIterFromIterationsMD` from
+     the same `iterations.md` file (the predicate asks "is
+     `max` in the file we just parsed `max` from?"). Any
+     dirty-vault wrap with `iter_n >= 2` flipped to
+     `writes-already-landed` regardless of the iter's actual
+     shape.
+
+     The classifier was the wrong layer for collision
+     avoidance — it is an advisory shape label, while
+     idempotency is a transactional concern that belongs at
+     the mutating tool. The fix is two-part: (a) delete
+     `ShapeWritesAlreadyLanded`, the rule body, the
+     `IterNMinusOneAlreadyInIterationsMD` field on
+     `CollectWrapStateResult`, and the `iterationsMDHasIter`
+     helper; (b) make `vv_append_iteration` content-
+     addressable idempotent with a deterministic three-case
+     contract: heading absent → append; heading present and
+     body byte-identical (modulo trailing-newline tolerance)
+     → idempotent no-op returning the existing entry's
+     metadata; heading present and body differs → append a
+     `### Iteration N (revision K)` block beneath the
+     original with `revises: N` front-matter, where K
+     auto-increments from existing revisions. No `--force`
+     flag, no operator-decision branch, no LLM round-trip
+     to resolve.
+
+     **Why content-addressable over alternatives.** Refuse-
+     with-error and require-explicit-force both demand an
+     LLM round-trip to resolve, increasing token cost and
+     reducing determinism across hosts. Return-existing-as-is
+     silently discards refined narrative on legitimate
+     re-wraps. Append-revision preserves all information,
+     requires no LLM intervention, and is a pure function of
+     `(existing bytes, incoming bytes)` so the same inputs
+     produce the same outcome on every host. It also
+     strictly upholds the existing iterations.md invariant
+     that the file is "never truncated or rewritten — only
+     appended to."
+
+     **Whitespace normalization.** Trailing newlines are
+     stripped from each side before byte-comparison;
+     single-vs-double trailing newline between blocks is
+     tolerated. Internal whitespace, list indentation, and
+     quote characters are NOT normalized — they are
+     semantic for markdown rendering and rendered output
+     fidelity.
+
+     **Supersedes references in DESIGN #103, #104, #105.**
+     The `writes-already-landed` mentions in those entries
+     describe a shape that no longer exists; idempotency
+     now lives at the `vv_append_iteration` tool layer
+     rather than as a classifier rule. Source:
+     `internal/mcp/wrapshape.go`,
+     `internal/mcp/tools_collect_wrap_state.go`,
+     `internal/mcp/tools_iterations.go` (the new
+     `appendIterationIdempotent` path), and
+     `templates/agentctx/commands/wrap.md`.

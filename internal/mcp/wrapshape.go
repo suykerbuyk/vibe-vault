@@ -10,10 +10,9 @@ package mcp
 type WrapShape string
 
 const (
-	ShapeFreshFeature        WrapShape = "fresh-feature"
-	ShapePlanning            WrapShape = "planning"
-	ShapeBookkeeping         WrapShape = "bookkeeping"
-	ShapeWritesAlreadyLanded WrapShape = "writes-already-landed"
+	ShapeFreshFeature WrapShape = "fresh-feature"
+	ShapePlanning     WrapShape = "planning"
+	ShapeBookkeeping  WrapShape = "bookkeeping"
 )
 
 // CommitInfo summarizes a commit between the last-iter anchor and HEAD.
@@ -45,33 +44,33 @@ type TestCounts struct {
 // functions in tools_collect_wrap_state.go can reference it without
 // forward-declaration churn.
 type CollectWrapStateResult struct {
-	IterN                              int          `json:"iter_n"`
-	Branch                             string       `json:"branch"`
-	LastIterAnchorSha                  string       `json:"last_iter_anchor_sha,omitempty"`
-	IterNMinusOneAlreadyInIterationsMD bool         `json:"iter_n_minus_one_already_in_iterations_md"`
-	CommitsSinceLastIter               []CommitInfo `json:"commits_since_last_iter"`
-	FilesChanged                       []string     `json:"files_changed"`
-	TaskDeltas                         TaskDeltas   `json:"task_deltas"`
-	TestCounts                         TestCounts   `json:"test_counts"`
-	VaultHasUncommittedWrites          bool         `json:"vault_has_uncommitted_writes"`
-	ProjectHasUncommittedWrites        bool         `json:"project_has_uncommitted_writes"`
-	Shape                              WrapShape    `json:"shape"`
+	IterN                       int          `json:"iter_n"`
+	Branch                      string       `json:"branch"`
+	LastIterAnchorSha           string       `json:"last_iter_anchor_sha,omitempty"`
+	CommitsSinceLastIter        []CommitInfo `json:"commits_since_last_iter"`
+	FilesChanged                []string     `json:"files_changed"`
+	TaskDeltas                  TaskDeltas   `json:"task_deltas"`
+	TestCounts                  TestCounts   `json:"test_counts"`
+	VaultHasUncommittedWrites   bool         `json:"vault_has_uncommitted_writes"`
+	ProjectHasUncommittedWrites bool         `json:"project_has_uncommitted_writes"`
+	Shape                       WrapShape    `json:"shape"`
 }
 
 // ClassifyWrapShape returns the work-unit shape per the rules in
 // templates/agentctx/commands/wrap.md. Pure function: no I/O, no
 // state. The caller materializes all input fields before calling.
 //
-// Short-circuit precedence: writes-already-landed wins over the other
-// three shapes per the "prefer most restrictive" tie-break (the iter-N-1
-// narrative is already in iterations.md AND the vault has uncommitted
-// writes — i.e., the wrap's writes have landed but the commit didn't).
-// After that, fresh-feature (commits since anchor) beats planning
+// Precedence: fresh-feature (commits since anchor) beats planning
 // (tasks added) beats bookkeeping (no signals).
+//
+// The legacy `writes-already-landed` shape was removed: it ANDed
+// `vault_has_uncommitted_writes` with a per-project predicate that
+// was trivially true once `iter_n` had been computed by parsing
+// iterations.md, and so misfired on every dirty-vault wrap with
+// `iter_n >= 2`. Collision avoidance moved to the mutating tool
+// (`vv_append_iteration` is content-addressable idempotent), where
+// transactional correctness belongs — not the advisory classifier.
 func ClassifyWrapShape(state CollectWrapStateResult) WrapShape {
-	if state.VaultHasUncommittedWrites && state.IterNMinusOneAlreadyInIterationsMD {
-		return ShapeWritesAlreadyLanded
-	}
 	if len(state.CommitsSinceLastIter) > 0 {
 		return ShapeFreshFeature
 	}

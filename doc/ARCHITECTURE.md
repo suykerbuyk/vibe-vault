@@ -278,14 +278,13 @@ slash command (templates/agentctx/commands/wrap.md)
     ├── vv_collect_wrap_state(project?)
     │     → server computes the full record: {iter_n, branch,
     │                               last_iter_anchor_sha,
-    │                               iter_n_minus_one_already_in_iterations_md,
     │                               commits_since_last_iter, files_changed,
     │                               task_deltas, test_counts,
     │                               vault_has_uncommitted_writes,
     │                               project_has_uncommitted_writes, shape}
     │
     ├── shape (server-classified by ClassifyWrapShape):
-    │     fresh-feature | planning | bookkeeping | writes-already-landed
+    │     fresh-feature | planning | bookkeeping
     │
     ├── if shape needs prose:
     │     parallel-fetch context bundle:
@@ -325,14 +324,13 @@ output: {
   iter_n:                                int,        # max(### Iteration N) + 1 in iterations.md
   branch:                                string,     # git rev-parse --abbrev-ref HEAD
   last_iter_anchor_sha:                  string|"",  # git log -n 1 --format=%H -- .vibe-vault/last-iter; empty if file not yet tracked (DESIGN #93)
-  iter_n_minus_one_already_in_iterations_md: bool,   # ### Iteration N-1 present in iterations.md
   commits_since_last_iter:               []CommitInfo,  # git log <anchor>..HEAD; empty-anchor falls back to oldest root commit
   files_changed:                         []string,   # git diff --name-only <anchor>..HEAD
   task_deltas:                           {added,retired,cancelled},  # set diff vs .vibe-vault/last-tasks-snapshot.json
   test_counts:                           {unit,integration,lint,warning},  # parsed from doc/TESTING.md headline
   vault_has_uncommitted_writes:          bool,       # git status --porcelain in vault
   project_has_uncommitted_writes:        bool,       # git status --porcelain in project
-  shape:                                 string      # fresh-feature | planning | bookkeeping | writes-already-landed
+  shape:                                 string      # fresh-feature | planning | bookkeeping
 }
 ```
 

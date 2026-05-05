@@ -708,11 +708,6 @@ func TestCollectWrapState_PriorIterAnchorFound(t *testing.T) {
 	if res.LastIterAnchorSha != priorSHA {
 		t.Errorf("last_iter_anchor_sha = %q, want %q", res.LastIterAnchorSha, priorSHA)
 	}
-	// iter_n_minus_one (= 41) IS in iterations.md, so the flag should
-	// be true.
-	if !res.IterNMinusOneAlreadyInIterationsMD {
-		t.Errorf("iter_n_minus_one_already_in_iterations_md = false, want true (### Iteration 41 present)")
-	}
 }
 
 // TestCollectWrapState_BranchDetection asserts the branch field reports

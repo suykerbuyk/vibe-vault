@@ -19,10 +19,22 @@ import (
 // iterationHeadingRegexp matches a full iteration heading line:
 //
 //	### Iteration N — Title (YYYY-MM-DD)
+//	### Iteration N (revision K) — Title (YYYY-MM-DD)
 //
 // Title may itself contain em dashes (iter 118's title does), so the date in
 // parentheses is the anchor and the title capture is non-greedy.
-var iterationHeadingRegexp = regexp.MustCompile(`^### Iteration (\d+)\s*—\s*(.+?)\s*\((\d{4}-\d{2}-\d{2})\)\s*$`)
+//
+// The optional `(revision K)` clause is captured into group 2; bare
+// (non-revision) headings leave group 2 empty. Captures shift down by
+// one slot vs. the legacy regex: g1=N, g2=K|"", g3=Title, g4=Date.
+//
+// Revision blocks are emitted by the content-addressable idempotency
+// path of `vv_append_iteration` (DESIGN #106). Recognising them here
+// is what gives parseIterations a clean heading boundary so the
+// original iter's narrative doesn't extend into the revision body —
+// downstream consumers (collectHistoryRows, summary tools) then see
+// them as distinct entries that they can dedupe on `Number`.
+var iterationHeadingRegexp = regexp.MustCompile(`^### Iteration (\d+)(?: \(revision (\d+)\))?\s*—\s*(.+?)\s*\((\d{4}-\d{2}-\d{2})\)\s*$`)
 
 // provenanceTrailerRE matches the HTML-comment provenance trailer appended by
 // vv_append_iteration to an iteration narrative. Anchored to end-of-string so
@@ -44,8 +56,16 @@ var frontmatterKeyValRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.
 // frontmatter task — D1, D4). It is populated by parseIterations and is
 // json:"-" so the field never serializes into table or full responses
 // (closes the v3-M5 leakage gate).
+//
+// Revision is non-zero (≥2) when the entry is a `### Iteration N (revision K)`
+// block emitted by the content-addressable idempotency path
+// (DESIGN #106). The original block carries Revision=0. Downstream
+// consumers that emit one row per iteration N (project-history-tail,
+// vv_get_iterations summary) dedupe on Number — see the deduping
+// logic in collectHistoryRows and the summary handler.
 type Iteration struct {
 	Number      int               `json:"number"`
+	Revision    int               `json:"revision,omitempty"`
 	Date        string            `json:"date"`
 	Title       string            `json:"title"`
 	Narrative   string            `json:"narrative,omitempty"`
@@ -91,10 +111,15 @@ func parseIterations(content string) []Iteration {
 		if m := iterationHeadingRegexp.FindStringSubmatch(line); m != nil {
 			flush()
 			num, _ := strconv.Atoi(m[1])
+			rev := 0
+			if m[2] != "" {
+				rev, _ = strconv.Atoi(m[2])
+			}
 			current = &Iteration{
-				Number: num,
-				Title:  strings.TrimSpace(m[2]),
-				Date:   m[3],
+				Number:   num,
+				Revision: rev,
+				Title:    strings.TrimSpace(m[3]),
+				Date:     m[4],
 			}
 			continue
 		}
@@ -262,7 +287,29 @@ func NewGetIterationsTool(cfg config.Config) Tool {
 				return "", fmt.Errorf("read iterations: %w", err)
 			}
 
-			all := parseIterations(string(data))
+			parsed := parseIterations(string(data))
+
+			// Dedupe revision blocks (DESIGN #106) so consumers see
+			// one row per iteration N — last-wins on revision K, so a
+			// divergent re-wrap surfaces as the most recent
+			// authoritative narrative. The original Revision=0 entry
+			// is replaced by the highest-K revision for the same N.
+			byIter := make(map[int]Iteration, len(parsed))
+			order := make([]int, 0, len(parsed))
+			for _, it := range parsed {
+				if prev, ok := byIter[it.Number]; ok {
+					if it.Revision > prev.Revision {
+						byIter[it.Number] = it
+					}
+					continue
+				}
+				byIter[it.Number] = it
+				order = append(order, it.Number)
+			}
+			all := make([]Iteration, 0, len(order))
+			for _, n := range order {
+				all = append(all, byIter[n])
+			}
 			total := len(all)
 
 			if args.SinceIteration != nil {

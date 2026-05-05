@@ -332,8 +332,8 @@ func TestAppendIterationAutoIncrement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
-	if !strings.Contains(result, "iteration 2") {
-		t.Errorf("result = %q, want 'iteration 2'", result)
+	if !strings.Contains(result, `"iteration": 2`) || !strings.Contains(result, `"action": "appended"`) {
+		t.Errorf("result = %q, want JSON with iteration=2 + action=appended", result)
 	}
 
 	data, _ := os.ReadFile(filepath.Join(cfg.VaultPath, "Projects", "testproj", "agentctx", "iterations.md"))
@@ -357,24 +357,8 @@ func TestAppendIterationExplicitNumber(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
-	if !strings.Contains(result, "iteration 5") {
-		t.Errorf("result = %q, want 'iteration 5'", result)
-	}
-}
-
-func TestAppendIterationDuplicateNumber(t *testing.T) {
-	iterations := "# Iterations\n\n### Iteration 3 — Existing (2026-03-01)\n\nContent.\n"
-	cfg := writeTestVault(t, map[string]index.SessionEntry{}, map[string]string{
-		"Projects/testproj/agentctx/iterations.md": iterations,
-	})
-
-	tool := NewAppendIterationTool(cfg)
-	_, err := tool.Handler(json.RawMessage(`{"project":"testproj","iteration":3,"title":"Dupe","narrative":"Nope.","date":"2026-03-12"}`))
-	if err == nil {
-		t.Fatal("expected error for duplicate iteration number")
-	}
-	if !strings.Contains(err.Error(), "already exists") {
-		t.Errorf("error = %v, want 'already exists'", err)
+	if !strings.Contains(result, `"iteration": 5`) || !strings.Contains(result, `"action": "appended"`) {
+		t.Errorf("result = %q, want JSON with iteration=5 + action=appended", result)
 	}
 }
 

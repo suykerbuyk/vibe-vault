@@ -22,26 +22,25 @@ them.
 | `fresh-feature` | `commits_since_last_iter` non-empty |
 | `planning` | `commits_since_last_iter` empty AND `task_deltas.added` non-empty |
 | `bookkeeping` | `commits_since_last_iter` empty AND `task_deltas.added` empty |
-| `writes-already-landed` | `vault_has_uncommitted_writes` true AND `iter_n_minus_one_already_in_iterations_md` true (i.e., `### Iteration N` already in `iterations.md` where `N == iter_n - 1`; the iter we're about to write was appended in a prior partial wrap but the surrounding commit didn't land) |
 
-The four `(commits-empty, task-added-empty)` Cartesian cells partition
-cleanly: any commits → `fresh-feature` (new task in the same iter is
-mentioned in narrative, no separate dispatch); empty + new task →
-`planning`; empty + no task → `bookkeeping`. `writes-already-landed`
-is the orthogonal short-circuit and wins on tie via the existing
-"prefer most restrictive" rule.
+The three rules partition the `(commits-empty, task-added-empty)`
+Cartesian cleanly: any commits → `fresh-feature` (new task in the
+same iter is mentioned in narrative, no separate dispatch); empty +
+new task → `planning`; empty + no task → `bookkeeping`.
 
-The `vault_has_uncommitted_writes` field drops out of three of the
-four rules. After always-stamps, vault dirty/clean is purely about
-when in the wrap sequence the state-collector call happens, not
-about the iter's shape.
+The `vault_has_uncommitted_writes` field is a preflight advisory only;
+it does not feed into the shape classification. Collision avoidance
+on duplicate iter writes lives in `vv_append_iteration`'s content-
+addressable idempotency contract (heading-absent → append; heading
+present + body byte-identical → idempotent no-op; heading present +
+body differs → revision block append), so the classifier never has
+to anticipate "already-landed" cases.
 
 `bookkeeping` (empty window + no new task) covers two cases that
 previously lived in separate shapes: post-merge reconciliation of a
 previously-wrapped feature branch, and pre-staged vault-only work.
 Both produce the same minimal narrative + mechanically-composed
 commit message (`chore(wrap): stamp iter N`).
-`writes-already-landed` short-circuits the narrative entirely.
 
 `bookkeeping` replaces the retired `vault-only` and `reconciliation`
 shapes (DESIGN #93). Rebase-merge and squash-merge of a previously-
@@ -65,8 +64,9 @@ Call `vv_preflight_wrap()` once. The response shape is
   `project_dirty` advisories) — surface them to the operator and
   proceed. `project_dirty` typically means the operator should run
   `make pre-commit` before staging if lint/test infra changed;
-  `vault_dirty` may indicate a writes-already-landed situation that
-  Stage 1's classifier will pick up.
+  `vault_dirty` is informational (per-project scoped) and does not
+  feed shape classification — `vv_append_iteration`'s idempotency
+  contract handles any duplicate-write case at write time.
 
 **Merge-pattern timing.** When the project uses a feature-branch
 merge pattern, run `/wrap` on the feature branch BEFORE merging.
@@ -86,8 +86,6 @@ consume:
   wrote `.vibe-vault/last-iter`. Empty when the project hasn't run a
   post-DESIGN-#93 wrap yet; the server substitutes the project's
   oldest root commit (deterministic, no operator judgment).
-- `iter_n_minus_one_already_in_iterations_md` — boolean used by the
-  classifier's `writes-already-landed` rule (see shape table above).
 - `commits_since_last_iter` — `[{sha, subject}]` between the anchor
   and HEAD.
 - `files_changed` — `git diff --name-only <anchor>..HEAD`.
@@ -105,16 +103,15 @@ consume:
 - `vault_has_uncommitted_writes` and `project_has_uncommitted_writes`
   — `git status --porcelain` flags for the vault and project repos.
 - `shape` — the work-unit classification (`fresh-feature` |
-  `planning` | `bookkeeping` | `writes-already-landed`); see the
-  shape table.
+  `planning` | `bookkeeping`); see the shape table.
 
 ### Stage 2 — Shape classification
 
 The `shape` field of Stage 1's response IS the classification. No
 orchestrator-side re-derivation: the server applies
 `ClassifyWrapShape` to the same record returned in Stage 1, with
-short-circuit precedence `writes-already-landed > fresh-feature >
-planning > bookkeeping`. Proceed to Stage 3 with the returned shape.
+precedence `fresh-feature > planning > bookkeeping`. Proceed to
+Stage 3 with the returned shape.
 
 ### Stage 3 — Compose narrative inline
 
@@ -126,8 +123,7 @@ Compose the iter narrative covering:
 
 - Shape-appropriate framing (`fresh-feature` cites commits/files;
   `planning` cites the new task slug + decisions; `bookkeeping`
-  acknowledges work substance even when the commit graph is empty;
-  `writes-already-landed` short-circuits — no narrative).
+  acknowledges work substance even when the commit graph is empty).
 - Citation discipline: SHAs + file paths + line numbers when
   referenced.
 - Summary line ≤200 chars (single sentence, no newlines) for the
@@ -144,18 +140,25 @@ Order matters: iter row, then thread/carried, then commit msg, then
 session capture.
 
 1. **`vv_append_iteration`** — append the new row to `iterations.md`.
-   Skip on `writes-already-landed`. Pass the orchestrator-composed
-   `summary` and the Stage-2 shape verbatim as optional args
-   (`summary=<from orchestrator>`, `shape=<classified>`) so the
-   writer emits a YAML front-matter block between the heading and
-   body. The block feeds `vv_get_iterations(format=summary)` at the
-   structured-digest fast path; absence falls back to first-paragraph
-   extraction at read time without breaking anything. For
-   `bookkeeping` shape: pass `shape="bookkeeping"`; the orchestrator
-   still produces `summary`. The auto-heal hook re-renders the
-   resume.md state-derived regions (`vv:active-tasks`,
-   `vv:current-state`, `vv:project-history-tail`) from filesystem
-   ground truth post-write — no separate marker-block step required.
+   Pass the orchestrator-composed `summary` and the Stage-2 shape
+   verbatim as optional args (`summary=<from orchestrator>`,
+   `shape=<classified>`) so the writer emits a YAML front-matter
+   block between the heading and body. The block feeds
+   `vv_get_iterations(format=summary)` at the structured-digest
+   fast path; absence falls back to first-paragraph extraction at
+   read time without breaking anything. For `bookkeeping` shape:
+   pass `shape="bookkeeping"`; the orchestrator still produces
+   `summary`. The auto-heal hook re-renders the resume.md
+   state-derived regions (`vv:active-tasks`, `vv:current-state`,
+   `vv:project-history-tail`) from filesystem ground truth post-
+   write — no separate marker-block step required. The tool is
+   content-addressable idempotent: re-issuing the same call with
+   identical body bytes is a no-op (the existing entry's metadata
+   is returned with `idempotent: true`); a body that differs from
+   the existing `### Iteration N` block appends a revision entry
+   (`### Iteration N (revision K)` with `revises: N` front-matter)
+   beneath the original rather than failing or silently
+   discarding the new prose.
 2. **`vv_update_resume`** — mutate resume.md narrative sections only
    when the wrap carries non-state changes. Auto-heal hook also fires.
 3. **Thread/carried mutations** as needed:
