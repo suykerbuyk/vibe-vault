@@ -1,11 +1,9 @@
 {
-  "iter_n": 230,
-  "anchor_sha": "b33f1a89f207be1add8c94a8dd62aeace8de54a8",
+  "iter_n": 231,
+  "anchor_sha": "a7ac7d5df54d187fbc58dd421b4034ab24db4159",
   "active": [
     "claude-code-tool-selection-telemetry",
-    "mcp-call-tracing",
-    "optimized-cuddling-key",
-    "synchronous-drifting-reddy"
+    "mcp-call-tracing"
   ],
   "done": [
     "adaptive-hugging-hedgehog",
@@ -98,6 +96,7 @@
     "nifty-soaring-finch",
     "obsidian-analytics-dashboards",
     "obsidian-dashboard-templates",
+    "optimized-cuddling-key",
     "partitioned-sparking-peach",
     "performance-benchmarks",
     "project-namespacing",
@@ -131,6 +130,7 @@
     "stop-hook-learning-capture",
     "structured-mapping-blossom",
     "structured-plotting-knuth",
+    "synchronous-drifting-reddy",
     "template-promotion",
     "test-coverage-gaps",
     "thinking-block-extraction",
