@@ -1,10 +1,11 @@
 {
-  "iter_n": 229,
-  "anchor_sha": "adcc502047e77d6b69c4e625be2041465f949412",
+  "iter_n": 230,
+  "anchor_sha": "b33f1a89f207be1add8c94a8dd62aeace8de54a8",
   "active": [
     "claude-code-tool-selection-telemetry",
-    "grok-provider-support",
-    "mcp-call-tracing"
+    "mcp-call-tracing",
+    "optimized-cuddling-key",
+    "synchronous-drifting-reddy"
   ],
   "done": [
     "adaptive-hugging-hedgehog",
@@ -48,6 +49,7 @@
     "glowing-wondering-nest",
     "golangci-lint",
     "greedy-skipping-lemur",
+    "grok-provider-support",
     "hidden-discovering-lake",
     "hidden-kindling-iverson",
     "history-pruning-and-decay",
