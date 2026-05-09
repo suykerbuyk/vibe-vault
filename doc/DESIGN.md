@@ -4272,3 +4272,63 @@ Key architectural and design decisions in vibe-vault, with rationale.
      trail: `doc/ZED-AGENT-PANEL-INTEGRATION.md`. Original task
      spec: `agentctx/tasks/done/zed-extension-spike.md` (retired —
      superseded by the pivot decision recorded here).
+
+109. **MCP prompts are template-backed via a shared
+     `templatePrompt` helper; adding prompts does NOT bump
+     `MCPSurfaceVersion`.** Iteration 233 executed the DESIGN #108
+     deferred work by adding `NewRestartPrompt()` and
+     `NewWrapPrompt()` to `internal/mcp/prompts.go`. Both call a
+     private `templatePrompt(name, relPath, description)` helper
+     that loads the body verbatim from
+     `templates.New().DefaultContent(relPath)` — the same lookup
+     `vv command get <name>` uses. Single source of truth: editing
+     `templates/agentctx/commands/restart.md` (then `make install`)
+     updates both the CLI shellout and the MCP prompt body
+     atomically.
+
+     **`MCPSurfaceVersion` does not bump.** The constant in
+     `internal/surface/version.go` tracks the *tool* surface schema
+     (every historical bump in git log corresponds to a tool
+     addition or retirement). Prompts traverse a separate
+     `prompts/list` MCP endpoint; vault-compatibility gating reads
+     the tool-surface stamp only. Locking the convention here
+     prevents a future contributor from over-bumping on a
+     prompt-only change. Revisit only if a future surface-aware
+     client introspects prompts and needs a separate version axis;
+     at that point introduce `MCPPromptSurfaceVersion` rather than
+     conflating the two.
+
+     **Hand-built vs template-backed prompts coexist.**
+     `NewSessionGuidelinesPrompt` keeps its hand-built Go body
+     because it accepts a `project` arg requiring runtime
+     substitution; templates have no parameter mechanism. The
+     `Prompt` interface is the contract — internals are an
+     implementation detail.
+
+     **`vv_session_guidelines` mid-session-safety rephrase.** The
+     same iteration closes the carried-forward
+     `vv-session-guidelines-mid-session-safety` thread by adding an
+     explicit "How to use this prompt" preamble: "This is
+     session-start orientation. Do NOT call `vv_capture_session` on
+     this invocation alone. Wait until the user explicitly wraps up
+     or you have completed a coherent work unit." The "When to
+     capture" criteria are reframed to require user confirmation
+     before capture, eliminating the failure mode where pasting
+     `/vv_session_guidelines` mid-session triggered a low-value
+     capture of an in-progress fragment.
+
+     **`make install` re-embed gotcha (operator-facing).** Editing
+     `templates/agentctx/commands/*.md` requires `make install`
+     before `vv mcp` subprocesses see the updated body. The
+     embedded FS is captured at build time via `go:embed`; the
+     `vv mcp` process does not re-read templates from disk. Same
+     constraint as `vv command get`. This is documented in
+     auto-memory (`feedback_make_install_re_embeds_templates.md`)
+     and now locked here.
+
+     Source: `internal/mcp/prompts.go` (`templatePrompt`,
+     `NewRestartPrompt`, `NewWrapPrompt`, revised
+     `sessionGuidelinesText`), `internal/mcp/server.go`
+     (registration), `internal/mcp/prompts_test.go` (per-prompt
+     definition + body byte-identity tests, registration
+     completeness, mid-session-safety assertion).

@@ -384,13 +384,23 @@ via `srv.RegisterPrompt(NewSessionGuidelinesPrompt())`, and shows up
 as `/vv_session_guidelines` in the Agent panel automatically. No
 extension required.
 
-**Iteration 233 will add MCP prompts** for the canonical slash
-commands (`/vv_restart`, `/vv_wrap`, `/vv_review_plan`, etc.) by
-mirroring the existing `NewSessionGuidelinesPrompt` shape — each
-prompt's body comes from
-`templates.New().DefaultContent("agentctx/commands/<name>.md")`,
-which is exactly the same lookup `vv command get <name>` uses on the
-CLI side.
+**Iteration 233 shipped MCP prompts** for the first two canonical
+slash commands. `NewRestartPrompt` and `NewWrapPrompt` in
+`internal/mcp/prompts.go` deliver `/vv_restart` and `/vv_wrap` to
+the Agent panel; both delegate to a shared `templatePrompt` helper
+that loads the body from
+`templates.New().DefaultContent("agentctx/commands/<name>.md")` —
+the same lookup `vv command get <name>` uses on the CLI side, so
+the bodies are guaranteed byte-identical between MCP and CLI
+surfaces. The remaining `agentctx/commands/*.md` templates
+(`cancel-plan`, `execute-plan`, `features-split`, `license`,
+`makefile`, `review-plan`) can be promoted to prompts in a
+follow-up iteration; the helper makes promotion mechanical (~3
+lines per prompt + a definition + body-identity test).
+
+The same iteration also rephrased `vv_session_guidelines` to defer
+`vv_capture_session` invocation when the prompt is pasted
+mid-session — see DESIGN #109 for the full rationale.
 
 **Verified NOT feasible via the public extension API** (kept here for
 completeness; all require core Zed PR contributions, not extension
@@ -542,9 +552,10 @@ a blocker.
 Operators standing up a fresh Zed + Grok workflow today
 should follow the four-step setup above. Slash commands in the
 Agent panel come from MCP prompts the vibe-vault MCP server
-registers (already working: `/vv_session_guidelines`); iteration
-233 will add `/vv_restart`, `/vv_wrap`, etc. by extending the same
-mechanism. Status-bar and codelens features are not feasible via
+registers: `/vv_session_guidelines`, `/vv_restart`, and `/vv_wrap`
+ship today (iter 233); promoting the remaining
+`agentctx/commands/*.md` templates to prompts is mechanical via
+the shared `templatePrompt` helper. Status-bar and codelens features are not feasible via
 the current extension API and would require core Zed PR
 contributions. See `doc/ZED-AGENT-PANEL-INTEGRATION.md` for the
 full panel-vs-extension investigation. Contributors with serious
