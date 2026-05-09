@@ -124,6 +124,20 @@ func main() {
 	case "templates":
 		runTemplates()
 
+	case "command":
+		args := os.Args[2:]
+		if wantsHelp(args) {
+			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdCommand))
+			return
+		}
+		if len(args) >= 1 && args[0] == "get" && wantsHelp(args[1:]) {
+			fmt.Fprint(os.Stderr, help.FormatTerminal(help.CmdCommandGet))
+			return
+		}
+		if err := runCommand(args, os.Stdout); err != nil {
+			fatal("%v", err)
+		}
+
 	case "internal":
 		runInternal()
 

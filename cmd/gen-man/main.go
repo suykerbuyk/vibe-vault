@@ -77,6 +77,15 @@ func main() {
 			os.Exit(1)
 		}
 	}
+
+	// Command sub-subcommand man pages
+	for _, cmd := range help.CommandSubcommands {
+		filename := cmd.ManName() + ".1"
+		if err := write(dir, filename, help.FormatRoff(cmd, date)); err != nil {
+			fmt.Fprintf(os.Stderr, "gen-man: %v\n", err)
+			os.Exit(1)
+		}
+	}
 }
 
 // commitDate returns the committer date of HEAD in YYYY-MM-DD format.

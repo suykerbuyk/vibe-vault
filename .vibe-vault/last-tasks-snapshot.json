@@ -1,6 +1,6 @@
 {
-  "iter_n": 231,
-  "anchor_sha": "a7ac7d5df54d187fbc58dd421b4034ab24db4159",
+  "iter_n": 232,
+  "anchor_sha": "a1d99fc983641fa69acfd09d9d89cf542c71aca2",
   "active": [
     "claude-code-tool-selection-telemetry",
     "mcp-call-tracing"
@@ -168,6 +168,7 @@
     "wrap-skeleton-cache-cross-project-eviction",
     "zed-agent-panel-capture",
     "zed-capture-phase3-polish",
+    "zed-extension-spike",
     "zed-project-detection",
     "zed-session-export-hook",
     "zed-watcher-debounce-test-flake"

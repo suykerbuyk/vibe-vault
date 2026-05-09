@@ -366,32 +366,51 @@ body is "Read `agentctx/commands/restart.md` and follow it"
 for `/restart`, etc. Grok consumes the markdown the same way
 Claude Code does.
 
-### Tier 2 — Zed extension (Rust)
+### Tier 2 — slash commands via MCP prompts (NOT extension API)
 
-A `zed-vibe-vault` extension could expose:
+The iter-232 spike attempted to ship `/vv-restart` as a Zed extension
+(`zed-extension/` Rust+WASM crate). The extension built and installed
+cleanly, but **does not surface in the Agent panel** — the panel where
+the operator actually works. Extension `[slash_commands.X]`
+registrations target the legacy Assistant panel only. See
+`doc/ZED-AGENT-PANEL-INTEGRATION.md` for the full investigation,
+evidence trail, and references.
 
-- **Slash-command surface in the assistant.** The Zed
-  extension API exposes assistant-side slash commands
-  (`SlashCommand` trait). A vibe-vault extension could
-  register `/wrap`, `/restart`, etc. that resolve to the
-  corresponding `agentctx/commands/*.md` body, returning
-  it as the slash command's output for Grok to consume.
-  This makes the slash-command UX symmetric with Claude
-  Code without changing the underlying markdown files.
+**The path that works in the Agent panel: MCP prompts.** Zed's Agent
+panel surfaces `prompts/list` results from each `context_servers.*`
+entry as slash commands. The vault already proves this pattern:
+`vv_session_guidelines` is registered at `internal/mcp/server.go:109`
+via `srv.RegisterPrompt(NewSessionGuidelinesPrompt())`, and shows up
+as `/vv_session_guidelines` in the Agent panel automatically. No
+extension required.
 
-- **Status-bar capture indicator.** Listen on the
-  `vv_capture_session` MCP tool calls and render
-  "captured Nm ago" in the status bar — useful operator
-  feedback that the agent is wrapping up correctly.
+**Iteration 233 will add MCP prompts** for the canonical slash
+commands (`/vv_restart`, `/vv_wrap`, `/vv_review_plan`, etc.) by
+mirroring the existing `NewSessionGuidelinesPrompt` shape — each
+prompt's body comes from
+`templates.New().DefaultContent("agentctx/commands/<name>.md")`,
+which is exactly the same lookup `vv command get <name>` uses on the
+CLI side.
 
-- **Codelens / inline insights.** Surface `vv friction`
-  counts adjacent to recently-edited regions, or
-  `vv search-sessions` results inline. Reads-only against
-  the vault; no write coupling.
+**Verified NOT feasible via the public extension API** (kept here for
+completeness; all require core Zed PR contributions, not extension
+work):
 
-Each of these is one or two days of Rust work against the
-Zed extension API. None are blockers — Tier 1 alone covers
-the operator-facing UX gap.
+- **Status-bar capture indicator.** The extension API exposes no UI
+  host-bridge functions — no status-bar items, panels, or modals.
+  Cited evidence: Worktree's 5-method API surface, `Extension`
+  trait surface, [issue #16933 maintainer comment](https://github.com/zed-industries/zed/issues/16933)
+  ("no support for modifying the UI to create new panels").
+- **Codelens / inline insights.** Same constraint. Possible only
+  via an LSP server the extension registers, which is
+  disproportionate work for a small UX touch.
+- **MCP-call-event subscription.** Extensions can register MCP
+  servers (`Extension::context_server_command`) but have no IPC
+  bridge for subscribing to tool-call events.
+
+These three remain core-Zed-PR territory; the extension API surface
+itself is structurally insufficient regardless of what surface
+(Assistant or Agent) it would target.
 
 ### Tier 3 — ACP-stream native capture (Track C)
 
@@ -521,9 +540,14 @@ capture — and it is a deliberately-deferred enhancement, not
 a blocker.
 
 Operators standing up a fresh Zed + Grok workflow today
-should follow the four-step setup above. Contributors looking
-for impact should consider the Tier-2 Zed extension ideas
-(slash-command surface in the assistant; status-bar capture
-indicator) as the highest-leverage native-UX work, and
-Track C if mid-session capture latency becomes a real
-constraint.
+should follow the four-step setup above. Slash commands in the
+Agent panel come from MCP prompts the vibe-vault MCP server
+registers (already working: `/vv_session_guidelines`); iteration
+233 will add `/vv_restart`, `/vv_wrap`, etc. by extending the same
+mechanism. Status-bar and codelens features are not feasible via
+the current extension API and would require core Zed PR
+contributions. See `doc/ZED-AGENT-PANEL-INTEGRATION.md` for the
+full panel-vs-extension investigation. Contributors with serious
+impact appetite could file core-Zed PRs adding the missing
+host-bridge surface, or pursue Track C if mid-session capture
+latency becomes a real constraint.

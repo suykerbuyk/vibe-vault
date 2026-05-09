@@ -436,6 +436,21 @@ var expectedTerminal = map[string]string{
 		"provider's environment variable (ANTHROPIC_API_KEY / OPENAI_API_KEY /\n" +
 		"GOOGLE_API_KEY) for operators who already have shell-env-based setup.\n",
 
+	"command": "vv command \u2014 print canonical bodies of vibe-vault slash commands\n" +
+		"\n" +
+		"Usage: vv command [get <name>]\n" +
+		"\n" +
+		"Prints the canonical Markdown body of a vibe-vault slash command\n" +
+		"(e.g. restart, wrap, review-plan) to stdout, sourced from vv's\n" +
+		"embedded templates.\n" +
+		"\n" +
+		"Designed for shellout consumers like the Vibe Vault Zed extension,\n" +
+		"whose WASM sandbox cannot read project files arbitrarily and proxies\n" +
+		"slash commands through this subcommand.\n" +
+		"\n" +
+		"Subcommands:\n" +
+		"  vv command get <name>   Print body of agentctx/commands/<name>.md\n",
+
 	"templates": "vv templates \u2014 inspect, compare, and reset vault templates\n" +
 		"\n" +
 		"Usage: vv templates [list | diff | show | reset]\n" +
@@ -529,6 +544,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv mcp [install | ...]           Start MCP server (JSON-RPC over stdio)\n" +
 		"  vv worktree [gc | ...]           Manage subagent worktrees (gc)\n" +
 		"  vv config [set-key | ...]        Manage configuration (provider keys, etc.)\n" +
+		"  vv command [get]                 Print embedded slash-command bodies for shellout consumers\n" +
 		"  vv templates [list | ...]        Inspect, compare, and reset vault templates\n" +
 		"  vv version                       Print version\n" +
 		"  vv help                          Show this help\n" +
@@ -567,7 +583,7 @@ func TestCmdIndex_GlobIsRecursive(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "context", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "memory", "vault", "staging", "zed", "mcp", "worktree", "config", "templates", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "memory", "vault", "staging", "zed", "mcp", "worktree", "config", "command", "templates", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))
@@ -635,6 +651,7 @@ func TestFormatRoffStructure(t *testing.T) {
 	allCmds = append(allCmds, ContextSubcommands...)
 	allCmds = append(allCmds, ZedSubcommands...)
 	allCmds = append(allCmds, TemplatesSubcommands...)
+	allCmds = append(allCmds, CommandSubcommands...)
 	allCmds = append(allCmds, MemorySubcommands...)
 	// Test each subcommand has required sections
 	for _, cmd := range allCmds {
