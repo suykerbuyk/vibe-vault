@@ -107,6 +107,8 @@ func RegisterAllTools(srv *Server, cfg config.Config) {
 	srv.RegisterTool(NewRenderWrapTextTool())
 	srv.RegisterTool(NewWorktreeGCTool(cfg))
 	srv.RegisterPrompt(NewSessionGuidelinesPrompt())
+	srv.RegisterPrompt(NewRestartPrompt())
+	srv.RegisterPrompt(NewWrapPrompt())
 }
 
 // ToolNames returns the registered tool names in stable alphabetical order.

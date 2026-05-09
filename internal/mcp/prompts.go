@@ -6,7 +6,67 @@ package mcp
 import (
 	"fmt"
 	"strings"
+
+	"github.com/suykerbuyk/vibe-vault/internal/templates"
 )
+
+// templatePrompt builds a Prompt whose body is the verbatim default content
+// of an embedded template, looked up by relative path under
+// templates/agentctx/. The handler returns the same bytes that
+// `vv command get <slug>` writes — single source of truth for slash-command
+// bodies regardless of whether the client invokes via MCP prompts/get or the
+// CLI shellout.
+//
+// Used by NewRestartPrompt and NewWrapPrompt; safe to add more prompts
+// backed by additional agentctx/commands/*.md templates by calling this
+// helper.
+func templatePrompt(name, relPath, description string) Prompt {
+	return Prompt{
+		Definition: PromptDef{
+			Name:        name,
+			Description: description,
+		},
+		Handler: func(_ map[string]string) (PromptsGetResult, error) {
+			body, ok := templates.New().DefaultContent(relPath)
+			if !ok {
+				return PromptsGetResult{}, fmt.Errorf("template not found: %s", relPath)
+			}
+			return PromptsGetResult{
+				Description: description,
+				Messages: []PromptMessage{
+					{
+						Role:    "user",
+						Content: ContentBlock{Type: "text", Text: string(body)},
+					},
+				},
+			}, nil
+		},
+	}
+}
+
+// NewRestartPrompt creates the vv_restart prompt. Its body is the canonical
+// /restart slash-command playbook from
+// templates/agentctx/commands/restart.md, delivered verbatim so MCP clients
+// (Zed Agent panel, Claude Code, etc.) can drive a session-restore flow
+// identical to the in-tree slash command.
+func NewRestartPrompt() Prompt {
+	return templatePrompt(
+		"vv_restart",
+		"agentctx/commands/restart.md",
+		"Restore full session context: surface handshake, vault sync, orphan sweep, bootstrap, and active-task triage.",
+	)
+}
+
+// NewWrapPrompt creates the vv_wrap prompt. Its body is the canonical /wrap
+// slash-command orchestrator playbook from
+// templates/agentctx/commands/wrap.md, delivered verbatim.
+func NewWrapPrompt() Prompt {
+	return templatePrompt(
+		"vv_wrap",
+		"agentctx/commands/wrap.md",
+		"Wrap the current iteration: classify the work-unit shape, compose the iter narrative inline, and apply mutations to vault and project tree.",
+	)
+}
 
 // NewSessionGuidelinesPrompt creates the vv_session_guidelines prompt.
 // When requested by an MCP client, it returns instructions that tell the
@@ -45,11 +105,23 @@ func sessionGuidelinesText(project string) string {
 
 You have access to the vibe-vault MCP server for recording development sessions.
 
+### How to use this prompt
+This is session-start orientation. **Do NOT call vv_capture_session on this
+invocation alone.** Wait until the user explicitly wraps up or you have
+completed a coherent work unit (a feature, bug fix, refactor, review, or
+investigation) and the user has confirmed they are done.
+
+Mid-session invocation of this prompt — for example, an operator pasting
+` + "`/vv_session_guidelines`" + ` to refresh context — should not trigger an
+immediate capture. Capturing fragments produces low-value notes that
+clutter the project history.
+
 ### When to capture
 Call the vv_capture_session tool when:
-- You are finishing a work session or conversation
-- The user asks you to wrap up, save, or capture the session
-- You have completed a significant unit of work
+- The user explicitly asks you to wrap up, save, capture, or finish
+- You finish a coherent work unit AND the user has confirmed they are done
+  (e.g., they accept your summary, they say "looks good", they commit, they
+  move on to a different task)
 
 ### How to capture
 Call vv_capture_session with:

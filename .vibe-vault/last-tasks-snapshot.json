@@ -1,6 +1,6 @@
 {
-  "iter_n": 232,
-  "anchor_sha": "a1d99fc983641fa69acfd09d9d89cf542c71aca2",
+  "iter_n": 233,
+  "anchor_sha": "0fd570ec481bb8fdecd388e73a45cc285409888a",
   "active": [
     "claude-code-tool-selection-telemetry",
     "mcp-call-tracing"
@@ -62,6 +62,7 @@
     "integration-test-harness-vault-leak",
     "iter-141-follow-ups",
     "iter-145-follow-ups-bundle-items-1-2-4",
+    "iter-233-mcp-prompt-expansion",
     "iterations-summary-frontmatter",
     "jaunty-humming-goose",
     "jiggly-forging-feather",
