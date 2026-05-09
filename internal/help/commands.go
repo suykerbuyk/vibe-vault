@@ -747,6 +747,46 @@ deployment). Run from each repo root without --all for repo-side updates.`,
 	SeeAlso: []string{"vv(1)", "vv-context(1)", "vv-templates(1)"},
 }
 
+var CmdCommand = Command{
+	Name:       "command",
+	Synopsis:   "print canonical bodies of vibe-vault slash commands",
+	Brief:      "Print embedded slash-command bodies for shellout consumers",
+	Usage:      "vv command [get <name>]",
+	TableUsage: "vv command [get]",
+	Description: `Prints the canonical Markdown body of a vibe-vault slash command
+(e.g. restart, wrap, review-plan) to stdout, sourced from vv's
+embedded templates.
+
+Designed for shellout consumers like the Vibe Vault Zed extension,
+whose WASM sandbox cannot read project files arbitrarily and proxies
+slash commands through this subcommand.
+
+Subcommands:
+  vv command get <name>   Print body of agentctx/commands/<name>.md`,
+	SeeAlso: []string{"vv(1)", "vv-templates(1)"},
+}
+
+var CmdCommandGet = Command{
+	Name:     "command get",
+	Synopsis: "print the body of an embedded slash command to stdout",
+	Brief:    "Print embedded slash-command body to stdout",
+	Usage:    "vv command get <name>",
+	Args: []Arg{
+		{Name: "name", Desc: "Slash-command name without .md (e.g. restart, wrap)"},
+	},
+	Description: `Prints the canonical body of agentctx/commands/<name>.md to stdout.
+Exit 0 on success, non-zero with stderr message if the command does
+not exist in the embedded template registry.
+
+The body is identical to what vv context sync would install at
+.claude/commands/<name>.md in a managed project.`,
+	Examples: []string{
+		"vv command get restart        Print the /restart workflow body",
+		"vv command get review-plan    Print the /review-plan body",
+	},
+	SeeAlso: []string{"vv(1)", "vv-command(1)", "vv-templates(1)"},
+}
+
 var CmdTemplates = Command{
 	Name:       "templates",
 	Synopsis:   "inspect, compare, and reset vault templates",
@@ -1286,6 +1326,11 @@ var TemplatesSubcommands = []Command{
 	CmdTemplatesReset,
 }
 
+// CommandSubcommands is the ordered list of command sub-subcommands.
+var CommandSubcommands = []Command{
+	CmdCommandGet,
+}
+
 // HookSubcommands is the ordered list of hook sub-subcommands.
 var HookSubcommands = []Command{
 	CmdHookInstall,
@@ -1334,6 +1379,7 @@ var Subcommands = []Command{
 	CmdMcp,
 	CmdWorktree,
 	CmdConfig,
+	CmdCommand,
 	CmdTemplates,
 	CmdVersion,
 }

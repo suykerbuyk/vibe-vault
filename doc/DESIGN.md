@@ -4176,3 +4176,99 @@ Key architectural and design decisions in vibe-vault, with rationale.
      `internal/config/config.go`, `internal/config/write.go`,
      `cmd/vv/config_setkey.go`. Task spec:
      `agentctx/tasks/grok-provider-support.md` (Draft v3).
+
+108. **Zed Agent panel slash commands come from MCP prompts, not
+     from the Zed extension API.** The iter-232 `zed-extension-spike`
+     task built a Rust+WASM extension registering `/vv-restart` via
+     the extension API's `[slash_commands.X]` mechanism. The
+     extension installed cleanly (Zed compiled the wasm component,
+     placed it at `~/.local/share/zed/extensions/installed/vibe-vault/`)
+     but the slash command never appeared in the Agent panel — only
+     the existing `/vv_session_guidelines` (registered as an MCP
+     **prompt** via `internal/mcp/server.go:109`'s
+     `srv.RegisterPrompt(NewSessionGuidelinesPrompt())`) showed up.
+
+     This is structural Zed behavior, not a vibe-vault bug.
+     Confirmed by:
+
+     - [zed-industries/zed#41405](https://github.com/zed-industries/zed/issues/41405)
+       — "AI: Cannot use slash commands in third-party External AI
+       Agents" (CLOSED, "stale"). Operators using external AI agents
+       in the Agent panel report `/help` and other slash commands
+       return "Available commands: none."
+     - [zed-industries/zed#53908](https://github.com/zed-industries/zed/discussions/53908)
+       — "Add reasoning effort toggle and slash commands for Claude
+       Code (ACP) in Agent Panel." Even Claude Code's own native
+       slash commands don't pass through the Agent panel.
+     - The [Zed Agent Panel docs](https://zed.dev/docs/ai/agent-panel)
+       capability list omits extension slash commands. The
+       [extension developing-extensions](https://zed.dev/docs/extensions/developing-extensions)
+       page lists slash commands among extension capabilities, but
+       the documentation that defines the semantics
+       ([slash-commands.md in-tree](https://github.com/zed-industries/zed/blob/main/docs/src/extensions/slash-commands.md))
+       is framed as "slash commands for use in the Assistant" — i.e.,
+       the legacy Assistant panel.
+
+     **Decision: pivot the slash-command surface to MCP prompts.**
+     Each `agentctx/commands/<name>.md` becomes an MCP prompt
+     (`vv_<name>`) registered alongside `vv_session_guidelines` in
+     `internal/mcp/server.go`. The prompt body comes from
+     `templates.New().DefaultContent("agentctx/commands/<name>.md")`
+     — same lookup the surviving `vv command get <name>` CLI
+     subcommand uses. Operators get the slash commands in the Agent
+     panel automatically because their `~/.config/zed/settings.json`
+     already lists `vibe-vault` under `context_servers`. No
+     extension manifest, no Rust+WASM, no install dance, no PATH
+     inheritance, no panel-vs-panel ambiguity.
+
+     **What's preserved from the spike:**
+
+     - `cmd/vv/command.go` (the new `vv command get <name>`
+       subcommand) lands. It is useful as a non-MCP CLI surface for
+       CI, scripting, and AI clients that don't speak MCP.
+     - The verified-extension-API findings (sandboxed FS, forbidden
+       `chdir`, missing UI host bridges, no MCP-call-event
+       subscription) are documented in
+       `doc/ZED-AGENT-PANEL-INTEGRATION.md`. They remain true and
+       useful for any future iteration that considers the extension
+       surface again.
+
+     **What's retired from the spike:**
+
+     - The `zed-extension/` Rust+WASM crate. Its surface (the
+       Assistant panel) is not the panel the operator uses; the
+       maintenance cost of a parallel Assistant-panel surface
+       outweighs the value.
+     - The Makefile `##@ Zed Extension` section.
+     - `zed-extension/GAP-REPORT.md` — superseded by
+       `doc/ZED-AGENT-PANEL-INTEGRATION.md`, which is broader.
+
+     **What's deferred to iteration 233+:**
+
+     - Adding `NewRestartPrompt`, `NewWrapPrompt`, etc., mirroring
+       the existing `NewSessionGuidelinesPrompt` pattern in
+       `internal/mcp/prompts.go`.
+     - Reviewing the existing `vv_session_guidelines` body — it was
+       designed as a session-start preamble but instructs the AI to
+       call `vv_capture_session` immediately, which produces
+       low-value notes when invoked mid-session. Either rephrase or
+       split into `vv_session_start` (preamble) and an explicit
+       trigger.
+     - Multi-client concurrency hardening: when Claude Code and Zed
+       Agent panel run on the same project simultaneously, both
+       launch their own `vv mcp` subprocesses against the same
+       vault. Read-only operations (`vv_get_resume`, `vv_list_tasks`)
+       are safe; append-only operations are safe via DESIGN #106
+       content-addressable idempotency; concurrent writes to
+       `commit.msg`, task files, and resume.md marker blocks are
+       NOT explicitly protected and need a follow-up. The
+       `mcp-driven-vault-sync` task's lazy-freshness-gate proposal
+       (Draft v4) extends naturally to cover the parallel-clients
+       case structurally.
+
+     Source: `cmd/vv/command.go`, `cmd/vv/command_test.go`,
+     `internal/help/commands.go` (`CmdCommand`, `CmdCommandGet`,
+     `CommandSubcommands`), `cmd/gen-man/main.go`. Investigation
+     trail: `doc/ZED-AGENT-PANEL-INTEGRATION.md`. Original task
+     spec: `agentctx/tasks/done/zed-extension-spike.md` (retired —
+     superseded by the pivot decision recorded here).
