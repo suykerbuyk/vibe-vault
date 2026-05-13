@@ -495,6 +495,9 @@ func runCheck() {
 			if result := check.CheckWrapIterDrift(cwd, cfg.VaultPath, project); result != nil {
 				report.Results = append(report.Results, *result)
 			}
+			if result := check.CheckStalePackageRefs(cfg.VaultPath, project, cwd); result != nil {
+				report.Results = append(report.Results, *result)
+			}
 		}
 	}
 
