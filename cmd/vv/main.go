@@ -502,6 +502,12 @@ func runCheck() {
 				report.Results = append(report.Results, *result)
 			}
 		}
+		// flowdoc staleness is warn-only and resolves its own project
+		// root from cwd, so it runs outside the project-name gate —
+		// it's meaningful in any git checkout, named project or not.
+		if result := check.CheckFlowdoc(cwd); result != nil {
+			report.Results = append(report.Results, *result)
+		}
 	}
 
 	// Toolchain probe runs on every `vv check` invocation, outside both the
