@@ -1,9 +1,12 @@
 {
-  "iter_n": 235,
-  "anchor_sha": "086e8a0cb008ebaeac3535f50491ee287b02efab",
+  "iter_n": 236,
+  "anchor_sha": "6886ca688f880847a9ffbea191d87c3af75740a2",
   "active": [
     "claude-code-tool-selection-telemetry",
-    "mcp-call-tracing"
+    "flowdoc-command",
+    "flowdoc-verify-lint",
+    "mcp-call-tracing",
+    "wrap-integration-spike"
   ],
   "done": [
     "adaptive-hugging-hedgehog",
@@ -126,6 +129,7 @@
     "sharded-conjuring-newt",
     "squishy-conjuring-milner",
     "staged-toasting-balloon",
+    "stale-package-refs-lint",
     "stamp-only-direct-push-bypass",
     "stdin-hardening",
     "stop-hook-learning-capture",
