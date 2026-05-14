@@ -329,6 +329,35 @@ var expectedTerminal = map[string]string{
 		"  vv effectiveness --project myproject   Show one project\n" +
 		"  vv effectiveness --format json         Output as JSON\n",
 
+	"flowdoc": "vv flowdoc \u2014 generate the flowdoc graph for the current project\n" +
+		"\n" +
+		"Usage: vv flowdoc gen [--project <name>] [--model <name>] [--open]\n" +
+		"\n" +
+		"Flags:\n" +
+		"  --project <name>   Override the auto-detected project name\n" +
+		"  --model <name>     Override the configured LLM model (default: grok-4-fast)\n" +
+		"  --open             Open the rendered HTML viewer after writing\n" +
+		"\n" +
+		"Sends the project's source tree, templates, and MCP prompts to the\n" +
+		"configured LLM with the flowdoc generator brief, parses and validates\n" +
+		"the returned JSON, and writes:\n" +
+		"\n" +
+		"  <project-root>/doc/flows.json    Indented FlowDoc v1 schema\n" +
+		"  <project-root>/doc/FLOWS.html    Self-contained HTML viewer\n" +
+		"\n" +
+		"The generator brief instructs the LLM to emit nodes (subsystems,\n" +
+		"binaries, templates, externals) and flows (slash commands, CLI verbs,\n" +
+		"hooks, pipeline stages) referencing each other by symbol-qualified\n" +
+		"path. See internal/flowdoc/types.go for the full schema.\n" +
+		"\n" +
+		"Requires LLM enrichment to be configured (any provider; the request\n" +
+		"sets MaxTokens=16384 and Temperature=0.0).\n" +
+		"\n" +
+		"Examples:\n" +
+		"  vv flowdoc gen                       Generate for current project\n" +
+		"  vv flowdoc gen --model claude-3-5    Override model\n" +
+		"  vv flowdoc gen --open                Open viewer after writing\n",
+
 	"vault": "vv vault \u2014 vault git synchronization\n" +
 		"\n" +
 		"Usage: vv vault <command>\n" +
@@ -537,6 +566,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv inject [--project X]          Output session-start context payload\n" +
 		"  vv export [--format X]           Export session data (JSON or CSV)\n" +
 		"  vv effectiveness [--project X]   Analyze context effectiveness on outcomes\n" +
+		"  vv flowdoc gen [...]             Generate flows.json + FLOWS.html via LLM\n" +
 		"  vv memory [link | ...]           Link Claude Code auto-memory into vault\n" +
 		"  vv vault <command>               Vault git sync (pull, push, status, recover)\n" +
 		"  vv staging [init | ...]          Manage host-local staging dir (init, status, gc, migrate)\n" +
@@ -583,7 +613,7 @@ func TestCmdIndex_GlobIsRecursive(t *testing.T) {
 func TestRegistryCompleteness(t *testing.T) {
 	expectedNames := []string{
 		"init", "hook", "context", "process", "index",
-		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "memory", "vault", "staging", "zed", "mcp", "worktree", "config", "command", "templates", "version",
+		"backfill", "archive", "reprocess", "check", "stats", "friction", "trends", "inject", "export", "effectiveness", "flowdoc", "memory", "vault", "staging", "zed", "mcp", "worktree", "config", "command", "templates", "version",
 	}
 	if len(Subcommands) != len(expectedNames) {
 		t.Fatalf("expected %d subcommands, got %d", len(expectedNames), len(Subcommands))

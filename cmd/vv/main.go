@@ -103,6 +103,9 @@ func main() {
 	case "effectiveness":
 		runEffectiveness()
 
+	case "flowdoc":
+		os.Exit(runFlowdoc(os.Args[2:]))
+
 	case "config":
 		runConfig()
 

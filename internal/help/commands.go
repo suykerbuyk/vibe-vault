@@ -405,6 +405,39 @@ populate ContextAvailable data on historical sessions.`,
 	SeeAlso: []string{"vv(1)", "vv-friction(1)", "vv-trends(1)", "vv-reprocess(1)"},
 }
 
+var CmdFlowdoc = Command{
+	Name:       "flowdoc",
+	Synopsis:   "generate the flowdoc graph for the current project",
+	Brief:      "Generate flows.json + FLOWS.html via LLM",
+	Usage:      "vv flowdoc gen [--project <name>] [--model <name>] [--open]",
+	TableUsage: "vv flowdoc gen [...]",
+	Flags: []Flag{
+		{Name: "--project <name>", Desc: "Override the auto-detected project name"},
+		{Name: "--model <name>", Desc: "Override the configured LLM model (default: grok-4-fast)"},
+		{Name: "--open", Desc: "Open the rendered HTML viewer after writing"},
+	},
+	Description: `Sends the project's source tree, templates, and MCP prompts to the
+configured LLM with the flowdoc generator brief, parses and validates
+the returned JSON, and writes:
+
+  <project-root>/doc/flows.json    Indented FlowDoc v1 schema
+  <project-root>/doc/FLOWS.html    Self-contained HTML viewer
+
+The generator brief instructs the LLM to emit nodes (subsystems,
+binaries, templates, externals) and flows (slash commands, CLI verbs,
+hooks, pipeline stages) referencing each other by symbol-qualified
+path. See internal/flowdoc/types.go for the full schema.
+
+Requires LLM enrichment to be configured (any provider; the request
+sets MaxTokens=16384 and Temperature=0.0).`,
+	Examples: []string{
+		"vv flowdoc gen                       Generate for current project",
+		"vv flowdoc gen --model claude-3-5    Override model",
+		"vv flowdoc gen --open                Open viewer after writing",
+	},
+	SeeAlso: []string{"vv(1)", "vv-effectiveness(1)"},
+}
+
 var CmdMcp = Command{
 	Name:       "mcp",
 	Synopsis:   "start MCP server for AI agent integration",
@@ -1372,6 +1405,7 @@ var Subcommands = []Command{
 	CmdInject,
 	CmdExport,
 	CmdEffectiveness,
+	CmdFlowdoc,
 	CmdMemory,
 	CmdVault,
 	CmdStaging,
