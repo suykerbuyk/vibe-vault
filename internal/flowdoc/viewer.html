@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>flowdoc viewer</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f7f8fa;
+    --panel-2: #eef0f3;
+    --ink: #1f2937;
+    --ink-dim: #6b7280;
+    --border: #d1d5db;
+    --border-soft: #e5e7eb;
+    --accent: #2563eb;
+    --accent-bg: #dbeafe;
+    --edge: #9ca3af;
+    --edge-on: #2563eb;
+    --node-fill: #f3f4f6;
+    --node-fill-on: #dbeafe;
+    --node-stroke: #d1d5db;
+    --node-stroke-on: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    font-size: 13px; line-height: 1.45;
+  }
+  #layout {
+    display: grid;
+    grid-template-columns: 260px 1fr 340px;
+    height: 100vh;
+  }
+  #sidebar, #details {
+    background: var(--panel);
+    overflow-y: auto;
+    padding: 14px 16px;
+  }
+  #sidebar { border-right: 1px solid var(--border-soft); }
+  #details { border-left: 1px solid var(--border-soft); }
+  #viz {
+    position: relative;
+    overflow: auto;
+    background: var(--bg);
+  }
+  h1 { font-size: 14px; margin: 0 0 6px 0; font-weight: 600; }
+  h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--ink-dim); margin: 16px 0 6px 0; font-weight: 600;
+  }
+  p { margin: 0 0 8px 0; }
+  .subtle { color: var(--ink-dim); font-size: 11px; }
+  .meta { color: var(--ink-dim); font-size: 11px; margin: 2px 0 8px 0; }
+  ul.flows { list-style: none; margin: 0; padding: 0; }
+  ul.flows li {
+    padding: 8px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-bottom: 3px;
+    border: 1px solid transparent;
+    transition: background 0.08s, border-color 0.08s;
+  }
+  ul.flows li:hover { background: var(--panel-2); }
+  ul.flows li.active {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+  }
+  ul.flows li .label {
+    display: block;
+    color: var(--ink);
+  }
+  .chip {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    color: var(--ink-dim);
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    letter-spacing: 0.03em;
+    margin-right: 4px;
+  }
+  svg#graph {
+    width: 100%; height: 100%; display: block;
+    min-width: 600px; min-height: 400px;
+  }
+  svg .node rect {
+    fill: var(--node-fill);
+    stroke: var(--node-stroke);
+    stroke-width: 1.2;
+  }
+  svg .node text {
+    fill: var(--ink);
+    font-size: 11px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  svg .node .group {
+    fill: var(--ink-dim);
+    font-size: 9px;
+  }
+  svg .node.highlighted rect {
+    fill: var(--node-fill-on);
+    stroke: var(--node-stroke-on);
+    stroke-width: 1.8;
+  }
+  svg .edge path {
+    fill: none;
+    stroke: var(--edge-on);
+    stroke-width: 1.4;
+    opacity: 0.85;
+  }
+  svg .edge .op-label {
+    font-size: 9px;
+    fill: var(--ink);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  svg .edge .op-label-bg {
+    fill: var(--bg);
+    fill-opacity: 0.85;
+  }
+  ol.steps {
+    list-style: none; padding-left: 0; margin: 0;
+    counter-reset: step;
+  }
+  ol.steps li {
+    padding: 7px 9px 7px 30px;
+    margin-bottom: 4px;
+    border-radius: 3px;
+    background: var(--bg);
+    border: 1px solid var(--border-soft);
+    position: relative;
+  }
+  ol.steps li::before {
+    counter-increment: step;
+    content: counter(step);
+    position: absolute; left: 8px; top: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  ol.steps .pair {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--ink);
+  }
+  ol.steps .op { margin-top: 2px; color: var(--ink); }
+  ol.steps .passes {
+    color: var(--ink-dim); font-size: 10px; margin-top: 2px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  ol.steps .ref {
+    color: var(--ink-dim); font-size: 9.5px; margin-top: 2px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  #empty {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%;
+    color: var(--ink-dim);
+    font-size: 14px;
+  }
+  #d-hint {
+    color: var(--ink-dim);
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+<div id="layout">
+  <aside id="sidebar">
+    <h1 id="title">Flows</h1>
+    <p class="subtle" id="subtitle"></p>
+    <ul class="flows" id="flow-list"></ul>
+  </aside>
+
+  <main id="viz">
+    <svg id="graph" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+        </marker>
+      </defs>
+      <g id="g-edges"></g>
+      <g id="g-nodes"></g>
+    </svg>
+    <div id="empty" style="display:none">No flows in this document.</div>
+  </main>
+
+  <aside id="details">
+    <h1 id="d-label">Select a flow</h1>
+    <p id="d-hint">Click a flow on the left to see its description, entry point, and steps.</p>
+    <p class="meta" id="d-kind" style="display:none"></p>
+    <p id="d-desc" style="display:none"></p>
+    <p class="meta" id="d-entry" style="display:none"></p>
+    <h2 id="d-steps-h" style="display:none">Steps</h2>
+    <ol class="steps" id="d-steps"></ol>
+  </aside>
+</div>
+
+<script>const FLOWS = {{.FlowsJSON}};</script>
+<script>
+(() => {
+  const doc = FLOWS || {};
+  const nodes = Array.isArray(doc.nodes) ? doc.nodes : [];
+  const flows = Array.isArray(doc.flows) ? doc.flows : [];
+
+  // Title / subtitle
+  const title = document.getElementById('title');
+  const subtitle = document.getElementById('subtitle');
+  if (doc.project) title.textContent = doc.project + ' flows';
+  subtitle.textContent = flows.length + ' flow' + (flows.length === 1 ? '' : 's')
+                      + ' / ' + nodes.length + ' node' + (nodes.length === 1 ? '' : 's');
+
+  // Empty state when no flows are present.
+  const empty = document.getElementById('empty');
+  const svg = document.getElementById('graph');
+  if (flows.length === 0) {
+    empty.style.display = 'flex';
+    svg.style.display = 'none';
+  }
+
+  // ---------- Layout: assign columns by layout_group (first-seen order) ----------
+  const groupOrder = [];
+  const groupIndex = new Map();
+  nodes.forEach(n => {
+    const g = n.layout_group || 'default';
+    if (!groupIndex.has(g)) {
+      groupIndex.set(g, groupOrder.length);
+      groupOrder.push(g);
+    }
+  });
+
+  // Bucket nodes by group to compute per-column rows.
+  const byGroup = new Map();
+  groupOrder.forEach(g => byGroup.set(g, []));
+  nodes.forEach(n => {
+    const g = n.layout_group || 'default';
+    byGroup.get(g).push(n);
+  });
+
+  const NODE_W = 170, NODE_H = 44;
+  const COL_W = 220, ROW_H = 60;
+  const PAD_LEFT = 30, PAD_TOP = 40;
+
+  // node-id -> {x, y, w, h, col, row}
+  const nodePos = new Map();
+  groupOrder.forEach((g, ci) => {
+    byGroup.get(g).forEach((n, ri) => {
+      nodePos.set(n.id, {
+        x: PAD_LEFT + ci * COL_W,
+        y: PAD_TOP + ri * ROW_H,
+        w: NODE_W,
+        h: NODE_H,
+        col: ci,
+        row: ri,
+      });
+    });
+  });
+
+  // Compute SVG canvas size and set viewBox.
+  let maxCol = 0, maxRow = 0;
+  nodePos.forEach(p => {
+    if (p.col > maxCol) maxCol = p.col;
+    if (p.row > maxRow) maxRow = p.row;
+  });
+  const SVG_W = PAD_LEFT * 2 + (maxCol + 1) * COL_W;
+  const SVG_H = PAD_TOP * 2 + (maxRow + 1) * ROW_H + 20;
+  svg.setAttribute('viewBox', '0 0 ' + SVG_W + ' ' + SVG_H);
+
+  // ---------- Render nodes ----------
+  const nodesG = document.getElementById('g-nodes');
+  const edgesG = document.getElementById('g-edges');
+  const nodeEls = new Map();
+
+  function makeNode(n) {
+    const pos = nodePos.get(n.id);
+    if (!pos) return;
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'node');
+    g.setAttribute('data-id', n.id);
+    g.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('width', pos.w);
+    rect.setAttribute('height', pos.h);
+    rect.setAttribute('rx', 4);
+    g.appendChild(rect);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', 9);
+    label.setAttribute('y', 17);
+    label.textContent = n.label || n.id;
+    g.appendChild(label);
+
+    const groupText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    groupText.setAttribute('class', 'group');
+    groupText.setAttribute('x', 9);
+    groupText.setAttribute('y', 32);
+    const role = n.role ? n.role : (n.layout_group || '');
+    const trimmed = role.length > 28 ? role.slice(0, 26) + '...' : role;
+    groupText.textContent = trimmed;
+    g.appendChild(groupText);
+
+    const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    tip.textContent = n.id + (n.role ? ' - ' + n.role : '') + (n.path ? '\n' + n.path : '');
+    g.appendChild(tip);
+
+    nodesG.appendChild(g);
+    nodeEls.set(n.id, g);
+  }
+  nodes.forEach(makeNode);
+
+  // ---------- Edge routing ----------
+  function edgePath(fromId, toId) {
+    const a = nodePos.get(fromId);
+    const b = nodePos.get(toId);
+    if (!a || !b) return null;
+    if (fromId === toId) {
+      const sx = a.x + a.w, sy = a.y + a.h * 0.3;
+      const ex = a.x + a.w, ey = a.y + a.h * 0.7;
+      return 'M' + sx + ',' + sy +
+             ' C' + (sx + 40) + ',' + (sy - 10) +
+             ' ' + (ex + 40) + ',' + (ey + 10) +
+             ' ' + ex + ',' + ey;
+    }
+    let sx, sy, ex, ey;
+    if (b.col >= a.col) {
+      sx = a.x + a.w; sy = a.y + a.h / 2;
+      ex = b.x;       ey = b.y + b.h / 2;
+    } else {
+      sx = a.x;       sy = a.y + a.h / 2;
+      ex = b.x + b.w; ey = b.y + b.h / 2;
+    }
+    const dx = Math.abs(ex - sx);
+    const c = Math.max(40, dx * 0.35);
+    const sign = (b.col >= a.col) ? 1 : -1;
+    const c1x = sx + sign * c;
+    const c2x = ex - sign * c;
+    return 'M' + sx + ',' + sy +
+           ' C' + c1x + ',' + sy +
+           ' ' + c2x + ',' + ey +
+           ' ' + ex + ',' + ey;
+  }
+
+  // ---------- Sidebar list ----------
+  const list = document.getElementById('flow-list');
+  flows.forEach(f => {
+    const li = document.createElement('li');
+    li.dataset.slug = f.slug;
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = f.kind || 'flow';
+    const lbl = document.createElement('span');
+    lbl.className = 'label';
+    lbl.textContent = f.label || f.slug;
+    li.appendChild(chip);
+    li.appendChild(lbl);
+    li.addEventListener('click', () => selectFlow(f.slug));
+    list.appendChild(li);
+  });
+
+  // ---------- Selection state ----------
+  let currentSlug = null;
+
+  function clearGraph() {
+    while (edgesG.firstChild) edgesG.removeChild(edgesG.firstChild);
+    nodeEls.forEach(el => el.classList.remove('highlighted'));
+  }
+
+  function escapeText(s) {
+    return String(s == null ? '' : s);
+  }
+
+  function selectFlow(slug) {
+    const f = flows.find(x => x.slug === slug);
+    if (!f) return;
+    currentSlug = slug;
+
+    // Sidebar active state
+    Array.prototype.forEach.call(list.querySelectorAll('li'), li => {
+      li.classList.toggle('active', li.dataset.slug === slug);
+    });
+
+    // Details pane visibility
+    document.getElementById('d-hint').style.display = 'none';
+    document.getElementById('d-label').textContent = f.label || f.slug;
+    const dKind = document.getElementById('d-kind');
+    dKind.textContent = f.kind || '';
+    dKind.style.display = '';
+    const dDesc = document.getElementById('d-desc');
+    dDesc.textContent = f.description || '';
+    dDesc.style.display = '';
+    const dEntry = document.getElementById('d-entry');
+    dEntry.textContent = 'entry: ' + (f.entry_point || '(none)');
+    dEntry.style.display = '';
+    document.getElementById('d-steps-h').style.display = '';
+
+    // Steps list (numbered)
+    const stepsOl = document.getElementById('d-steps');
+    while (stepsOl.firstChild) stepsOl.removeChild(stepsOl.firstChild);
+    const steps = Array.isArray(f.steps) ? f.steps : [];
+    steps.forEach(s => {
+      const li = document.createElement('li');
+
+      const pair = document.createElement('div');
+      pair.className = 'pair';
+      pair.textContent = escapeText(s.from) + ' → ' + escapeText(s.to);
+      li.appendChild(pair);
+
+      const op = document.createElement('div');
+      op.className = 'op';
+      op.textContent = escapeText(s.op);
+      li.appendChild(op);
+
+      if (s.passes) {
+        const p = document.createElement('div');
+        p.className = 'passes';
+        p.textContent = 'passes: ' + s.passes;
+        li.appendChild(p);
+      }
+      if (s.ref) {
+        const r = document.createElement('div');
+        r.className = 'ref';
+        r.textContent = s.ref;
+        li.appendChild(r);
+      }
+      stepsOl.appendChild(li);
+    });
+
+    // Graph: highlight involved nodes, draw step edges
+    clearGraph();
+    const involved = new Set();
+    if (Array.isArray(f.nodes)) f.nodes.forEach(id => involved.add(id));
+    steps.forEach(s => { involved.add(s.from); involved.add(s.to); });
+    nodeEls.forEach((el, id) => {
+      if (involved.has(id)) el.classList.add('highlighted');
+    });
+
+    // Render edges, fanning out duplicate (from,to) pairs to avoid overdraw.
+    const seen = new Map();
+    steps.forEach(s => {
+      const key = s.from + '|' + s.to;
+      const nth = seen.get(key) || 0;
+      seen.set(key, nth + 1);
+
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('class', 'edge');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      let d = edgePath(s.from, s.to);
+      if (!d) return;
+
+      if (nth > 0 && s.from !== s.to) {
+        // Offset duplicate edges so the labels don't stack.
+        const a = nodePos.get(s.from), b = nodePos.get(s.to);
+        const sx = (b.col >= a.col ? a.x + a.w : a.x);
+        const sy = a.y + a.h / 2 + nth * 6 * ((nth % 2) ? 1 : -1);
+        const ex = (b.col >= a.col ? b.x : b.x + b.w);
+        const ey = b.y + b.h / 2 + nth * 6 * ((nth % 2) ? -1 : 1);
+        const c = Math.max(40, Math.abs(ex - sx) * 0.35);
+        const sign = (b.col >= a.col) ? 1 : -1;
+        d = 'M' + sx + ',' + sy +
+            ' C' + (sx + sign * c) + ',' + sy +
+            ' ' + (ex - sign * c) + ',' + ey +
+            ' ' + ex + ',' + ey;
+      }
+      path.setAttribute('d', d);
+      path.setAttribute('marker-end', 'url(#arrow)');
+      g.appendChild(path);
+
+      // Op annotation near the midpoint of the path.
+      const m = d.match(/M(-?\d+\.?\d*),(-?\d+\.?\d*).*?(-?\d+\.?\d*),(-?\d+\.?\d*)$/);
+      if (m && s.op) {
+        const mx = (parseFloat(m[1]) + parseFloat(m[3])) / 2;
+        const my = (parseFloat(m[2]) + parseFloat(m[4])) / 2 - 3;
+        const opText = s.op.length > 28 ? s.op.slice(0, 26) + '...' : s.op;
+        // Background rect for legibility over edges.
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        const approxW = opText.length * 6 + 6;
+        bg.setAttribute('class', 'op-label-bg');
+        bg.setAttribute('x', mx - approxW / 2);
+        bg.setAttribute('y', my - 9);
+        bg.setAttribute('width', approxW);
+        bg.setAttribute('height', 11);
+        bg.setAttribute('rx', 2);
+        g.appendChild(bg);
+
+        const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        t.setAttribute('class', 'op-label');
+        t.setAttribute('x', mx);
+        t.setAttribute('y', my);
+        t.setAttribute('text-anchor', 'middle');
+        t.textContent = opText;
+        g.appendChild(t);
+      }
+      edgesG.appendChild(g);
+    });
+  }
+
+  // No auto-select: leave the details pane in its hint state until the user
+  // clicks. (The graph already shows all nodes grouped by layout_group.)
+})();
+</script>
+</body>
+</html>
