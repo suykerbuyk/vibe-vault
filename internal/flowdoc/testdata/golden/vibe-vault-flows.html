@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>vibe-vault flow viewer (spike)</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel-2: #1f242c;
+    --ink: #e6edf3;
+    --ink-dim: #8b949e;
+    --accent: #58a6ff;
+    --accent-2: #f0883e;
+    --warn: #d29922;
+    --pkg-fill: #21262d;
+    --pkg-stroke: #30363d;
+    --pkg-fill-on: #2d3a4f;
+    --pkg-stroke-on: #58a6ff;
+    --edge: #30363d;
+    --edge-on: #f0883e;
+    --external-fill: #1c2330;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--ink);
+               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+               font-size: 13px; line-height: 1.45; }
+  #layout { display: grid; grid-template-columns: 280px 1fr 380px; height: 100vh; }
+  #sidebar, #details {
+    background: var(--panel); border-right: 1px solid var(--pkg-stroke);
+    overflow-y: auto; padding: 12px 14px;
+  }
+  #details { border-right: none; border-left: 1px solid var(--pkg-stroke); }
+  #viz { position: relative; overflow: hidden; background: radial-gradient(ellipse at center, #11161e 0%, #0a0d12 90%); }
+  h1 { font-size: 14px; margin: 0 0 4px 0; letter-spacing: 0.02em; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-dim);
+       margin: 16px 0 6px 0; font-weight: 600; }
+  p { margin: 0 0 8px 0; }
+  .subtle { color: var(--ink-dim); font-size: 11px; }
+  .meta { color: var(--ink-dim); font-size: 11px; margin-top: 2px; }
+  ul.actions { list-style: none; margin: 0; padding: 0; }
+  ul.actions li {
+    padding: 7px 10px; border-radius: 5px; cursor: pointer; margin-bottom: 3px;
+    border: 1px solid transparent; transition: background 0.08s, border 0.08s;
+  }
+  ul.actions li:hover { background: var(--panel-2); }
+  ul.actions li.active { background: #1e3148; border-color: var(--accent); }
+  ul.actions li .kind { font-size: 10px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+  ul.actions li .label { display: block; }
+  svg#graph { width: 100%; height: 100%; display: block; }
+  svg .pkg rect { fill: var(--pkg-fill); stroke: var(--pkg-stroke); stroke-width: 1.2; }
+  svg .pkg.external rect { fill: var(--external-fill); stroke: var(--pkg-stroke); stroke-dasharray: 4 3; }
+  svg .pkg text { fill: var(--ink-dim); font-size: 11px; font-family: monospace; }
+  svg .pkg .role { fill: var(--ink-dim); font-size: 9px; }
+  svg .pkg.on rect { fill: var(--pkg-fill-on); stroke: var(--pkg-stroke-on); stroke-width: 1.8; }
+  svg .pkg.on text { fill: var(--ink); }
+  svg .edge path { fill: none; stroke: var(--edge); stroke-width: 1; opacity: 0.18; }
+  svg .edge.on path { stroke: var(--edge-on); stroke-width: 1.8; opacity: 0.95; }
+  svg .edge .step-num { font-size: 10px; fill: var(--warn); font-family: monospace; }
+  svg .edge .annot { font-size: 9px; fill: var(--ink-dim); font-family: monospace; }
+  ol.steps { list-style: none; padding-left: 0; margin: 0; counter-reset: step; }
+  ol.steps li {
+    padding: 7px 9px 7px 32px; margin-bottom: 4px; border-radius: 4px;
+    background: var(--panel-2); position: relative; cursor: pointer; border: 1px solid transparent;
+    transition: border 0.08s, background 0.08s;
+  }
+  ol.steps li::before {
+    counter-increment: step; content: counter(step);
+    position: absolute; left: 8px; top: 7px; font-family: monospace; font-size: 10px;
+    color: var(--warn); font-weight: 700;
+  }
+  ol.steps li:hover { background: #232a33; }
+  ol.steps li.focus { border-color: var(--accent-2); background: #2a221a; }
+  ol.steps .pair { font-family: monospace; font-size: 11px; color: var(--ink); }
+  ol.steps .op { color: var(--ink); margin-top: 2px; }
+  ol.steps .passes { color: var(--ink-dim); font-size: 10px; margin-top: 2px; font-family: monospace; }
+  ol.steps .ref { color: #6e7681; font-size: 9.5px; margin-top: 2px; font-family: monospace; }
+  .legend {
+    position: absolute; bottom: 10px; left: 12px; font-size: 10px; color: var(--ink-dim);
+    background: rgba(14, 17, 22, 0.75); padding: 6px 9px; border-radius: 4px;
+    border: 1px solid var(--pkg-stroke);
+  }
+  .legend span { display: inline-block; margin-right: 10px; }
+  .legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+                 margin-right: 4px; vertical-align: -1px; }
+  .legend .dot.internal { background: var(--pkg-fill); border: 1px solid var(--pkg-stroke); }
+  .legend .dot.external { background: var(--external-fill); border: 1px dashed var(--pkg-stroke); }
+  .legend .dot.on { background: var(--pkg-fill-on); border: 1px solid var(--pkg-stroke-on); }
+  .elided {
+    background: #2a221a; border-left: 3px solid var(--warn); padding: 8px 10px;
+    font-size: 11px; border-radius: 3px; margin: 6px 0;
+  }
+  .pill {
+    display: inline-block; padding: 1px 6px; border-radius: 9px; font-size: 10px;
+    background: var(--panel-2); color: var(--ink-dim); margin-right: 4px;
+    font-family: monospace; letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+<div id="layout">
+  <aside id="sidebar">
+    <h1>vibe-vault flows</h1>
+    <p class="subtle">22 user-facing actions across 30 packages. Click one.</p>
+    <h2>Actions</h2>
+    <ul class="actions" id="action-list"></ul>
+    <h2>Notes</h2>
+    <p class="subtle">This is a spike. The /wrap flow does NOT use LLM dispatch
+       (DESIGN #92/#93 retired that); the orchestrator composes prose inline.</p>
+  </aside>
+
+  <main id="viz">
+    <svg id="graph" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <marker id="arrow"    viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--edge)"/>
+        </marker>
+        <marker id="arrow-on" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--edge-on)"/>
+        </marker>
+      </defs>
+      <g id="edges"></g>
+      <g id="nodes"></g>
+    </svg>
+    <div class="legend">
+      <span><span class="dot internal"></span>internal pkg</span>
+      <span><span class="dot external"></span>external</span>
+      <span><span class="dot on"></span>in active flow</span>
+      <span style="margin-right:0">click an action — hover a step to highlight that edge</span>
+    </div>
+  </main>
+
+  <aside id="details">
+    <h1 id="d-label">Select an action</h1>
+    <p class="meta" id="d-kind"></p>
+    <p id="d-desc"></p>
+    <div id="d-elided"></div>
+    <h2>Steps</h2>
+    <ol class="steps" id="d-steps"></ol>
+  </aside>
+</div>
+
+<!-- flows.json embedded inline so the file is self-contained, with no network/fs reads. -->
+<script id="flows-data" type="application/json">{"$schema_version":"vv-flowdoc/0.1","project":{"name":"vibe-vault","kind":"go-cli-mcp","root":"/home/johns/code/vibe-vault","notes":"Single-binary Go CLI (cmd/vv/main.go is a switch dispatcher, NOT cobra). MCP server is in-process under internal/mcp. Slash-commands (/restart, /wrap) are markdown templates served verbatim via MCP prompts."},"packages":[{"id":"cmd/vv","label":"cmd/vv","role":"CLI entry","path":"cmd/vv/main.go"},{"id":"internal/hook","label":"hook","role":"Claude Code hook handler + plugin installer","path":"internal/hook/"},{"id":"internal/mcp","label":"mcp","role":"MCP JSON-RPC server, tool dispatch, prompts","path":"internal/mcp/"},{"id":"internal/session","label":"session","role":"Transcript \u2192 Obsidian note capture","path":"internal/session/"},{"id":"internal/transcript","label":"transcript","role":"Claude Code JSONL parser","path":"internal/transcript/"},{"id":"internal/staging","label":"staging","role":"Host-local per-project staging dir + sync-sessions","path":"internal/staging/"},{"id":"internal/vaultsync","label":"vaultsync","role":"git wrapper around the Obsidian vault repo","path":"internal/vaultsync/"},{"id":"internal/index","label":"index","role":"session-index.json rebuild + GenerateContext","path":"internal/index/"},{"id":"internal/llm","label":"llm","role":"Provider factory (anthropic/openai/google/grok)","path":"internal/llm/"},{"id":"internal/synthesis","label":"synthesis","role":"Post-session knowledge propagation","path":"internal/synthesis/"},{"id":"internal/inject","label":"inject","role":"Build the CLAUDE.md bootstrap blob","path":"internal/inject/"},{"id":"internal/check","label":"check","role":"vv check probes + surface gate","path":"internal/check/"},{"id":"internal/surface","label":"surface","role":"MCP surface-version stamp + handshake","path":"internal/surface/"},{"id":"internal/config","label":"config","role":"TOML config + provider key storage","path":"internal/config/"},{"id":"internal/context","label":"context","role":"agentctx scaffolding (init/migrate/sync)","path":"internal/context/"},{"id":"internal/plugin","label":"plugin","role":"Claude Code plugin marketplace generator","path":"internal/plugin/"},{"id":"internal/scaffold","label":"scaffold","role":"Vault skeleton on `vv init`","path":"internal/scaffold/"},{"id":"internal/templates","label":"templates","role":"go:embed of templates/ tree (incl. slash-cmd md)","path":"internal/templates/"},{"id":"internal/wraprender","label":"wraprender","role":"Marker-block renderer for resume.md state regions","path":"internal/wraprender/"},{"id":"internal/archive","label":"archive","role":"zstd compression of older transcripts","path":"internal/archive/"},{"id":"internal/discover","label":"discover","role":"Find ~/.claude/projects/*/transcript JSONL","path":"internal/discover/"},{"id":"internal/stats","label":"stats","role":"Per-project session counters","path":"internal/stats/"},{"id":"internal/friction","label":"friction","role":"Friction-score aggregation","path":"internal/friction/"},{"id":"internal/trends","label":"trends","role":"Rolling-window trend computation","path":"internal/trends/"},{"id":"internal/sessionclaim","label":"sessionclaim","role":"Per-host session-slot lock for multi-host disambig","path":"internal/sessionclaim/"},{"id":"internal/lockfile","label":"lockfile","role":"Flock-style locks around session-index.json","path":"internal/lockfile/"},{"id":"internal/agentctx","label":"agentctx (templates)","role":"Embedded agentctx/*.md templates","path":"templates/agentctx/"},{"id":"claude-code","label":"Claude Code (host)","role":"External: editor/agent \u2014 fires hooks, calls MCP","path":"(external)"},{"id":"obsidian-vault","label":"Obsidian vault (git)","role":"External filesystem: markdown notes + .git","path":"(filesystem)"},{"id":"transcript-jsonl","label":"~/.claude/projects/...jsonl","role":"External: Claude Code transcript files","path":"(filesystem)"}],"flows":[{"slug":"restart","label":"/restart (session bootstrap)","kind":"slash-command","description":"Surface handshake, multi-host vault sync, orphan-worktree sweep, then load resume/workflow/active-tasks into the Claude Code session.","elided":"Plan-sweep details (Glob ~/.claude/plans/, slugify, vv_manage_task create) treated as a single step; auto-retire pass abbreviated.","entry_point":"Claude Code expands the templates/agentctx/commands/restart.md prompt body.","packages":["claude-code","internal/mcp","internal/agentctx","internal/check","internal/surface","internal/vaultsync","internal/index","internal/context","internal/inject"],"steps":[{"from":"claude-code","to":"internal/mcp","op":"MCP prompts/get vv_restart","passes":"no args","ref":"internal/mcp/prompts.go:52"},{"from":"internal/mcp","to":"internal/agentctx","op":"load embedded restart.md","passes":"templates/agentctx/commands/restart.md","ref":"internal/mcp/prompts.go:23"},{"from":"internal/agentctx","to":"claude-code","op":"return prompt body verbatim","passes":"playbook markdown","ref":"templates/agentctx/commands/restart.md"},{"from":"claude-code","to":"cmd/vv","op":"Bash: vv check --json","passes":"argv","ref":"cmd/vv/main.go:470"},{"from":"cmd/vv","to":"internal/check","op":"check.Run + CheckSurface","passes":"config.Config","ref":"cmd/vv/main.go:479"},{"from":"internal/check","to":"internal/surface","op":"compare binary MCPSurfaceVersion vs vault stamps","passes":"vault path","ref":"internal/check/surface.go"},{"from":"cmd/vv","to":"claude-code","op":"JSON report on stdout","passes":"{Results[], ExitCode}","ref":"cmd/vv/main.go:524"},{"from":"claude-code","to":"cmd/vv","op":"Bash: vv vault pull","passes":"argv","ref":"cmd/vv/main.go:883"},{"from":"cmd/vv","to":"internal/vaultsync","op":"vaultsync.Pull(vaultPath)","passes":"vault path","ref":"internal/vaultsync/vaultsync.go:265"},{"from":"internal/vaultsync","to":"obsidian-vault","op":"git fetch + rebase + stash pop","passes":"(shell-out)","ref":"internal/vaultsync/vaultsync.go:265"},{"from":"cmd/vv","to":"internal/index","op":"index.Rebuild on regenerate flag","passes":"ProjectsDir, StateDir","ref":"cmd/vv/main.go:904"},{"from":"claude-code","to":"internal/mcp","op":"tools/call vv_worktree_gc","passes":"no args","ref":"internal/mcp/tools_worktree_gc.go"},{"from":"claude-code","to":"internal/mcp","op":"tools/call vv_bootstrap_context","passes":"{project, max_tokens}","ref":"internal/mcp/tools_context.go:392"},{"from":"internal/mcp","to":"internal/agentctx","op":"read <vault>/Projects/<p>/agentctx/workflow.md (+template fallback)","passes":"project name","ref":"internal/mcp/tools_context.go:434"},{"from":"internal/mcp","to":"obsidian-vault","op":"read resume.md + scan agentctx/tasks/","passes":"project paths","ref":"internal/mcp/tools_context.go:455"},{"from":"internal/mcp","to":"internal/index","op":"index.Load + trends.Compute","passes":"StateDir","ref":"internal/mcp/tools_context.go:476"},{"from":"internal/mcp","to":"internal/inject","op":"inject.Build + Render (format=json)","passes":"entries, trends, opts","ref":"internal/mcp/tools_context.go:486"},{"from":"internal/mcp","to":"claude-code","op":"return {workflow, resume, active_tasks, context}","passes":"JSON payload","ref":"internal/mcp/tools_context.go:496"}]},{"slug":"wrap","label":"/wrap (iteration capture)","kind":"slash-command","description":"Pre-flight + collect-state + orchestrator-composed narrative + mechanical apply (append-iteration, stamp-iter, commit.msg) + vault sync. NOTE: contrary to the spec brief, there is NO LLM dispatch / tiered providers in /wrap \u2014 DESIGN #92/#93 retired that path. Claude Code itself writes the prose inline.","elided":"Thread/carried mutations only fire conditionally; merge-pattern feature-branch variant omitted (happy path is single-branch, fresh-feature shape).","entry_point":"Claude Code expands templates/agentctx/commands/wrap.md.","packages":["claude-code","internal/mcp","internal/agentctx","internal/staging","internal/vaultsync","obsidian-vault"],"steps":[{"from":"claude-code","to":"internal/mcp","op":"prompts/get vv_wrap","passes":"no args","ref":"internal/mcp/prompts.go:63"},{"from":"internal/mcp","to":"internal/agentctx","op":"embedded wrap.md returned verbatim","passes":"templates/agentctx/commands/wrap.md","ref":"internal/mcp/prompts.go:23"},{"from":"claude-code","to":"internal/mcp","op":"tools/call vv_preflight_wrap","passes":"no args","ref":"internal/mcp/tools_preflight_wrap.go"},{"from":"internal/mcp","to":"internal/surface","op":"EnforceFailStop(vault) + dirty probes","passes":"vault path","ref":"internal/mcp/tools_preflight_wrap.go"},{"from":"internal/mcp","to":"claude-code","op":"{ok, warnings[], errors[]}","passes":"JSON","ref":"internal/mcp/tools_preflight_wrap.go"},{"from":"claude-code","to":"internal/mcp","op":"tools/call vv_collect_wrap_state","passes":"{project}","ref":"internal/mcp/tools_collect_wrap_state.go:458"},{"from":"internal/mcp","to":"obsidian-vault","op":"parse iterations.md \u2192 next iter_n","passes":"Projects/<p>/agentctx/iterations.md","ref":"internal/mcp/tools_collect_wrap_state.go:354"},{"from":"internal/mcp","to":"obsidian-vault","op":"git in project dir: anchor sha, commits, diff names","passes":"project repo","ref":"internal/mcp/tools_collect_wrap_state.go:378"},{"from":"internal/mcp","to":"obsidian-vault","op":"diff .vibe-vault/last-tasks-snapshot.json vs live tasks/","passes":"project + vault paths","ref":"internal/mcp/tools_collect_wrap_state.go:399"},{"from":"internal/mcp","to":"internal/mcp","op":"ClassifyWrapShape (fresh-feature | planning | bookkeeping)","passes":"collected state","ref":"internal/mcp/wrapshape.go"},{"from":"internal/mcp","to":"claude-code","op":"wrap-state record + shape","passes":"JSON","ref":"internal/mcp/tools_collect_wrap_state.go:507"},{"from":"claude-code","to":"claude-code","op":"ORCHESTRATOR composes narrative inline (no LLM dispatch)","passes":"session context","ref":"templates/agentctx/commands/wrap.md:116"},{"from":"claude-code","to":"internal/mcp","op":"tools/call vv_append_iteration","passes":"{summary, shape, body}","ref":"internal/mcp/tools_iterations.go"},{"from":"internal/mcp","to":"internal/wraprender","op":"re-render resume.md marker-block regions","passes":"active_tasks, current_state, history_tail","ref":"internal/mcp/resume_state_blocks.go"},{"from":"internal/mcp","to":"obsidian-vault","op":"write iterations.md + resume.md","passes":"atomic file writes","ref":"internal/mcp/tools_iterations.go"},{"from":"claude-code","to":"internal/mcp","op":"tools/call vv_set_commit_msg","passes":"{content}","ref":"internal/mcp/tools_commit_msg.go"},{"from":"internal/mcp","to":"obsidian-vault","op":"write <projectRoot>/commit.msg","passes":"subject + body","ref":"internal/mcp/tools_commit_msg.go"},{"from":"claude-code","to":"internal/mcp","op":"tools/call vv_stamp_iter","passes":"{iter_n}","ref":"internal/mcp/tools_stamp_iter.go"},{"from":"internal/mcp","to":"obsidian-vault","op":"write .vibe-vault/last-iter + last-tasks-snapshot.json","passes":"iter_n + slug snapshot","ref":"internal/mcp/tools_stamp_iter.go"},{"from":"claude-code","to":"cmd/vv","op":"Bash: git add + commit -F commit.msg","passes":"argv","ref":"templates/agentctx/commands/wrap.md:194"},{"from":"claude-code","to":"cmd/vv","op":"Bash: vv vault sync-sessions","passes":"argv","ref":"cmd/vv/main.go:1005"},{"from":"cmd/vv","to":"internal/staging","op":"staging.SyncSessions","passes":"{vaultPath, Projects?}","ref":"internal/staging/sync_sessions.go:102"},{"from":"internal/staging","to":"internal/vaultsync","op":"CommitAndPushPaths(push=false)","passes":"per-host subtree + commit msg","ref":"internal/staging/sync_sessions.go:174"},{"from":"claude-code","to":"cmd/vv","op":"Bash: vv vault push","passes":"argv","ref":"cmd/vv/main.go:943"},{"from":"cmd/vv","to":"internal/vaultsync","op":"CommitAndPush(vaultPath, msg)","passes":"vault path + msg","ref":"internal/vaultsync/vaultsync.go:377"},{"from":"internal/vaultsync","to":"obsidian-vault","op":"git add + commit + push --all-remotes","passes":"(shell-out)","ref":"internal/vaultsync/vaultsync.go:377"}]},{"slug":"hook","label":"vv hook (SessionEnd/Stop/PreCompact)","kind":"cli","description":"Claude Code fires this on every session-lifecycle event with JSON over stdin. We parse the transcript, write an Obsidian note into host-local staging, optionally enrich via LLM, optionally run synthesis, and refresh per-project context docs.","elided":"Stop/PreCompact path skips enrichment (Checkpoint=true, SkipEnrichment=true) \u2014 captured here as the happy SessionEnd path.","entry_point":"claude-code spawns `vv hook --event SessionEnd` and pipes JSON on stdin","packages":["claude-code","cmd/vv","internal/hook","internal/config","internal/sessionclaim","internal/staging","internal/session","internal/transcript","internal/llm","internal/synthesis","internal/index"],"steps":[{"from":"claude-code","to":"cmd/vv","op":"exec `vv hook` + write JSON to stdin","passes":"{session_id, transcript_path, hook_event_name, cwd, ...}","ref":"internal/hook/handler.go:33"},{"from":"cmd/vv","to":"internal/hook","op":"hook.Handle(cfg, event)","passes":"config + override event","ref":"cmd/vv/main.go:279"},{"from":"internal/hook","to":"internal/hook","op":"readStdin (64KB cap, 2s timeout)","passes":"stdin reader","ref":"internal/hook/handler.go:73"},{"from":"internal/hook","to":"internal/llm","op":"llm.NewProvider(cfg.Enrichment, cfg.Providers)","passes":"config","ref":"internal/hook/handler.go:184"},{"from":"internal/hook","to":"internal/sessionclaim","op":"claim per-host slot for project","passes":"projectRoot","ref":"internal/hook/handler.go:190"},{"from":"internal/hook","to":"internal/staging","op":"staging.ResolveRoot(cfg.Staging.Root)","passes":"config override or XDG default","ref":"internal/hook/handler.go:194"},{"from":"internal/hook","to":"internal/session","op":"session.Capture(CaptureOpts, cfg)","passes":"{TranscriptPath, CWD, SessionID, Provider, StagingRoot}","ref":"internal/hook/handler.go:196"},{"from":"internal/session","to":"internal/transcript","op":"parse JSONL events","passes":"transcript file path","ref":"internal/transcript/"},{"from":"internal/session","to":"internal/llm","op":"(optional) call provider for enrichment","passes":"transcript prose","ref":"internal/session/"},{"from":"internal/session","to":"internal/staging","op":"write note into <staging>/<project>/sessions/<date>.md","passes":"rendered markdown","ref":"internal/staging/staging.go"},{"from":"internal/session","to":"internal/index","op":"update session-index.json under lock","passes":"SessionEntry","ref":"internal/index/index.go"},{"from":"internal/hook","to":"internal/sessionclaim","op":"ReleaseSession on success","passes":"projectRoot","ref":"internal/hook/handler.go:216"},{"from":"internal/hook","to":"internal/synthesis","op":"(if cfg.Synthesis.Enabled) Run with LLM, index, note path","passes":"RunOpts","ref":"internal/hook/handler.go:268"},{"from":"internal/synthesis","to":"obsidian-vault","op":"append Knowledge/learnings, flag stale, update resume","passes":"Result struct","ref":"internal/synthesis/actions.go:16"},{"from":"internal/hook","to":"internal/index","op":"GenerateContext (refresh per-project history.md)","passes":"ContextOptions","ref":"internal/hook/handler.go:292"}]},{"slug":"inject","label":"vv inject (CLAUDE.md fallback context)","kind":"cli","description":"Builds the bootstrap blob Claude Code injects into CLAUDE.md when MCP isn't available. Walks the session index for the detected project, computes trends, renders sections (summary/sessions/threads/decisions/friction) within a token budget.","elided":"Section truncation and per-section formatting details kept high-level.","entry_point":"operator runs `vv inject [--project X]`","packages":["cmd/vv","internal/config","internal/index","internal/trends","internal/inject"],"steps":[{"from":"cmd/vv","to":"internal/config","op":"mustLoadConfig + EnforceWarnOnly","passes":"argv","ref":"cmd/vv/main.go:621"},{"from":"cmd/vv","to":"internal/index","op":"index.Load(StateDir)","passes":"state dir path","ref":"cmd/vv/main.go:651"},{"from":"cmd/vv","to":"internal/trends","op":"trends.Compute(entries, project, 4)","passes":"entries, project, weeks","ref":"cmd/vv/main.go:668"},{"from":"cmd/vv","to":"internal/inject","op":"inject.Build(entries, trendResult, Opts)","passes":"{project, format, sections, maxTokens}","ref":"cmd/vv/main.go:677"},{"from":"internal/inject","to":"internal/inject","op":"Render (md or json) within token budget","passes":"Result struct","ref":"internal/inject/inject.go"},{"from":"cmd/vv","to":"claude-code","op":"stdout markdown or JSON","passes":"blob","ref":"cmd/vv/main.go:682"}]},{"slug":"check","label":"vv check (surface handshake + toolchain probes)","kind":"cli","description":"Runs the per-vault and per-project probes plus the binary-vs-vault MCP surface-version handshake (DESIGN #97). --json mode also embeds the binary's tool count by booting an in-process MCP server and counting registered tools.","elided":"Each individual probe (obsidian, projects, state, index, domains, enrichment, synthesis, hook, agentctx schema) is one box per probe in our viz \u2014 not 11 separate steps.","entry_point":"operator runs `vv check [--json]`","packages":["cmd/vv","internal/check","internal/surface","internal/config","internal/context","internal/mcp"],"steps":[{"from":"cmd/vv","to":"internal/config","op":"mustLoadConfig","passes":"argv","ref":"cmd/vv/main.go:478"},{"from":"cmd/vv","to":"internal/check","op":"check.Run(cfg)","passes":"config","ref":"cmd/vv/main.go:479"},{"from":"internal/check","to":"obsidian-vault","op":"probe vault tree (.obsidian, Projects/, .vibe-vault/)","passes":"vault path","ref":"internal/check/check.go:120"},{"from":"internal/check","to":"internal/check","op":"CheckEnrichment / CheckSynthesis / CheckHook","passes":"config slices","ref":"internal/check/check.go:203"},{"from":"cmd/vv","to":"internal/check","op":"CheckAgentctxSchema + CheckWrapIterDrift","passes":"vault, project, cwd","ref":"cmd/vv/main.go:486"},{"from":"internal/check","to":"internal/check","op":"CheckToolchain (probe go, git, rg, ...)","passes":"$PATH","ref":"internal/check/toolchain.go"},{"from":"internal/check","to":"internal/surface","op":"CheckSurface vs vault stamps","passes":"vault path","ref":"internal/check/surface.go"},{"from":"cmd/vv","to":"internal/mcp","op":"(--json only) boot in-process MCP, count tools","passes":"ServerInfo + cfg","ref":"cmd/vv/main.go:516"},{"from":"cmd/vv","to":"claude-code","op":"stdout: human or JSON report","passes":"Report","ref":"cmd/vv/main.go:529"}]},{"slug":"index","label":"vv index (rebuild session-index.json)","kind":"cli","description":"Walks Projects/<p>/sessions/ across hosts, rebuilds session-index.json, then regenerates per-project history.md (the context doc consumed by inject/bootstrap).","entry_point":"operator runs `vv index`","packages":["cmd/vv","internal/config","internal/surface","internal/index"],"steps":[{"from":"cmd/vv","to":"internal/surface","op":"EnforceFailStop","passes":"vault path","ref":"cmd/vv/main.go:1567"},{"from":"cmd/vv","to":"internal/index","op":"index.Rebuild(ProjectsDir, StateDir)","passes":"paths","ref":"cmd/vv/main.go:1572"},{"from":"internal/index","to":"obsidian-vault","op":"walk Projects/*/sessions/**/*.md","passes":"vault tree","ref":"internal/index/rebuild.go"},{"from":"internal/index","to":"obsidian-vault","op":"atomic write session-index.json + per-project history.md","passes":"Index struct","ref":"internal/index/generate.go"}]},{"slug":"vault-pull","label":"vv vault pull","kind":"cli","description":"Auto-installs the surface merge driver, runs `git pull --rebase` on the vault repo, regenerates auto-generated files if the rebase touched them, and reports any DroppedUpstream content for `vv vault recover`.","entry_point":"operator runs `vv vault pull`","packages":["cmd/vv","internal/vaultsync","internal/index","obsidian-vault"],"steps":[{"from":"cmd/vv","to":"cmd/vv","op":"EnsureMergeDriverInstalled","passes":"vault path","ref":"cmd/vv/main.go:888"},{"from":"cmd/vv","to":"internal/vaultsync","op":"vaultsync.Pull(vaultPath)","passes":"vault path","ref":"internal/vaultsync/vaultsync.go:265"},{"from":"internal/vaultsync","to":"obsidian-vault","op":"git fetch + rebase + (stash pop)","passes":"(shell-out)","ref":"internal/vaultsync/vaultsync.go:265"},{"from":"cmd/vv","to":"internal/index","op":"(if regenerate) Rebuild + GenerateContext","passes":"paths","ref":"cmd/vv/main.go:904"},{"from":"cmd/vv","to":"claude-code","op":"stdout: 'pulled' / 'up to date' + warnings","passes":"result fields","ref":"cmd/vv/main.go:898"}]},{"slug":"vault-push","label":"vv vault push","kind":"cli","description":"Stages all dirty paths (or only --paths X --paths Y), creates one commit, and pushes to all configured remotes in a single network round-trip. Reports per-remote success/failure.","entry_point":"operator runs `vv vault push [--message ...] [--paths ...]`","packages":["cmd/vv","internal/vaultsync","obsidian-vault"],"steps":[{"from":"cmd/vv","to":"internal/vaultsync","op":"CommitAndPush or CommitAndPushPaths","passes":"vaultPath, msg, [paths]","ref":"cmd/vv/main.go:962"},{"from":"internal/vaultsync","to":"obsidian-vault","op":"git add + commit","passes":"(shell-out)","ref":"internal/vaultsync/vaultsync.go:377"},{"from":"internal/vaultsync","to":"obsidian-vault","op":"git push to each configured remote","passes":"remote list","ref":"internal/vaultsync/vaultsync.go:377"},{"from":"cmd/vv","to":"claude-code","op":"stdout: per-remote PushResult","passes":"RemoteResults map","ref":"cmd/vv/main.go:972"}]},{"slug":"vault-status","label":"vv vault status","kind":"cli","description":"Reports current branch, dirty state, and ahead/behind per remote for the vault git repo.","entry_point":"operator runs `vv vault status`","packages":["cmd/vv","internal/vaultsync","obsidian-vault"],"steps":[{"from":"cmd/vv","to":"internal/vaultsync","op":"vaultsync.GetStatus(vaultPath)","passes":"vault path","ref":"internal/vaultsync/vaultsync.go:197"},{"from":"internal/vaultsync","to":"obsidian-vault","op":"git status / rev-list per remote","passes":"(shell-out)","ref":"internal/vaultsync/vaultsync.go:197"},{"from":"cmd/vv","to":"claude-code","op":"stdout: branch, clean/dirty, remotes","passes":"Status struct","ref":"cmd/vv/main.go:869"}]},{"slug":"vault-sync-sessions","label":"vv vault sync-sessions","kind":"cli","description":"Mirrors each host-local staging dir into <vault>/Projects/<p>/sessions/<host>/, writes per-host index.json, and creates one LOCAL commit per project. No network push (deferred to `vv vault push`).","entry_point":"operator runs `vv vault sync-sessions [--project X | --all-projects]`","packages":["cmd/vv","internal/staging","internal/vaultsync","obsidian-vault"],"steps":[{"from":"cmd/vv","to":"internal/staging","op":"staging.SyncSessions(vaultPath, opts)","passes":"{vaultPath, Projects?}","ref":"internal/staging/sync_sessions.go:102"},{"from":"internal/staging","to":"internal/staging","op":"Mirror staging/<p>/ \u2192 vault Projects/<p>/sessions/<host>/","passes":"src, dst dirs","ref":"internal/staging/mirror.go"},{"from":"internal/staging","to":"internal/staging","op":"writePerHostIndex","passes":"destDir","ref":"internal/staging/sync_sessions.go:228"},{"from":"internal/staging","to":"internal/vaultsync","op":"CommitAndPushPaths(push=false)","passes":"per-host subtree","ref":"internal/staging/sync_sessions.go:174"},{"from":"internal/vaultsync","to":"obsidian-vault","op":"git add <subtree> + commit","passes":"(shell-out)","ref":"internal/vaultsync/vaultsync.go:442"},{"from":"cmd/vv","to":"claude-code","op":"stdout: per-project commit summary","passes":"SyncResult","ref":"cmd/vv/main.go:1031"}]},{"slug":"mcp-install","label":"vv mcp install","kind":"cli","description":"Auto-detects Claude Code (~/.claude/) and/or Zed (~/.config/zed/) and registers vibe-vault as an MCP server. With --claude-plugin uses the plugin marketplace path that works around Claude Code bug #2682.","elided":"Zed-only branch and uninstall path treated as variants of the same flow.","entry_point":"operator runs `vv mcp install [--claude-plugin | --claude-only | --zed-only]`","packages":["cmd/vv","internal/hook","internal/plugin","internal/config","claude-code"],"steps":[{"from":"cmd/vv","to":"internal/hook","op":"InstallMCPAll(claudeOnly, zedOnly) or InstallClaudePlugin","passes":"flags","ref":"cmd/vv/main.go:1441"},{"from":"internal/hook","to":"internal/hook","op":"claudeDetected / zedDetected probes","passes":"$HOME","ref":"internal/hook/setup.go:632"},{"from":"internal/hook","to":"internal/plugin","op":"(plugin path) plugin.Generate(version) + InstallToCache","passes":"version string","ref":"internal/hook/setup.go:692"},{"from":"internal/hook","to":"claude-code","op":"atomic update ~/.claude/settings.json (backup + write)","passes":"settings map","ref":"internal/hook/setup.go:716"},{"from":"internal/plugin","to":"claude-code","op":"(plugin path) register marketplace + installed plugin","passes":"marketplace dir","ref":"internal/plugin/plugin.go"},{"from":"cmd/vv","to":"claude-code","op":"stderr: 'Restart Claude Code to activate.'","passes":"msg","ref":"internal/hook/setup.go:747"}]},{"slug":"mcp-check","label":"vv mcp check","kind":"cli","description":"Boots an in-process MCP server, registers all tools, and runs the self-check suite (manifest validity, prompt registration, surface gate readiness).","entry_point":"operator runs `vv mcp check [--tools]`","packages":["cmd/vv","internal/mcp","internal/config"],"steps":[{"from":"cmd/vv","to":"internal/config","op":"mustLoadConfig","passes":"argv","ref":"cmd/vv/main.go:1479"},{"from":"cmd/vv","to":"internal/mcp","op":"NewServer + RegisterAllTools + SetInstructions","passes":"ServerInfo + cfg","ref":"cmd/vv/main.go:1481"},{"from":"cmd/vv","to":"internal/mcp","op":"RunChecks(srv)","passes":"server handle","ref":"cmd/vv/main.go:1488"},{"from":"cmd/vv","to":"claude-code","op":"stdout: [PASS|FAIL] per check","passes":"results slice","ref":"cmd/vv/main.go:1496"}]},{"slug":"config-set-key","label":"vv config set-key","kind":"cli","description":"Validates a provider API key (anthropic|openai|google|grok), then atomically writes it into ~/.config/vibe-vault/config.toml with 0600 permissions. Refuses to overwrite without --force.","entry_point":"operator runs `vv config set-key [--force] <provider> <key|->`","packages":["cmd/vv","internal/config"],"steps":[{"from":"cmd/vv","to":"cmd/vv","op":"validate provider name (whitelist)","passes":"argv","ref":"cmd/vv/config_setkey.go:65"},{"from":"cmd/vv","to":"cmd/vv","op":"readKeyValue (arg or stdin if '-')","passes":"key arg, stdin reader","ref":"cmd/vv/config_setkey.go:71"},{"from":"cmd/vv","to":"cmd/vv","op":"validateKey (length/charset)","passes":"key string","ref":"cmd/vv/config_setkey.go:75"},{"from":"cmd/vv","to":"internal/config","op":"loadFileIfPresent","passes":"config.toml path","ref":"cmd/vv/config_setkey.go:79"},{"from":"cmd/vv","to":"internal/config","op":"atomic write 0600 (tmp + rename)","passes":"TOML bytes","ref":"cmd/vv/config_setkey.go"},{"from":"cmd/vv","to":"claude-code","op":"stderr: confirmation","passes":"msg","ref":"cmd/vv/config_setkey.go"}]},{"slug":"backfill","label":"vv backfill (older sessions)","kind":"cli","description":"Discovers transcripts under ~/.claude/projects/ that aren't in session-index.json yet, captures them through the same session pipeline `vv hook` uses (but staging-rooted), and patches missing TranscriptPath fields on existing entries.","elided":"Per-entry skip/error reporting collapsed into one summary step.","entry_point":"operator runs `vv backfill [path]`","packages":["cmd/vv","internal/discover","internal/index","internal/session","internal/staging"],"steps":[{"from":"cmd/vv","to":"internal/discover","op":"discover.Discover(basePath)","passes":"~/.claude/projects/","ref":"cmd/vv/main.go:1624"},{"from":"cmd/vv","to":"internal/index","op":"index.Load(StateDir)","passes":"state dir","ref":"cmd/vv/main.go:1631"},{"from":"cmd/vv","to":"internal/session","op":"session.Capture for each new transcript","passes":"{TranscriptPath, StagingRoot}","ref":"cmd/vv/main.go:1653"},{"from":"internal/session","to":"internal/staging","op":"write note into staging tree","passes":"markdown","ref":"internal/staging/staging.go"},{"from":"internal/session","to":"internal/index","op":"save index incrementally","passes":"SessionEntry","ref":"internal/index/index.go"},{"from":"cmd/vv","to":"claude-code","op":"stdout: processed/skipped/errors","passes":"counters","ref":"cmd/vv/main.go:1682"}]},{"slug":"archive","label":"vv archive (compress old transcripts)","kind":"cli","description":"Iterates the session index and zstd-compresses each transcript JSONL into <state>/archive/, reporting size delta. Idempotent: already-archived entries are skipped.","entry_point":"operator runs `vv archive`","packages":["cmd/vv","internal/index","internal/archive","internal/discover"],"steps":[{"from":"cmd/vv","to":"internal/index","op":"index.Load(StateDir)","passes":"state dir","ref":"cmd/vv/main.go:1702"},{"from":"cmd/vv","to":"internal/discover","op":"fallback FindBySessionID when path missing","passes":"session id","ref":"cmd/vv/main.go:1717"},{"from":"cmd/vv","to":"internal/archive","op":"archive.IsArchived + archive.Archive (zstd)","passes":"src path + archive dir","ref":"cmd/vv/main.go:1729"},{"from":"internal/archive","to":"obsidian-vault","op":"(actually $STATE/archive/) write .zst file","passes":"compressed bytes","ref":"internal/archive/"},{"from":"cmd/vv","to":"claude-code","op":"stdout: archived/skipped + size delta","passes":"counters","ref":"cmd/vv/main.go:1752"}]},{"slug":"reprocess","label":"vv reprocess (re-enrich a session)","kind":"cli","description":"Walks the index, optionally filtered by --project / --source, and re-runs session.Capture with an LLM provider so previously-heuristic notes pick up enrichment. Has a --backfill-context shortcut to populate ContextAvailable on entries without LLM cost.","elided":"Dry-run reporting and Zed-source re-capture branch (reprocessZedEntry) noted as variants \u2014 happy path is Claude Code source.","entry_point":"operator runs `vv reprocess [--project X] [--source ...] [--dry-run] [--backfill-context]`","packages":["cmd/vv","internal/llm","internal/index","internal/session","internal/lockfile"],"steps":[{"from":"cmd/vv","to":"internal/lockfile","op":"(backfill-context) acquire index lock","passes":"lock path","ref":"cmd/vv/main.go:1772"},{"from":"cmd/vv","to":"internal/llm","op":"llm.NewProvider(cfg.Enrichment, providers)","passes":"config","ref":"cmd/vv/main.go:1799"},{"from":"cmd/vv","to":"internal/index","op":"index.Load(StateDir)","passes":"state dir","ref":"cmd/vv/main.go:1814"},{"from":"cmd/vv","to":"internal/session","op":"session.Capture per entry (with Provider)","passes":"CaptureOpts","ref":"internal/session/"},{"from":"internal/session","to":"internal/llm","op":"provider call: summary + decisions extraction","passes":"transcript text","ref":"internal/session/"},{"from":"internal/session","to":"obsidian-vault","op":"rewrite session markdown in staging","passes":"enriched note","ref":"internal/staging/staging.go"},{"from":"cmd/vv","to":"claude-code","op":"stdout: processed/skipped/errors","passes":"counters","ref":"cmd/vv/main.go"}]},{"slug":"stats","label":"vv stats","kind":"cli","description":"Load the session index, optionally filter by --source, compute per-project counters, and print a human table.","entry_point":"operator runs `vv stats [--project X] [--source X]`","packages":["cmd/vv","internal/index","internal/stats"],"steps":[{"from":"cmd/vv","to":"internal/index","op":"index.Load(StateDir)","passes":"state dir","ref":"cmd/vv/main.go:553"},{"from":"internal/index","to":"internal/index","op":"FilterBySource(entries, src)","passes":"entries, filter","ref":"internal/index/index_filter_test.go"},{"from":"cmd/vv","to":"internal/stats","op":"stats.Compute + stats.Format","passes":"filtered entries","ref":"cmd/vv/main.go:559"},{"from":"cmd/vv","to":"claude-code","op":"stdout: formatted table","passes":"string","ref":"cmd/vv/main.go:560"}]},{"slug":"friction","label":"vv friction","kind":"cli","description":"Same shape as `vv stats` but aggregates the per-session friction score (extracted at enrichment time) into per-project rankings.","entry_point":"operator runs `vv friction [--project X] [--source X]`","packages":["cmd/vv","internal/index","internal/friction"],"steps":[{"from":"cmd/vv","to":"internal/index","op":"index.Load(StateDir)","passes":"state dir","ref":"cmd/vv/main.go:574"},{"from":"cmd/vv","to":"internal/friction","op":"ComputeProjectFriction + Format","passes":"entries","ref":"cmd/vv/main.go:580"},{"from":"cmd/vv","to":"claude-code","op":"stdout: ranked table","passes":"string","ref":"cmd/vv/main.go:581"}]},{"slug":"trends","label":"vv trends","kind":"cli","description":"Rolling-window trend report (weekly buckets by default) showing direction of friction / volume / topics over recent sessions.","entry_point":"operator runs `vv trends [--project X] [--source X]`","packages":["cmd/vv","internal/index","internal/trends"],"steps":[{"from":"cmd/vv","to":"internal/index","op":"index.Load(StateDir)","passes":"state dir","ref":"cmd/vv/main.go"},{"from":"cmd/vv","to":"internal/trends","op":"trends.Compute(entries, project, weeks)","passes":"entries","ref":"internal/trends/"},{"from":"cmd/vv","to":"claude-code","op":"stdout: trend report","passes":"string","ref":"cmd/vv/main.go"}]},{"slug":"context-init","label":"vv context init","kind":"cli","description":"First-time agentctx scaffolding for the current project: writes .vibe-vault.toml marker, creates vault Projects/<project>/agentctx/ dir, drops template files (workflow, resume, iterations).","entry_point":"operator runs `vv context init [--project X] [--force]`","packages":["cmd/vv","internal/surface","internal/identity","internal/context","internal/templates"],"steps":[{"from":"cmd/vv","to":"internal/surface","op":"EnforceFailStop","passes":"vault path","ref":"cmd/vv/main.go:296"},{"from":"cmd/vv","to":"internal/identity","op":"ancestorMarker probe (nested-project guard)","passes":"cwd","ref":"cmd/vv/main.go:305"},{"from":"cmd/vv","to":"internal/context","op":"vvcontext.Init(cfg, cwd, opts)","passes":"{Project, Force}","ref":"cmd/vv/main.go:315"},{"from":"internal/context","to":"internal/templates","op":"read embedded agentctx/* templates","passes":"FS handle","ref":"internal/context/"},{"from":"internal/context","to":"obsidian-vault","op":"write .vibe-vault.toml + agentctx files","passes":"rendered content","ref":"internal/context/"},{"from":"cmd/vv","to":"claude-code","op":"stdout: action list + next steps","passes":"Result","ref":"cmd/vv/main.go:319"}]},{"slug":"context-migrate","label":"vv context migrate","kind":"cli","description":"Migrate an existing local-only agentctx tree (e.g. legacy .agentctx/) into the vault layout under Projects/<project>/agentctx/. Preserves local copies for manual cleanup.","entry_point":"operator runs `vv context migrate [--project X] [--force]`","packages":["cmd/vv","internal/identity","internal/context","internal/templates"],"steps":[{"from":"cmd/vv","to":"internal/identity","op":"FindMarker probe","passes":"cwd","ref":"cmd/vv/main.go:346"},{"from":"cmd/vv","to":"internal/context","op":"vvcontext.Migrate(cfg, cwd, opts)","passes":"Opts","ref":"cmd/vv/main.go:354"},{"from":"internal/context","to":"obsidian-vault","op":"copy/move existing local agentctx \u2192 vault path","passes":"paths","ref":"internal/context/"},{"from":"cmd/vv","to":"claude-code","op":"stdout: migration actions","passes":"Result","ref":"cmd/vv/main.go:358"}]},{"slug":"context-sync","label":"vv context sync","kind":"cli","description":"Re-stamp embedded shared commands/templates into every (or one) project's agentctx tree, advancing schema version where needed. Dry-run mode prints diffs without writing.","entry_point":"operator runs `vv context sync [--project X | --all] [--dry-run] [--force]`","packages":["cmd/vv","internal/context","internal/templates"],"steps":[{"from":"cmd/vv","to":"internal/context","op":"vvcontext.Sync(cfg, cwd, opts)","passes":"SyncOpts","ref":"cmd/vv/main.go:387"},{"from":"internal/context","to":"internal/templates","op":"diff embedded templates vs on-disk","passes":"FS handle","ref":"internal/context/"},{"from":"internal/context","to":"obsidian-vault","op":"atomic writes per template","passes":"rendered files","ref":"internal/context/"},{"from":"cmd/vv","to":"claude-code","op":"stdout: per-project schema delta + actions","passes":"SyncResult","ref":"cmd/vv/main.go:391"}]}]}</script>
+<script>
+(() => {
+  const DATA = JSON.parse(document.getElementById('flows-data').textContent);
+
+  // ---------- Graph layout (deterministic, dependency-ordered grid) ----------
+  // Group packages into columns by role. Order is left → right: caller, CLI,
+  // MCP / scaffolding, orchestration helpers, transport, storage/external.
+  const COLUMNS = [
+    {label: 'caller',       ids: ['claude-code']},
+    {label: 'CLI',          ids: ['cmd/vv']},
+    {label: 'dispatch',     ids: ['internal/hook', 'internal/mcp']},
+    {label: 'pipeline',     ids: ['internal/session', 'internal/synthesis', 'internal/inject', 'internal/context',
+                                  'internal/check', 'internal/scaffold']},
+    {label: 'helpers',      ids: ['internal/transcript', 'internal/llm', 'internal/staging', 'internal/index',
+                                  'internal/trends', 'internal/stats', 'internal/friction', 'internal/wraprender',
+                                  'internal/plugin', 'internal/templates', 'internal/agentctx',
+                                  'internal/discover', 'internal/archive', 'internal/sessionclaim',
+                                  'internal/lockfile', 'internal/identity', 'internal/surface',
+                                  'internal/config']},
+    {label: 'storage',      ids: ['internal/vaultsync']},
+    {label: 'external',     ids: ['obsidian-vault', 'transcript-jsonl']}
+  ];
+
+  const EXTERNAL_IDS = new Set(['claude-code', 'obsidian-vault', 'transcript-jsonl']);
+  const NODE_W = 168, NODE_H = 42, COL_W = 220, ROW_H = 56;
+  const PAD_LEFT = 30, PAD_TOP = 30;
+
+  // Build a node-id → {x,y,w,h} map.
+  const nodePos = new Map();
+  COLUMNS.forEach((col, ci) => {
+    col.ids.forEach((id, ri) => {
+      nodePos.set(id, {
+        x: PAD_LEFT + ci * COL_W,
+        y: PAD_TOP + ri * ROW_H,
+        w: NODE_W, h: NODE_H,
+        col: ci, row: ri
+      });
+    });
+  });
+
+  // Any package referenced in flows but not listed above? Stash them in a
+  // synthetic "misc" column on the far right so they still render.
+  const declaredIds = new Set();
+  COLUMNS.forEach(c => c.ids.forEach(i => declaredIds.add(i)));
+  const missing = DATA.packages.filter(p => !declaredIds.has(p.id));
+  if (missing.length) {
+    const ci = COLUMNS.length;
+    missing.forEach((p, ri) => {
+      nodePos.set(p.id, {x: PAD_LEFT + ci * COL_W, y: PAD_TOP + ri * ROW_H, w: NODE_W, h: NODE_H, col: ci, row: ri});
+    });
+  }
+
+  // Compute SVG canvas size and set viewBox.
+  const maxCol = Math.max(...[...nodePos.values()].map(p => p.col));
+  const maxRow = Math.max(...[...nodePos.values()].map(p => p.row));
+  const SVG_W = PAD_LEFT * 2 + (maxCol + 1) * COL_W;
+  const SVG_H = PAD_TOP * 2 + (maxRow + 1) * ROW_H + 40;
+  const svg = document.getElementById('graph');
+  svg.setAttribute('viewBox', `0 0 ${SVG_W} ${SVG_H}`);
+
+  // ---------- Render nodes ----------
+  const nodesG = document.getElementById('nodes');
+  const pkgById = Object.fromEntries(DATA.packages.map(p => [p.id, p]));
+  const nodeEls = new Map();
+  DATA.packages.forEach(p => {
+    const pos = nodePos.get(p.id);
+    if (!pos) return;
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'pkg' + (EXTERNAL_IDS.has(p.id) ? ' external' : ''));
+    g.setAttribute('data-id', p.id);
+    g.setAttribute('transform', `translate(${pos.x},${pos.y})`);
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('width', pos.w);
+    rect.setAttribute('height', pos.h);
+    rect.setAttribute('rx', 5);
+    g.appendChild(rect);
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', 9);
+    label.setAttribute('y', 17);
+    label.textContent = p.label;
+    g.appendChild(label);
+    const role = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    role.setAttribute('class', 'role');
+    role.setAttribute('x', 9);
+    role.setAttribute('y', 31);
+    // Truncate role to fit.
+    const r = p.role.length > 32 ? p.role.slice(0, 30) + '…' : p.role;
+    role.textContent = r;
+    g.appendChild(role);
+    // Tooltip via <title>
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    title.textContent = `${p.id} — ${p.role}\n${p.path}`;
+    g.appendChild(title);
+    nodesG.appendChild(g);
+    nodeEls.set(p.id, g);
+  });
+
+  // ---------- Edge routing ----------
+  // For each edge we draw a cubic Bezier from the right edge of `from` to the
+  // left edge of `to`. Self-edges (from == to) draw a small loop.
+  function edgePath(from, to) {
+    const a = nodePos.get(from), b = nodePos.get(to);
+    if (!a || !b) return null;
+    if (from === to) {
+      // Loop on the right side of the node.
+      const sx = a.x + a.w, sy = a.y + a.h * 0.3;
+      const ex = a.x + a.w, ey = a.y + a.h * 0.7;
+      return `M${sx},${sy} C${sx+40},${sy-10} ${ex+40},${ey+10} ${ex},${ey}`;
+    }
+    let sx, sy, ex, ey;
+    if (b.col >= a.col) {
+      sx = a.x + a.w; sy = a.y + a.h / 2;
+      ex = b.x;       ey = b.y + b.h / 2;
+    } else {
+      // Reverse direction (right-to-left): exit left side of `a`.
+      sx = a.x; sy = a.y + a.h / 2;
+      ex = b.x + b.w; ey = b.y + b.h / 2;
+    }
+    const dx = Math.abs(ex - sx);
+    const c = Math.max(40, dx * 0.35);
+    const c1x = sx + (b.col >= a.col ? c : -c);
+    const c2x = ex - (b.col >= a.col ? c : -c);
+    return `M${sx},${sy} C${c1x},${sy} ${c2x},${ey} ${ex},${ey}`;
+  }
+
+  // ---------- Sidebar ----------
+  const list = document.getElementById('action-list');
+  DATA.flows.forEach((f, i) => {
+    const li = document.createElement('li');
+    li.dataset.slug = f.slug;
+    li.innerHTML = `<span class="kind">${f.kind}</span><span class="label">${f.label}</span>`;
+    li.addEventListener('click', () => selectFlow(f.slug));
+    list.appendChild(li);
+  });
+
+  // ---------- Edge rendering for selected flow ----------
+  const edgesG = document.getElementById('edges');
+  const stepEls = [];
+  const edgeEls = [];
+
+  let currentSlug = null;
+
+  function clear() {
+    edgesG.innerHTML = '';
+    nodeEls.forEach(el => el.classList.remove('on'));
+    edgeEls.length = 0;
+    stepEls.length = 0;
+  }
+
+  function selectFlow(slug) {
+    if (currentSlug === slug) return;
+    currentSlug = slug;
+    const f = DATA.flows.find(x => x.slug === slug);
+    if (!f) return;
+
+    // Sidebar active state
+    list.querySelectorAll('li').forEach(li => {
+      li.classList.toggle('active', li.dataset.slug === slug);
+    });
+
+    // Details pane
+    document.getElementById('d-label').textContent = f.label;
+    document.getElementById('d-kind').innerHTML =
+      `<span class="pill">${f.kind}</span>` +
+      (f.entry_point ? `<span class="subtle">entry: ${escapeHTML(f.entry_point)}</span>` : '');
+    document.getElementById('d-desc').textContent = f.description;
+    const elided = document.getElementById('d-elided');
+    elided.innerHTML = f.elided ? `<div class="elided"><b>Elided:</b> ${escapeHTML(f.elided)}</div>` : '';
+
+    // Steps list
+    const stepsOl = document.getElementById('d-steps');
+    stepsOl.innerHTML = '';
+    f.steps.forEach((s, i) => {
+      const li = document.createElement('li');
+      li.dataset.idx = i;
+      li.innerHTML =
+        `<div class="pair">${escapeHTML(s.from)} → ${escapeHTML(s.to)}</div>` +
+        `<div class="op">${escapeHTML(s.op)}</div>` +
+        (s.passes ? `<div class="passes">passes: ${escapeHTML(s.passes)}</div>` : '') +
+        (s.ref ? `<div class="ref">${escapeHTML(s.ref)}</div>` : '');
+      li.addEventListener('mouseenter', () => focusStep(i));
+      li.addEventListener('mouseleave', () => focusStep(-1));
+      stepsOl.appendChild(li);
+      stepEls.push(li);
+    });
+
+    // Graph: highlight involved nodes
+    clear();
+    const touched = new Set(f.packages);
+    nodeEls.forEach((el, id) => {
+      el.classList.toggle('on', touched.has(id));
+    });
+
+    // Render edges in step order, with a tiny per-edge offset along the same
+    // (from,to) pair so duplicate edges fan out instead of overdrawing.
+    const seen = new Map(); // "from|to" → count
+    f.steps.forEach((s, i) => {
+      const key = s.from + '|' + s.to;
+      const nth = seen.get(key) || 0;
+      seen.set(key, nth + 1);
+
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('class', 'edge on');
+      g.dataset.idx = i;
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      let d = edgePath(s.from, s.to);
+      if (!d) { /* unknown node — skip */ }
+      else {
+        // Apply a small vertical offset on the midpoint by re-routing through
+        // a slightly different control-point set when nth > 0.
+        if (nth > 0 && s.from !== s.to) {
+          const a = nodePos.get(s.from), b = nodePos.get(s.to);
+          const sx = (b.col >= a.col ? a.x + a.w : a.x);
+          const sy = a.y + a.h / 2 + nth * 6 * ((nth % 2) ? 1 : -1);
+          const ex = (b.col >= a.col ? b.x : b.x + b.w);
+          const ey = b.y + b.h / 2 + nth * 6 * ((nth % 2) ? -1 : 1);
+          const c = Math.max(40, Math.abs(ex - sx) * 0.35);
+          const c1x = sx + (b.col >= a.col ? c : -c);
+          const c2x = ex - (b.col >= a.col ? c : -c);
+          d = `M${sx},${sy} C${c1x},${sy} ${c2x},${ey} ${ex},${ey}`;
+        }
+        path.setAttribute('d', d);
+        path.setAttribute('marker-end', 'url(#arrow-on)');
+        g.appendChild(path);
+
+        // Place the step number at the midpoint of the path.
+        // SVG path midpoint approximation: average of M and end coords.
+        const mAndEnd = d.match(/M(-?\d+\.?\d*),(-?\d+\.?\d*).*?(-?\d+\.?\d*),(-?\d+\.?\d*)$/);
+        if (mAndEnd) {
+          const mx = (parseFloat(mAndEnd[1]) + parseFloat(mAndEnd[3])) / 2;
+          const my = (parseFloat(mAndEnd[2]) + parseFloat(mAndEnd[4])) / 2 - 4;
+          const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          t.setAttribute('class', 'step-num');
+          t.setAttribute('x', mx);
+          t.setAttribute('y', my);
+          t.setAttribute('text-anchor', 'middle');
+          t.textContent = (i + 1).toString();
+          g.appendChild(t);
+
+          // Annotation underneath, when there's room (only for first edge per pair).
+          if (nth === 0 && s.passes && s.passes.length < 36) {
+            const a = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            a.setAttribute('class', 'annot');
+            a.setAttribute('x', mx);
+            a.setAttribute('y', my + 14);
+            a.setAttribute('text-anchor', 'middle');
+            a.textContent = s.passes;
+            g.appendChild(a);
+          }
+        }
+
+        g.addEventListener('mouseenter', () => focusStep(i));
+        g.addEventListener('mouseleave', () => focusStep(-1));
+        edgesG.appendChild(g);
+        edgeEls.push(g);
+      }
+    });
+  }
+
+  function focusStep(idx) {
+    stepEls.forEach((el, i) => el.classList.toggle('focus', i === idx));
+    edgeEls.forEach((el, i) => {
+      const isOn = (idx === -1) || (i === idx);
+      el.style.opacity = isOn ? '1' : '0.18';
+    });
+  }
+
+  function escapeHTML(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // Auto-select the first flow on load.
+  selectFlow(DATA.flows[0].slug);
+})();
+</script>
+</body>
+</html>
