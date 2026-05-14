@@ -40,17 +40,20 @@ var newProviderForFlowdoc = func(cfg config.Config) (llm.Provider, error) {
 // code; main.go's switch wires this through directly.
 func runFlowdoc(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: vv flowdoc <gen> [...]")
+		fmt.Fprintln(os.Stderr, "usage: vv flowdoc <gen|verify> [...]")
 		return 2
 	}
 	switch args[0] {
 	case "gen":
 		return runFlowdocGen(args[1:])
+	case "verify":
+		return runFlowdocVerify(args[1:])
 	case "--help", "-help", "-h", "help":
-		fmt.Fprintln(os.Stderr, "usage: vv flowdoc <gen> [...]")
+		fmt.Fprintln(os.Stderr, "usage: vv flowdoc <gen|verify> [...]")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "subcommands:")
-		fmt.Fprintln(os.Stderr, "  gen   Generate doc/flows.json + doc/FLOWS.html via LLM")
+		fmt.Fprintln(os.Stderr, "  gen      Generate doc/flows.json + doc/FLOWS.html via LLM")
+		fmt.Fprintln(os.Stderr, "  verify   Check doc/flows.json refs against the source tree (zero-LLM)")
 		return 0
 	default:
 		fmt.Fprintf(os.Stderr, "unknown flowdoc verb: %s\n", args[0])
@@ -263,6 +266,108 @@ func runFlowdocGen(args []string) int {
 		openInBrowser(htmlPath)
 	}
 
+	return 0
+}
+
+// parseFlowdocVerifyArgs parses the flag set for `vv flowdoc verify`. Only
+// --project is accepted (verify is zero-LLM, so no --model/--open). Errors
+// surface as a non-nil error so the caller controls the exit code.
+func parseFlowdocVerifyArgs(args []string) (string, error) {
+	var project string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--help", a == "-h", a == "-help":
+			return "", fmt.Errorf("help requested")
+		case a == "--project":
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("--project requires a value")
+			}
+			project = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--project="):
+			project = strings.TrimPrefix(a, "--project=")
+		default:
+			return "", fmt.Errorf("unknown flag: %s", a)
+		}
+	}
+	return project, nil
+}
+
+// runFlowdocVerify handles `vv flowdoc verify`. Returns the process exit
+// code.
+//
+// Behavior:
+//   - Resolves the project root the same way `gen` does (cwd → first
+//     ancestor with a .git entry, falling back to cwd). --project is
+//     accepted for parity but does not affect the doc/ location.
+//   - Reads <project-root>/doc/flows.json. Missing → stderr hint, return 1.
+//   - Unmarshals into flowdoc.FlowDoc. Parse failure → stderr, return 1.
+//   - Runs flowdoc.Validate (structural) first. Failure → stderr, return 1.
+//   - Runs flowdoc.VerifyRefs and prints FormatRefIssues.
+//   - Any hard error → return 1; warnings-only → return 0; clean → print a
+//     one-line summary and return 0.
+func runFlowdocVerify(args []string) int {
+	if _, err := parseFlowdocVerifyArgs(args); err != nil {
+		if err.Error() == "help requested" {
+			fmt.Fprintln(os.Stderr, "usage: vv flowdoc verify [--project <name>]")
+			return 0
+		}
+		fmt.Fprintf(os.Stderr, "flowdoc verify: %v\n", err)
+		fmt.Fprintln(os.Stderr, "usage: vv flowdoc verify [--project <name>]")
+		return 2
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "flowdoc verify: getwd: %v\n", err)
+		return 1
+	}
+
+	projectRoot := session.DetectProjectRoot(cwd)
+	if projectRoot == "" {
+		projectRoot = cwd
+	}
+
+	jsonPath := filepath.Join(projectRoot, "doc", "flows.json")
+	raw, err := os.ReadFile(jsonPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "flowdoc verify: no doc/flows.json found (run 'vv flowdoc gen' first)")
+		return 1
+	}
+
+	var doc flowdoc.FlowDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		fmt.Fprintf(os.Stderr, "flowdoc verify: parse %s: %v\n", jsonPath, err)
+		return 1
+	}
+
+	if err := flowdoc.Validate(&doc); err != nil {
+		fmt.Fprintf(os.Stderr, "flowdoc verify: %v\n", err)
+		return 1
+	}
+
+	issues := flowdoc.VerifyRefs(&doc, projectRoot)
+	report := flowdoc.FormatRefIssues(issues)
+
+	hasError := false
+	for _, i := range issues {
+		if i.IsError() {
+			hasError = true
+			break
+		}
+	}
+
+	if report != "" {
+		fmt.Print(report)
+	}
+
+	if hasError {
+		return 1
+	}
+	if len(issues) == 0 {
+		fmt.Printf("flowdoc verify: %d flows, %d nodes, no drift\n", len(doc.Flows), len(doc.Nodes))
+	}
 	return 0
 }
 

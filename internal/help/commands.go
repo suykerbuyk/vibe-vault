@@ -407,18 +407,18 @@ populate ContextAvailable data on historical sessions.`,
 
 var CmdFlowdoc = Command{
 	Name:       "flowdoc",
-	Synopsis:   "generate the flowdoc graph for the current project",
-	Brief:      "Generate flows.json + FLOWS.html via LLM",
-	Usage:      "vv flowdoc gen [--project <name>] [--model <name>] [--open]",
-	TableUsage: "vv flowdoc gen [...]",
+	Synopsis:   "generate and verify the flowdoc graph for the current project",
+	Brief:      "Generate flows.json + FLOWS.html via LLM; verify refs against the tree",
+	Usage:      "vv flowdoc gen [--project <name>] [--model <name>] [--open]\n    vv flowdoc verify [--project <name>]",
+	TableUsage: "vv flowdoc gen|verify [...]",
 	Flags: []Flag{
 		{Name: "--project <name>", Desc: "Override the auto-detected project name"},
-		{Name: "--model <name>", Desc: "Override the configured LLM model (default: grok-4-fast)"},
-		{Name: "--open", Desc: "Open the rendered HTML viewer after writing"},
+		{Name: "--model <name>", Desc: "Override the configured LLM model (gen only; default: grok-4-fast)"},
+		{Name: "--open", Desc: "Open the rendered HTML viewer after writing (gen only)"},
 	},
-	Description: `Sends the project's source tree, templates, and MCP prompts to the
-configured LLM with the flowdoc generator brief, parses and validates
-the returned JSON, and writes:
+	Description: `The 'gen' verb sends the project's source tree, templates, and MCP
+prompts to the configured LLM with the flowdoc generator brief, parses
+and validates the returned JSON, and writes:
 
   <project-root>/doc/flows.json    Indented FlowDoc v1 schema
   <project-root>/doc/FLOWS.html    Self-contained HTML viewer
@@ -428,12 +428,20 @@ binaries, templates, externals) and flows (slash commands, CLI verbs,
 hooks, pipeline stages) referencing each other by symbol-qualified
 path. See internal/flowdoc/types.go for the full schema.
 
-Requires LLM enrichment to be configured (any provider; the request
-sets MaxTokens=16384 and Temperature=0.0).`,
+'gen' requires LLM enrichment to be configured (any provider; the
+request sets MaxTokens=16384 and Temperature=0.0).
+
+The 'verify' verb is a deterministic, zero-LLM, zero-cost ref checker.
+It reads doc/flows.json and confirms every node path, flow node id,
+step from/to id, and step ref (path, path:line, path:Symbol) still
+resolves against the source tree. Hard errors (missing files, missing
+symbols, out-of-range lines, dangling node refs) exit 1; weak-match
+warnings (a path:line pointing inside a function body) exit 0.`,
 	Examples: []string{
 		"vv flowdoc gen                       Generate for current project",
 		"vv flowdoc gen --model claude-3-5    Override model",
 		"vv flowdoc gen --open                Open viewer after writing",
+		"vv flowdoc verify                    Check doc/flows.json for drift",
 	},
 	SeeAlso: []string{"vv(1)", "vv-effectiveness(1)"},
 }

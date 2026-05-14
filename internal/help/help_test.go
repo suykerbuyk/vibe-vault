@@ -329,18 +329,19 @@ var expectedTerminal = map[string]string{
 		"  vv effectiveness --project myproject   Show one project\n" +
 		"  vv effectiveness --format json         Output as JSON\n",
 
-	"flowdoc": "vv flowdoc \u2014 generate the flowdoc graph for the current project\n" +
+	"flowdoc": "vv flowdoc \u2014 generate and verify the flowdoc graph for the current project\n" +
 		"\n" +
 		"Usage: vv flowdoc gen [--project <name>] [--model <name>] [--open]\n" +
+		"    vv flowdoc verify [--project <name>]\n" +
 		"\n" +
 		"Flags:\n" +
 		"  --project <name>   Override the auto-detected project name\n" +
-		"  --model <name>     Override the configured LLM model (default: grok-4-fast)\n" +
-		"  --open             Open the rendered HTML viewer after writing\n" +
+		"  --model <name>     Override the configured LLM model (gen only; default: grok-4-fast)\n" +
+		"  --open             Open the rendered HTML viewer after writing (gen only)\n" +
 		"\n" +
-		"Sends the project's source tree, templates, and MCP prompts to the\n" +
-		"configured LLM with the flowdoc generator brief, parses and validates\n" +
-		"the returned JSON, and writes:\n" +
+		"The 'gen' verb sends the project's source tree, templates, and MCP\n" +
+		"prompts to the configured LLM with the flowdoc generator brief, parses\n" +
+		"and validates the returned JSON, and writes:\n" +
 		"\n" +
 		"  <project-root>/doc/flows.json    Indented FlowDoc v1 schema\n" +
 		"  <project-root>/doc/FLOWS.html    Self-contained HTML viewer\n" +
@@ -350,13 +351,21 @@ var expectedTerminal = map[string]string{
 		"hooks, pipeline stages) referencing each other by symbol-qualified\n" +
 		"path. See internal/flowdoc/types.go for the full schema.\n" +
 		"\n" +
-		"Requires LLM enrichment to be configured (any provider; the request\n" +
-		"sets MaxTokens=16384 and Temperature=0.0).\n" +
+		"'gen' requires LLM enrichment to be configured (any provider; the\n" +
+		"request sets MaxTokens=16384 and Temperature=0.0).\n" +
+		"\n" +
+		"The 'verify' verb is a deterministic, zero-LLM, zero-cost ref checker.\n" +
+		"It reads doc/flows.json and confirms every node path, flow node id,\n" +
+		"step from/to id, and step ref (path, path:line, path:Symbol) still\n" +
+		"resolves against the source tree. Hard errors (missing files, missing\n" +
+		"symbols, out-of-range lines, dangling node refs) exit 1; weak-match\n" +
+		"warnings (a path:line pointing inside a function body) exit 0.\n" +
 		"\n" +
 		"Examples:\n" +
 		"  vv flowdoc gen                       Generate for current project\n" +
 		"  vv flowdoc gen --model claude-3-5    Override model\n" +
-		"  vv flowdoc gen --open                Open viewer after writing\n",
+		"  vv flowdoc gen --open                Open viewer after writing\n" +
+		"  vv flowdoc verify                    Check doc/flows.json for drift\n",
 
 	"vault": "vv vault \u2014 vault git synchronization\n" +
 		"\n" +
@@ -566,7 +575,7 @@ func TestFormatUsage(t *testing.T) {
 		"  vv inject [--project X]          Output session-start context payload\n" +
 		"  vv export [--format X]           Export session data (JSON or CSV)\n" +
 		"  vv effectiveness [--project X]   Analyze context effectiveness on outcomes\n" +
-		"  vv flowdoc gen [...]             Generate flows.json + FLOWS.html via LLM\n" +
+		"  vv flowdoc gen|verify [...]      Generate flows.json + FLOWS.html via LLM; verify refs against the tree\n" +
 		"  vv memory [link | ...]           Link Claude Code auto-memory into vault\n" +
 		"  vv vault <command>               Vault git sync (pull, push, status, recover)\n" +
 		"  vv staging [init | ...]          Manage host-local staging dir (init, status, gc, migrate)\n" +

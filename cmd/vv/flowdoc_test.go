@@ -354,6 +354,299 @@ func TestRunFlowdocGen_UnknownFlag(t *testing.T) {
 	}
 }
 
+// --- vv flowdoc verify ---
+
+func TestParseFlowdocVerifyArgs(t *testing.T) {
+	if p, err := parseFlowdocVerifyArgs([]string{"--project", "foo"}); err != nil || p != "foo" {
+		t.Errorf("--project foo => (%q, %v), want (foo, nil)", p, err)
+	}
+	if p, err := parseFlowdocVerifyArgs([]string{"--project=bar"}); err != nil || p != "bar" {
+		t.Errorf("--project=bar => (%q, %v), want (bar, nil)", p, err)
+	}
+	if p, err := parseFlowdocVerifyArgs(nil); err != nil || p != "" {
+		t.Errorf("nil => (%q, %v), want (\"\", nil)", p, err)
+	}
+	if _, err := parseFlowdocVerifyArgs([]string{"--bogus"}); err == nil {
+		t.Error("expected error for unknown flag")
+	}
+	if _, err := parseFlowdocVerifyArgs([]string{"--project"}); err == nil {
+		t.Error("expected error for --project with no value")
+	}
+	if _, err := parseFlowdocVerifyArgs([]string{"--help"}); err == nil || err.Error() != "help requested" {
+		t.Errorf("--help => %v, want 'help requested'", err)
+	}
+}
+
+func TestRunFlowdocVerify_Help(t *testing.T) {
+	stderr, restore := captureStderr(t)
+	code := runFlowdocVerify([]string{"--help"})
+	restore()
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if !strings.Contains(stderr.String(), "usage: vv flowdoc verify") {
+		t.Errorf("expected usage on stderr, got %q", stderr.String())
+	}
+}
+
+func TestRunFlowdocVerify_UnknownFlag(t *testing.T) {
+	stderr, restore := captureStderr(t)
+	code := runFlowdocVerify([]string{"--bogus"})
+	restore()
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "unknown flag") {
+		t.Errorf("expected unknown-flag error on stderr, got %q", stderr.String())
+	}
+}
+
+func TestRunFlowdocVerify_NoFlowsJSON(t *testing.T) {
+	tmp := t.TempDir()
+	withChdir(t, tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	stderr, restoreErr := captureStderr(t)
+	_, restoreOut := captureStdout(t)
+	code := runFlowdocVerify(nil)
+	restoreOut()
+	restoreErr()
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "no doc/flows.json found") {
+		t.Errorf("expected 'no doc/flows.json found' on stderr, got %q", stderr.String())
+	}
+}
+
+func TestRunFlowdocVerify_InvalidJSON(t *testing.T) {
+	tmp := t.TempDir()
+	withChdir(t, tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "doc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "doc", "flows.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stderr, restoreErr := captureStderr(t)
+	_, restoreOut := captureStdout(t)
+	code := runFlowdocVerify(nil)
+	restoreOut()
+	restoreErr()
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "parse") {
+		t.Errorf("expected parse error on stderr, got %q", stderr.String())
+	}
+}
+
+func TestRunFlowdocVerify_ValidationFailure(t *testing.T) {
+	tmp := t.TempDir()
+	withChdir(t, tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "doc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Parseable but fails Validate: empty nodes[].
+	bad := `{"$schema_version":"1","project":"x","nodes":[],"flows":[]}`
+	if err := os.WriteFile(filepath.Join(tmp, "doc", "flows.json"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stderr, restoreErr := captureStderr(t)
+	_, restoreOut := captureStdout(t)
+	code := runFlowdocVerify(nil)
+	restoreOut()
+	restoreErr()
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "nodes must be non-empty") {
+		t.Errorf("expected validate error on stderr, got %q", stderr.String())
+	}
+}
+
+// goldenFlowsJSONPath walks up from the test cwd to the repo root and
+// returns the path to the flowdoc golden fixture.
+func goldenFlowsJSONPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		candidate := filepath.Join(dir, "internal", "flowdoc", "testdata", "golden", "vibe-vault-flows.json")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("could not locate golden fixture walking up from test cwd")
+		}
+		dir = parent
+	}
+}
+
+func TestRunFlowdocVerify_CleanGolden(t *testing.T) {
+	// The golden fixture's relative paths are anchored at the repo root,
+	// so the temp "project root" must BE the repo root for refs to
+	// resolve. Copy the golden into <repoRoot>/doc/flows.json is unsafe
+	// (pollutes the tree); instead chdir into the repo root and ensure
+	// doc/flows.json exists there for the duration of the test, restoring
+	// any pre-existing file afterward.
+	golden := goldenFlowsJSONPath(t)
+	// Walk up from the golden file to the module root (the dir with go.mod);
+	// that is the repo root the golden's relative paths are anchored at.
+	repoRoot := filepath.Dir(golden)
+	for {
+		if _, err := os.Stat(filepath.Join(repoRoot, "go.mod")); err == nil {
+			break
+		}
+		parent := filepath.Dir(repoRoot)
+		if parent == repoRoot {
+			t.Fatal("could not find go.mod walking up from golden fixture")
+		}
+		repoRoot = parent
+	}
+
+	docDir := filepath.Join(repoRoot, "doc")
+	flowsPath := filepath.Join(docDir, "flows.json")
+
+	// Preserve any existing doc/flows.json and doc/ dir state.
+	var savedContent []byte
+	hadFile := false
+	if b, err := os.ReadFile(flowsPath); err == nil {
+		savedContent = b
+		hadFile = true
+	}
+	hadDocDir := true
+	if _, err := os.Stat(docDir); err != nil {
+		hadDocDir = false
+	}
+	if err := os.MkdirAll(docDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(flowsPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if hadFile {
+			_ = os.WriteFile(flowsPath, savedContent, 0o644)
+		} else {
+			_ = os.Remove(flowsPath)
+			if !hadDocDir {
+				_ = os.Remove(docDir)
+			}
+		}
+	})
+
+	withChdir(t, repoRoot)
+
+	stdout, restoreOut := captureStdout(t)
+	stderr, restoreErr := captureStderr(t)
+	code := runFlowdocVerify(nil)
+	restoreOut()
+	restoreErr()
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (clean golden); stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	// The golden has weak-match warnings, so output is the warnings
+	// report rather than the "no drift" line. Either way, no errors.
+	out := stdout.String()
+	if strings.Contains(out, "errors (") {
+		t.Errorf("clean golden produced error lines: %q", out)
+	}
+}
+
+func TestRunFlowdocVerify_DriftDetected(t *testing.T) {
+	tmp := t.TempDir()
+	withChdir(t, tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "doc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Valid structurally, but a node points at a path that does not
+	// exist under the (empty) temp project root.
+	drift := `{
+  "$schema_version": "1",
+  "project": "drift-test",
+  "nodes": [
+    {"id": "ghost", "label": "ghost", "path": "internal/not/here.go", "language": "go", "layout_group": "g", "kind": "subsystem"}
+  ],
+  "flows": []
+}`
+	if err := os.WriteFile(filepath.Join(tmp, "doc", "flows.json"), []byte(drift), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, restoreOut := captureStdout(t)
+	_, restoreErr := captureStderr(t)
+	code := runFlowdocVerify(nil)
+	restoreOut()
+	restoreErr()
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1 (drift detected)", code)
+	}
+	if !strings.Contains(stdout.String(), "missing-file") {
+		t.Errorf("expected missing-file in report, got %q", stdout.String())
+	}
+}
+
+func TestRunFlowdocVerify_CleanNoDrift(t *testing.T) {
+	tmp := t.TempDir()
+	withChdir(t, tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "doc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A node whose path actually exists in the temp tree, no flows/refs:
+	// VerifyRefs returns zero issues, so verify prints the summary line.
+	if err := os.MkdirAll(filepath.Join(tmp, "internal", "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	clean := `{
+  "$schema_version": "1",
+  "project": "clean-test",
+  "nodes": [
+    {"id": "real", "label": "real", "path": "internal/real/", "language": "go", "layout_group": "g", "kind": "subsystem"}
+  ],
+  "flows": []
+}`
+	if err := os.WriteFile(filepath.Join(tmp, "doc", "flows.json"), []byte(clean), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, restoreOut := captureStdout(t)
+	_, restoreErr := captureStderr(t)
+	code := runFlowdocVerify(nil)
+	restoreOut()
+	restoreErr()
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if !strings.Contains(stdout.String(), "no drift") {
+		t.Errorf("expected 'no drift' summary, got %q", stdout.String())
+	}
+}
+
 func TestDefaultFlowdocModel(t *testing.T) {
 	if defaultFlowdocModel != "grok-4-fast" {
 		t.Errorf("defaultFlowdocModel = %q, want grok-4-fast", defaultFlowdocModel)
