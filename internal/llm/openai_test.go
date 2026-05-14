@@ -6,8 +6,10 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -110,5 +112,79 @@ func TestOpenAIName(t *testing.T) {
 	p, _ := NewOpenAI("http://localhost", "key", "model")
 	if p.Name() != "openai" {
 		t.Fatalf("got %q, want %q", p.Name(), "openai")
+	}
+}
+
+// TestOpenAIMaxTokens locks the wire-format contract for the MaxTokens
+// field: an explicit non-zero value renders as "max_tokens":<n> in the JSON
+// body, and the zero value omits the key entirely (omitempty) so the
+// upstream service applies its own default.
+func TestOpenAIMaxTokens(t *testing.T) {
+	cases := []struct {
+		name      string
+		req       Request
+		wantHas   bool
+		wantValue int
+	}{
+		{
+			name: "explicit non-zero appears on the wire",
+			req: Request{
+				System:     "sys",
+				UserPrompt: "hi",
+				MaxTokens:  1234,
+			},
+			wantHas:   true,
+			wantValue: 1234,
+		},
+		{
+			name: "zero omits max_tokens from the wire",
+			req: Request{
+				System:     "sys",
+				UserPrompt: "hi",
+			},
+			wantHas: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotRaw []byte
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var err error
+				gotRaw, err = io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("read body: %v", err)
+				}
+				resp := oaiResponse{
+					Choices: []oaiChoice{{Message: oaiMessage{Content: "ok"}}},
+				}
+				json.NewEncoder(w).Encode(resp)
+			}))
+			defer server.Close()
+
+			p, err := NewOpenAI(server.URL, "test-key", "gpt-4")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := p.ChatCompletion(context.Background(), tc.req); err != nil {
+				t.Fatalf("ChatCompletion: %v", err)
+			}
+
+			hasField := strings.Contains(string(gotRaw), `"max_tokens"`)
+			if hasField != tc.wantHas {
+				t.Fatalf("max_tokens present = %v, want %v; body=%s", hasField, tc.wantHas, string(gotRaw))
+			}
+			if tc.wantHas {
+				var probe struct {
+					MaxTokens int `json:"max_tokens"`
+				}
+				if err := json.Unmarshal(gotRaw, &probe); err != nil {
+					t.Fatalf("unmarshal body: %v", err)
+				}
+				if probe.MaxTokens != tc.wantValue {
+					t.Errorf("max_tokens = %d, want %d", probe.MaxTokens, tc.wantValue)
+				}
+			}
+		})
 	}
 }

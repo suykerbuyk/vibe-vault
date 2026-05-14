@@ -12,19 +12,27 @@ import (
 	"net/http"
 )
 
+// googleDefaultBaseURL is Gemini's canonical generateContent endpoint root.
+// Kept as a package-level constant so tests can construct a *Google addressed
+// at an httptest server by overriding the private baseURL field directly —
+// the public NewGoogle signature is unchanged.
+const googleDefaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
+
 // Google implements Provider for the Google Gemini REST API.
 type Google struct {
-	apiKey string
-	model  string
-	client *http.Client
+	baseURL string
+	apiKey  string
+	model   string
+	client  *http.Client
 }
 
 // NewGoogle creates a Google Gemini provider.
 func NewGoogle(apiKey, model string) (*Google, error) {
 	return &Google{
-		apiKey: apiKey,
-		model:  model,
-		client: &http.Client{},
+		baseURL: googleDefaultBaseURL,
+		apiKey:  apiKey,
+		model:   model,
+		client:  &http.Client{},
 	}, nil
 }
 
@@ -56,13 +64,21 @@ func (g *Google) ChatCompletion(ctx context.Context, req Request) (*Response, er
 		body.GenerationConfig.ResponseMimeType = "application/json"
 	}
 
+	// Gemini accepts maxOutputTokens as optional; omit when zero so the
+	// upstream service applies its own default. The struct field carries
+	// omitempty so the zero value is dropped from the marshalled JSON
+	// automatically.
+	if req.MaxTokens > 0 {
+		body.GenerationConfig.MaxOutputTokens = req.MaxTokens
+	}
+
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-		g.model, g.apiKey)
+	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s",
+		g.baseURL, g.model, g.apiKey)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
@@ -135,6 +151,7 @@ type geminiPart struct {
 
 type geminiGenConfig struct {
 	Temperature      float64 `json:"temperature"`
+	MaxOutputTokens  int     `json:"maxOutputTokens,omitempty"`
 	ResponseMimeType string  `json:"responseMimeType,omitempty"`
 }
 

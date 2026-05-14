@@ -30,6 +30,14 @@ type Request struct {
 	UserPrompt  string  // user message
 	Temperature float64 // 0.0–1.0
 	JSONMode    bool    // request JSON-formatted output
+
+	// MaxTokens caps the model's response length. The zero value means
+	// "use the provider's default": Anthropic requires the field on the
+	// wire and substitutes 4096; OpenAI, Grok (OpenAI-compatible), and
+	// Google omit the field from the request body entirely, letting the
+	// upstream service apply its own default. A non-zero value is passed
+	// through verbatim to every provider.
+	MaxTokens int
 }
 
 // Response holds the result of a chat completion call.

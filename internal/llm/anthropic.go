@@ -34,9 +34,17 @@ func (a *Anthropic) ChatCompletion(ctx context.Context, req Request) (*Response,
 		{Role: "user", Content: req.UserPrompt},
 	}
 
+	// Anthropic's Messages API requires max_tokens on the wire. Honour the
+	// caller's MaxTokens when non-zero; fall back to 4096 otherwise (the
+	// pre-MaxTokens default this provider always sent).
+	maxTokens := req.MaxTokens
+	if maxTokens == 0 {
+		maxTokens = 4096
+	}
+
 	body := anthropicRequest{
 		Model:       a.model,
-		MaxTokens:   4096,
+		MaxTokens:   maxTokens,
 		System:      req.System,
 		Messages:    messages,
 		Temperature: req.Temperature,

@@ -93,3 +93,41 @@ func TestNewGrok_RoundTrip(t *testing.T) {
 		t.Errorf("Authorization = %q, want \"Bearer test-key\"", gotAuth)
 	}
 }
+
+// TestNewGrok_MaxTokensOnWire confirms that Grok inherits the OpenAI provider's
+// MaxTokens plumbing: a non-zero value reaches the wire as "max_tokens":<n>.
+// Grok is a thin NewOpenAI wrapper, so this is a single-pass smoke test rather
+// than a full omit-when-zero matrix (that's covered by TestOpenAIMaxTokens).
+func TestNewGrok_MaxTokensOnWire(t *testing.T) {
+	var gotRaw []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		gotRaw, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		resp := oaiResponse{
+			Choices: []oaiChoice{{Message: oaiMessage{Content: "ok"}}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	p, err := NewGrok(srv.URL, "test-key", "grok-3-mini-fast")
+	if err != nil {
+		t.Fatalf("NewGrok: %v", err)
+	}
+
+	if _, err := p.ChatCompletion(context.Background(), Request{
+		System:     "sys",
+		UserPrompt: "hi",
+		MaxTokens:  1234,
+	}); err != nil {
+		t.Fatalf("ChatCompletion: %v", err)
+	}
+
+	if !strings.Contains(string(gotRaw), `"max_tokens":1234`) {
+		t.Errorf("body missing max_tokens=1234: %s", string(gotRaw))
+	}
+}

@@ -6,6 +6,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -127,4 +128,87 @@ func TestGoogleWithServer(t *testing.T) {
 
 	_ = ctx
 	_ = p
+}
+
+// TestGoogleMaxTokens locks the wire-format contract for the MaxTokens
+// field: an explicit non-zero value renders as
+// "generationConfig":{...,"maxOutputTokens":<n>,...}, and the zero value
+// omits the key entirely (omitempty) so the upstream service applies its
+// own default. Uses the private baseURL field to retarget the provider at
+// an httptest server without touching the public NewGoogle signature.
+func TestGoogleMaxTokens(t *testing.T) {
+	cases := []struct {
+		name      string
+		req       Request
+		wantHas   bool
+		wantValue int
+	}{
+		{
+			name: "explicit non-zero appears on the wire",
+			req: Request{
+				System:     "sys",
+				UserPrompt: "hi",
+				MaxTokens:  1234,
+			},
+			wantHas:   true,
+			wantValue: 1234,
+		},
+		{
+			name: "zero omits maxOutputTokens from the wire",
+			req: Request{
+				System:     "sys",
+				UserPrompt: "hi",
+			},
+			wantHas: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotRaw []byte
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var err error
+				gotRaw, err = io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("read body: %v", err)
+				}
+				resp := geminiResponse{
+					Candidates: []geminiCandidate{
+						{Content: geminiContent{Parts: []geminiPart{{Text: "ok"}}}},
+					},
+				}
+				_ = json.NewEncoder(w).Encode(resp)
+			}))
+			defer srv.Close()
+
+			p := &Google{
+				baseURL: srv.URL,
+				apiKey:  "test-key",
+				model:   "gemini-2.5-flash",
+				client:  srv.Client(),
+			}
+
+			if _, err := p.ChatCompletion(context.Background(), tc.req); err != nil {
+				t.Fatalf("ChatCompletion: %v", err)
+			}
+
+			hasField := strings.Contains(string(gotRaw), `"maxOutputTokens"`)
+			if hasField != tc.wantHas {
+				t.Fatalf("maxOutputTokens present = %v, want %v; body=%s", hasField, tc.wantHas, string(gotRaw))
+			}
+			if tc.wantHas {
+				var probe struct {
+					GenerationConfig struct {
+						MaxOutputTokens int `json:"maxOutputTokens"`
+					} `json:"generationConfig"`
+				}
+				if err := json.Unmarshal(gotRaw, &probe); err != nil {
+					t.Fatalf("unmarshal body: %v", err)
+				}
+				if probe.GenerationConfig.MaxOutputTokens != tc.wantValue {
+					t.Errorf("maxOutputTokens = %d, want %d", probe.GenerationConfig.MaxOutputTokens, tc.wantValue)
+				}
+			}
+		})
+	}
 }

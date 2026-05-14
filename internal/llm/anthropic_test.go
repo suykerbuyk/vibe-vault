@@ -91,6 +91,63 @@ func TestStripJSONFence(t *testing.T) {
 	}
 }
 
+// TestAnthropicMaxTokens locks the wire-format contract for the MaxTokens
+// field: an explicit non-zero value flows through verbatim, and the zero
+// value falls back to the provider's required default of 4096 (Anthropic
+// requires max_tokens on every request, so omitting it is not legal).
+func TestAnthropicMaxTokens(t *testing.T) {
+	cases := []struct {
+		name     string
+		req      Request
+		wantMax  int
+	}{
+		{
+			name: "explicit non-zero is passed through",
+			req: Request{
+				System:     "sys",
+				UserPrompt: "hi",
+				MaxTokens:  1234,
+			},
+			wantMax: 1234,
+		},
+		{
+			name: "zero falls back to 4096",
+			req: Request{
+				System:     "sys",
+				UserPrompt: "hi",
+			},
+			wantMax: 4096,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody anthropicRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					t.Fatalf("decode request body: %v", err)
+				}
+				resp := anthropicResponse{
+					Content: []anthropicContentBlock{{Type: "text", Text: "ok"}},
+				}
+				json.NewEncoder(w).Encode(resp)
+			}))
+			defer server.Close()
+
+			p, err := NewAnthropic(server.URL, "test-key", "claude")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := p.ChatCompletion(context.Background(), tc.req); err != nil {
+				t.Fatalf("ChatCompletion: %v", err)
+			}
+			if gotBody.MaxTokens != tc.wantMax {
+				t.Errorf("max_tokens = %d, want %d", gotBody.MaxTokens, tc.wantMax)
+			}
+		})
+	}
+}
+
 func TestAnthropicJSONModeStripsFences(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

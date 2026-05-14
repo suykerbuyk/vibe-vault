@@ -51,6 +51,12 @@ func (o *OpenAI) ChatCompletion(ctx context.Context, req Request) (*Response, er
 	if req.JSONMode {
 		body.ResponseFormat = &oaiRespFormat{Type: "json_object"}
 	}
+	// OpenAI accepts max_tokens as optional; omit when zero so the upstream
+	// service applies its own default. The struct field carries omitempty so
+	// the zero value is dropped from the marshalled JSON automatically.
+	if req.MaxTokens > 0 {
+		body.MaxTokens = req.MaxTokens
+	}
 
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -109,6 +115,7 @@ type oaiRequest struct {
 	Model          string         `json:"model"`
 	Messages       []oaiMessage   `json:"messages"`
 	Temperature    float64        `json:"temperature"`
+	MaxTokens      int            `json:"max_tokens,omitempty"`
 	ResponseFormat *oaiRespFormat `json:"response_format,omitempty"`
 }
 
