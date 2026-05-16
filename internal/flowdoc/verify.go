@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -79,6 +80,26 @@ type parsedRef struct {
 	symbol string // valid when form == refPathSymbol
 }
 
+// lastSingleColonIndex returns the index of the last ':' in s that is
+// neither preceded nor followed by another ':'. Returns -1 when no such
+// position exists. Used so refs like `dir:Type::method` split between
+// `dir` and `Type::method` rather than inside the scope qualifier.
+func lastSingleColonIndex(s string) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] != ':' {
+			continue
+		}
+		if i > 0 && s[i-1] == ':' {
+			continue
+		}
+		if i+1 < len(s) && s[i+1] == ':' {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
 // allDigits reports whether s is non-empty and entirely ASCII digits.
 func allDigits(s string) bool {
 	if s == "" {
@@ -92,15 +113,20 @@ func allDigits(s string) bool {
 	return true
 }
 
-// parseRef splits a step.ref on its LAST colon and classifies it:
+// parseRef splits a step.ref on its LAST single colon and classifies it:
 //   - "path"          → bare path
 //   - "path:123"      → path:line  (suffix is all digits)
 //   - "path:Symbol"   → path:Symbol (suffix is a non-empty non-numeric token)
 //
+// Colons that are part of a `::` (C++/Rust scope) sequence are NOT
+// candidate split points, so refs like `dir:Type::method` parse as
+// path=`dir`, symbol=`Type::method` rather than splitting inside the
+// scope qualifier.
+//
 // A trailing-empty suffix ("path:") or a ref with no colon both fall back
 // to the bare-path form.
 func parseRef(ref string) parsedRef {
-	idx := strings.LastIndex(ref, ":")
+	idx := lastSingleColonIndex(ref)
 	if idx < 0 {
 		return parsedRef{form: refBarePath, path: ref}
 	}
@@ -140,23 +166,222 @@ func readLines(name string) (lines []string, ok bool) {
 	return lines, true
 }
 
-// symbolDeclared reports whether content declares the Go symbol via a
-// func, method, or type/const/var form. The regex set is pragmatic — it
-// covers the overwhelming majority of real declarations.
-func symbolDeclared(content, symbol string) bool {
-	q := regexp.QuoteMeta(symbol)
-	patterns := []string{
-		`(?m)^\s*func\s+(\([^)]*\)\s+)?` + q + `\b`, // func Sym( / func (r T) Sym(
-		`(?m)^\s*type\s+` + q + `\b`,                // type Sym ... / type Sym=
-		`(?m)^\s*(const\s+|var\s+)?` + q + `\s*=`,   // [const|var] Sym = ... (single)
-		`(?m)^\s*(const\s+|var\s+)?` + q + `\s+\S`,  // [const|var] Sym Type ... (typed)
+// detectLangByPath returns a canonical language tag for the given
+// repo-relative path, or "" for an extension this verifier has no
+// declaration grammar for. The tag drives declPatterns dispatch.
+//
+// Recognized: go, c-family (C/C++/headers), cmake (CMakeLists.txt /
+// *.cmake), make (Makefile / GNUmakefile / *.mk), rust, python, node
+// (JavaScript / TypeScript). Anything else returns "".
+func detectLangByPath(rel string) string {
+	switch path.Base(rel) {
+	case "Makefile", "GNUmakefile":
+		return "make"
+	case "CMakeLists.txt":
+		return "cmake"
 	}
-	for _, p := range patterns {
-		if regexp.MustCompile(p).MatchString(content) {
+	switch strings.ToLower(path.Ext(rel)) {
+	case ".go":
+		return "go"
+	case ".c", ".h", ".cc", ".cpp", ".cxx", ".c++", ".hh", ".hpp", ".hxx", ".h++":
+		return "c-family"
+	case ".cmake":
+		return "cmake"
+	case ".mk":
+		return "make"
+	case ".rs":
+		return "rust"
+	case ".py":
+		return "python"
+	case ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx":
+		return "node"
+	}
+	return ""
+}
+
+// declPatterns returns the regex patterns (multi-line mode, with
+// regexp-quoted symbol q already substituted) that recognize a
+// declaration of symbol q in the given language. Returns nil for an
+// unknown language — symbolDeclared treats nil as "do not false-
+// positive" (see its doc).
+func declPatterns(lang, q string) []string {
+	switch lang {
+	case "go":
+		return []string{
+			`(?m)^\s*func\s+(\([^)]*\)\s+)?` + q + `\b`, // func Sym( / func (r T) Sym(
+			`(?m)^\s*type\s+` + q + `\b`,                // type Sym ... / type Sym=
+			`(?m)^\s*(const\s+|var\s+)?` + q + `\s*=`,   // [const|var] Sym = ... (single)
+			`(?m)^\s*(const\s+|var\s+)?` + q + `\s+\S`,  // [const|var] Sym Type ... (typed)
+		}
+	case "c-family":
+		return []string{
+			// function decl/def: line begins with type-prefix tokens (return
+			// type, qualifiers, namespace) ending in the symbol followed by
+			// `(`. RE2 has no lookahead, so a call site like `return
+			// foo();` also matches; that is accepted false-positive over
+			// false-negative — the verifier wants to confirm presence, not
+			// rule out call-site noise.
+			`(?m)^\s*[A-Za-z_][\w\s\*\&:<>,]*\b` + q + `\s*\(`,
+			`(?m)^\s*(class|struct|union|enum(\s+class)?)\s+` + q + `\b`,
+			`(?m)^\s*typedef\b[^;]*\b` + q + `\s*[;\[]`,
+			`(?m)^\s*#\s*define\s+` + q + `\b`,
+		}
+	case "cmake":
+		return []string{
+			`(?im)^\s*add_(executable|library|custom_target|subdirectory|test|dependencies)\s*\(\s*` + q + `\b`,
+			`(?im)^\s*(set|option|function|macro|project|find_package)\s*\(\s*` + q + `\b`,
+		}
+	case "make":
+		// Target lines: "<sym>: deps". Suppresses lines that are clearly
+		// variable assignments ("FOO := bar") by requiring the colon to be
+		// followed by something other than `=`.
+		return []string{
+			`(?m)^` + q + `\s*:(?:[^=]|$)`,
+		}
+	case "rust":
+		return []string{
+			`(?m)^\s*(pub(\s*\([^)]*\))?\s+)?(async\s+|const\s+|unsafe\s+|extern(\s+"[^"]*")?\s+)*fn\s+` + q + `[\s<\(]`,
+			`(?m)^\s*(pub(\s*\([^)]*\))?\s+)?(struct|enum|trait|type|mod|union)\s+` + q + `\b`,
+			`(?m)^\s*(pub(\s*\([^)]*\))?\s+)?(const|static)\s+` + q + `\s*[:=]`,
+			`(?m)^\s*impl\b[^{]*\b` + q + `\b`,
+			`(?m)^\s*macro_rules!\s+` + q + `\b`,
+		}
+	case "python":
+		return []string{
+			`(?m)^\s*(async\s+)?def\s+` + q + `\s*\(`,
+			`(?m)^\s*class\s+` + q + `[\s\(:]`,
+			`(?m)^` + q + `\s*[:=]`,
+		}
+	case "node":
+		return []string{
+			`(?m)^\s*(export\s+(default\s+)?)?(async\s+)?function\s*\*?\s+` + q + `\s*\(`,
+			`(?m)^\s*(export\s+(default\s+)?)?(abstract\s+)?class\s+` + q + `\b`,
+			`(?m)^\s*(export\s+)?(const|let|var)\s+` + q + `\b`,
+			`(?m)^\s*(export\s+(default\s+)?)?(type|interface|enum)\s+` + q + `\b`,
+		}
+	}
+	return nil
+}
+
+// dirSymbolFileSizeCap bounds how large a single file the directory
+// grep will load. Beyond this size the file is skipped — package-level
+// symbol resolution should not be at the mercy of a single oversized
+// generated file in the directory.
+const dirSymbolFileSizeCap = 1 << 20 // 1 MiB
+
+// dirSymbolMaxDepth bounds how deep into dir the recursive grep walks
+// for a package-style ref. Rust crates put code in `<crate>/src/...`
+// (depth 2+) and C/C++ projects in `<proj>/src/<sub>/...` (depth 3),
+// so a small depth cap captures the common idioms without scanning
+// unbounded subtrees. Common noise dirs (`vendor`, `target`, `dist`,
+// etc.) are pruned regardless of depth.
+const dirSymbolMaxDepth = 4
+
+// symbolFoundInDir reports whether any language-recognized file under
+// dir (within dirSymbolMaxDepth) declares symbol. Matches package-
+// style refs where the model names a crate / package directory and
+// the declaration lives one or two levels deeper in `src/` or a
+// nested submodule. Common build-output / dependency directories are
+// pruned. Files past dirSymbolFileSizeCap or with unknown extensions
+// are skipped.
+func symbolFoundInDir(dir, symbol string) bool {
+	return symbolFoundInDirAt(dir, symbol, 0)
+}
+
+func symbolFoundInDirAt(dir, symbol string, depth int) bool {
+	if depth > dirSymbolMaxDepth {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() {
+			if isNoisyDirName(name) {
+				continue
+			}
+			if symbolFoundInDirAt(filepath.Join(dir, name), symbol, depth+1) {
+				return true
+			}
+			continue
+		}
+		if detectLangByPath(name) == "" {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.Size() > dirSymbolFileSizeCap {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		if symbolDeclared(name, string(data), symbol) {
 			return true
 		}
 	}
 	return false
+}
+
+// isNoisyDirName reports whether name is a build-output / dependency /
+// hidden directory that should be skipped during recursive symbol
+// grep. The set mirrors repo.go's isNoisePath but operates on the
+// basename only since symbolFoundInDir walks one level at a time.
+func isNoisyDirName(name string) bool {
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
+	switch name {
+	case "vendor", "node_modules", "target", "build", "dist", "out",
+		"third_party", "assets", "share", "testdata":
+		return true
+	}
+	return false
+}
+
+// symbolDeclared reports whether content declares the named symbol
+// according to the per-language grammar selected by detectLangByPath
+// against rel. Unknown languages (no grammar in this set) return true
+// so the verifier does not produce false-positive missing-symbol
+// errors on file types it cannot read — extend declPatterns to add
+// strict checking for a new language.
+//
+// The grammars are deliberately regex-only (no real parser dep) — they
+// cover the overwhelming majority of real declarations and intentionally
+// prefer over-match (false pass) to false fail.
+func symbolDeclared(rel, content, symbol string) bool {
+	lang := detectLangByPath(rel)
+	for _, candidate := range symbolCandidates(symbol) {
+		patterns := declPatterns(lang, regexp.QuoteMeta(candidate))
+		if patterns == nil {
+			return true
+		}
+		for _, p := range patterns {
+			if regexp.MustCompile(p).MatchString(content) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// symbolCandidates expands a possibly-qualified symbol into the bare
+// identifiers a per-language grammar can match. Inputs like
+// `Type::method` (C++ / Rust) or `Module.Sub.func` (TS / Python) yield
+// the rightmost identifier in addition to the original, so the grammar
+// matches either the full qualifier or just the method/function name.
+// Returns the input itself if it has no qualifier separators.
+func symbolCandidates(symbol string) []string {
+	out := []string{symbol}
+	if i := strings.LastIndex(symbol, "::"); i >= 0 && i+2 < len(symbol) {
+		out = append(out, symbol[i+2:])
+	}
+	if i := strings.LastIndex(symbol, "."); i >= 0 && i+1 < len(symbol) {
+		out = append(out, symbol[i+1:])
+	}
+	return out
 }
 
 // VerifyRefs walks a FlowDoc and reports every ref that has drifted away
@@ -249,10 +474,25 @@ func verifyStepRef(slug string, stepNo int, ref, repoRoot string) (RefIssue, boo
 
 	switch pr.form {
 	case refBarePath:
-		if !pathExists(abs) {
-			return RefIssue{Kind: IssueMissingFile, Location: loc, Ref: ref, Detail: "file does not exist"}, true
+		if pathExists(abs) {
+			return RefIssue{}, false
 		}
-		return RefIssue{}, false
+		// File-missing fallback: the model often picks a plausible-
+		// but-wrong filename inside a real package directory. If the
+		// parent directory exists, the package name is at least real
+		// — downgrade to a weak-match warning rather than a hard
+		// missing-file error.
+		if parent := filepath.Dir(abs); parent != abs {
+			if pi, perr := os.Stat(parent); perr == nil && pi.IsDir() {
+				return RefIssue{
+					Kind:     IssueWeakMatch,
+					Location: loc,
+					Ref:      ref,
+					Detail:   fmt.Sprintf("file does not exist, but parent directory %s/ exists", filepath.Dir(pr.path)),
+				}, true
+			}
+		}
+		return RefIssue{Kind: IssueMissingFile, Location: loc, Ref: ref, Detail: "file does not exist"}, true
 
 	case refPathLine:
 		info, err := os.Stat(abs)
@@ -288,22 +528,63 @@ func verifyStepRef(slug string, stepNo int, ref, repoRoot string) (RefIssue, boo
 	case refPathSymbol:
 		info, err := os.Stat(abs)
 		if err != nil {
+			// File-missing fallback: a common generator pattern is to
+			// emit `dir/file.go:Sym` where `file.go` is wrong but the
+			// symbol lives in a sibling file in the same package. If
+			// the parent directory exists and any sibling declares the
+			// symbol, downgrade to a weak-match warning — the doc is
+			// drifted (wrong file name) but its intent resolves.
+			if parent := filepath.Dir(abs); parent != abs {
+				if pi, perr := os.Stat(parent); perr == nil && pi.IsDir() &&
+					symbolFoundInDir(parent, pr.symbol) {
+					return RefIssue{
+						Kind:     IssueWeakMatch,
+						Location: loc,
+						Ref:      ref,
+						Detail:   fmt.Sprintf("file does not exist, but symbol %q found elsewhere in %s/", pr.symbol, filepath.Dir(pr.path)),
+					}, true
+				}
+			}
 			return RefIssue{Kind: IssueMissingFile, Location: loc, Ref: ref, Detail: "file does not exist"}, true
 		}
 		if info.IsDir() {
+			// Package-style ref: `internal/foo:Symbol` — grep every
+			// language-recognized file directly under the directory for
+			// the symbol. This matches how the flowdoc generator
+			// canonically refers to package-scoped declarations whose
+			// specific file is incidental.
+			if symbolFoundInDir(abs, pr.symbol) {
+				return RefIssue{}, false
+			}
 			return RefIssue{
 				Kind:     IssueMissingSymbol,
 				Location: loc,
 				Ref:      ref,
-				Detail:   "path is a directory, cannot resolve symbol",
+				Detail:   fmt.Sprintf("symbol %q not declared in any file under directory", pr.symbol),
 			}, true
 		}
 		data, err := os.ReadFile(abs)
 		if err != nil {
 			return RefIssue{Kind: IssueMissingFile, Location: loc, Ref: ref, Detail: "file could not be read"}, true
 		}
-		if symbolDeclared(string(data), pr.symbol) {
+		if symbolDeclared(pr.path, string(data), pr.symbol) {
 			return RefIssue{}, false
+		}
+		// Sibling-fallback: file exists and is correct, but the symbol
+		// lives in a sibling file in the same package. Common when the
+		// model picks an entry-point file but the helper is split out.
+		// Downgrade to weak-match — the package name is right, only
+		// the precise file is off.
+		if parent := filepath.Dir(abs); parent != abs {
+			if pi, perr := os.Stat(parent); perr == nil && pi.IsDir() &&
+				symbolFoundInDir(parent, pr.symbol) {
+				return RefIssue{
+					Kind:     IssueWeakMatch,
+					Location: loc,
+					Ref:      ref,
+					Detail:   fmt.Sprintf("symbol %q not in this file but found elsewhere in %s/", pr.symbol, filepath.Dir(pr.path)),
+				}, true
+			}
 		}
 		return RefIssue{
 			Kind:     IssueMissingSymbol,

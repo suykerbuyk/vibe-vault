@@ -274,6 +274,34 @@ func TestValidate_AllLanguageEnumValues(t *testing.T) {
 	}
 }
 
+// TestValidate_LanguageAliasesNormalize asserts colloquial spellings the
+// generator might emit (e.g. "c++", "golang") are normalized to the
+// canonical enum value during Validate, so the persisted doc is always
+// canonical.
+func TestValidate_LanguageAliasesNormalize(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"c++", "cpp"},
+		{"golang", "go"},
+		{"py", "python"},
+		{"python3", "python"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			doc := validDoc()
+			doc.Nodes[0].Language = tc.input
+			if err := Validate(doc); err != nil {
+				t.Fatalf("alias %q rejected: %v", tc.input, err)
+			}
+			if doc.Nodes[0].Language != tc.want {
+				t.Errorf("alias %q normalized to %q, want %q", tc.input, doc.Nodes[0].Language, tc.want)
+			}
+		})
+	}
+}
+
 // TestValidate_AllNodeKindEnumValues exercises every accepted node kind.
 func TestValidate_AllNodeKindEnumValues(t *testing.T) {
 	for kind := range validNodeKinds {

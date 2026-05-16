@@ -36,6 +36,21 @@ var (
 		"external": {},
 	}
 
+	// languageAliases maps common colloquial spellings to the canonical
+	// enum value above. Validate normalizes a node's Language through
+	// this table before enum-membership checking so the model is not
+	// rejected for writing "c++" when the schema canonicalizes on "cpp".
+	languageAliases = map[string]string{
+		"c++":        "cpp",
+		"golang":     "go",
+		"py":         "python",
+		"python3":    "python",
+		"javascript": "data", // no JS/TS enum yet — collapse to data
+		"typescript": "data",
+		"js":         "data",
+		"ts":         "data",
+	}
+
 	validNodeKinds = map[string]struct{}{
 		"subsystem": {},
 		"binary":    {},
@@ -147,6 +162,10 @@ func validateNodes(nodes []Node) (map[string]struct{}, error) {
 		}
 		if n.Language == "" {
 			return nil, fmt.Errorf("flowdoc: nodes[%d] (id=%q) language must be non-empty", i, n.ID)
+		}
+		if canonical, aliased := languageAliases[n.Language]; aliased {
+			nodes[i].Language = canonical
+			n.Language = canonical
 		}
 		if _, ok := validLanguages[n.Language]; !ok {
 			return nil, fmt.Errorf("flowdoc: nodes[%d] (id=%q) language %q is not a valid enum value", i, n.ID, n.Language)

@@ -1,0 +1,4 @@
+/* Fixture for the unknown-extension fallback path.
+   detectLangByPath returns "" for .unknown; symbolDeclared returns
+   true (assume present), so missing-symbol is never reported. */
+this file has no parseable declaration anywhere

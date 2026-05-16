@@ -97,12 +97,55 @@ fences.
 
 # ref policy
 
-Use path:Symbol where Symbol is the bare function or type name — NOT
-"func Symbol" or "type Symbol", just the identifier (e.g.
-"internal/session/capture.go:Capture", not ":func Capture"). The
-verifier resolves Symbol against declarations in the file and a
-"func "-prefixed string never matches. Line numbers drift across
-refactors — avoid them. Fall back to the bare path when no symbol applies.
+A step.ref points the reader at a precise location in the code. Three
+forms, in order of preference:
+
+1. PACKAGE FORM (preferred): "<directory>:Symbol"
+   - directory is the enclosing package/folder.
+   - Symbol is a BARE identifier — function, type, target, class.
+   - Example: "internal/inject:Build", "cmd/rezbldr:cmdCheck",
+     "src:run_pipeline", "internal/hook:Install".
+   - Use this whenever the symbol is package-scoped — i.e. the
+     specific file is incidental and may change across refactors.
+   - The verifier greps every language-recognized file directly
+     under the directory and accepts the ref if any file declares
+     the symbol. This is the robust form.
+
+2. FILE FORM: "<dir>/<file>:Symbol"
+   - Use ONLY when you have actually read the specific file with
+     read_file or located the symbol with grep, and the file pinning
+     matters (e.g. one of multiple methods with the same name).
+   - Do NOT guess the filename. If you have not opened that exact
+     file, switch to PACKAGE FORM instead.
+
+3. BARE PATH: "<path>"
+   - No symbol. Use only when the entire file or directory is the
+     point and no single declaration is meaningful.
+
+Symbol grammar — every Symbol must satisfy ALL of:
+
+- bare identifier: matches [A-Za-z_][A-Za-z0-9_-]*  (and Make / CMake
+  targets like "build" or "recmeet-daemon" fit too).
+- NO "func " / "fn " / "def " / "class " / "type " prefix — only the
+  identifier itself.
+- NO Class::method or Module.Sub.func qualifier — strip to just the
+  rightmost identifier (the verifier doesn't parse qualifiers).
+- NO parenthetical descriptions, spaces, or call-argument noise like
+  "on (process.stream)" — that is prose, not a symbol; either pick
+  the real declared name or omit the :Symbol suffix entirely.
+
+Line numbers (path:123) drift across refactors — avoid them. Read
+before you cite: every Symbol you emit should be one you have seen in
+a file via read_file or grep, not one inferred from package
+conventions or a similar test name.
+
+Tool / handler / route names registered as string literals (e.g.
+mcp.NewTool("search_meetings", …) , router.GET("/foo", handler) ,
+addEventListener("click", …)) are NOT symbols. The symbol is the Go
+/ TypeScript / Rust identifier on the same call — the handler
+function passed in, or the surrounding Register / NewTool function
+that defines the registration table. Ref the surrounding declared
+symbol (or the bare package path), not the string literal.
 
 # Ground-truth sources
 
