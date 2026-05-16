@@ -1,11 +1,15 @@
 {
-  "iter_n": 236,
-  "anchor_sha": "6886ca688f880847a9ffbea191d87c3af75740a2",
+  "iter_n": 238,
+  "anchor_sha": "1428fb11b647d991690d3d0e79b9292009568b86",
   "active": [
     "claude-code-tool-selection-telemetry",
     "flowdoc-command",
+    "flowdoc-completeness-audit",
+    "flowdoc-gen-source-ingestion",
     "flowdoc-verify-lint",
+    "flowdoc-verify-multi-language-symbol-grammar",
     "mcp-call-tracing",
+    "worktree-gc-default-candidate-parents-drops-current-branch",
     "wrap-integration-spike"
   ],
   "done": [
