@@ -13,7 +13,7 @@ const BriefAgenticAddendum = `
 
 # Tool use
 
-This run exposes three tools you can call to explore the project:
+This run exposes four tools you can call:
 
 - read_file(path)              — read one file's contents (max 1 MiB; binary
                                   files refused).
@@ -21,11 +21,45 @@ This run exposes three tools you can call to explore the project:
                                   up to 50 matches per call.
 - list_dir(path, [recursive])  — directory listing; pass path="" for the
                                   project root.
+- check_ref(ref)               — verify a single step.ref string against
+                                  the project — returns {ok: true} when
+                                  it resolves cleanly, or {ok: false,
+                                  severity, kind, detail} when it does
+                                  not. Use this BEFORE emitting any ref.
 
-Explore the project at your own pace. The tools see only the kept set
-of source files — gitignored entries, submodule gitlinks, and
-committed-noise directories (vendor/, dist/, build/, etc.) are filtered
-out.
+Explore the project at your own pace with read_file / grep / list_dir.
+They see only the kept set of source files — gitignored entries,
+submodule gitlinks, and committed-noise directories (vendor/, dist/,
+build/, etc.) are filtered out.
+
+# Ref hygiene (REQUIRED)
+
+For every step.ref you intend to put in the final flows.json, call
+check_ref(ref) first. The response tells you whether the ref will
+resolve when the operator runs vv flowdoc verify:
+
+- {ok: true}                         — ship as-is.
+- {ok: false, severity: "warning"}   — the file pin is imprecise but
+                                       the symbol exists nearby; consider
+                                       switching to the PACKAGE FORM
+                                       (dir:Symbol) to clean up.
+- {ok: false, severity: "error"}     — the ref does NOT resolve. Common
+                                       fixes by kind:
+    * missing-file        — the path does not exist. Use list_dir to
+                            confirm; switch to a real path or drop the
+                            ref. For third-party / external deps, use
+                            kind:"external" with path:"(external)".
+    * missing-symbol      — the symbol is not declared in (or under) the
+                            named path. Use grep to find where it
+                            actually lives; if it is a string-literal
+                            tool/handler/route name, ref the surrounding
+                            REAL function symbol instead.
+    * out-of-range-line   — line number drifted; replace with a
+                            path:Symbol ref or drop the line.
+
+Do NOT emit a final flows.json containing refs you have not check_ref'd.
+A {ok: false, severity: "error"} that reaches the operator's vv flowdoc
+verify run is a Brief violation by you, not a verifier bug.
 
 # Final response — CRITICAL
 

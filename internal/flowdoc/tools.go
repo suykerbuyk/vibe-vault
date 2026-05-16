@@ -29,17 +29,25 @@ const grepHitCap = 50
 
 // NewRepoViewTools returns the tool catalogue (Tools) and the dispatcher
 // (Executor) that drive an llm.AgenticProvider.RunTools loop over a
-// RepoView. Three tools are exposed:
+// RepoView. Four tools are exposed:
 //
 //   - read_file(path)               → contents of one kept file
 //   - grep(pattern, [path_prefix])  → up to grepHitCap matching lines
 //   - list_dir(path, [recursive])   → directory entries, derived from the flat listing
+//   - check_ref(ref)                → verify a step.ref resolves before emitting it
 //
-// All three delegate to existing RepoView accessors (ReadFile, Search,
-// and the Files listing) so the agentic path inherits the same
+// The first three delegate to existing RepoView accessors (ReadFile,
+// Search, and the Files listing) so the agentic path inherits the same
 // filter-class semantics as the single-shot path: gitignored / gitlink /
 // committed-noise files are invisible to the model, and oversize files
 // can be listed but never read.
+//
+// check_ref runs the same logic as `vv flowdoc verify` against a single
+// ref, returning a structured {ok, severity, kind, detail} result. It
+// lets the model catch its own ref mistakes (wrong file, missing
+// symbol, invented identifier, stray string-literal name) inside the
+// loop, before they end up in the emitted flows.json — far cheaper
+// than a wasted final emission or post-hoc retry.
 func NewRepoViewTools(view RepoView) ([]llm.ToolSpec, llm.ToolExecutor) {
 	tools := []llm.ToolSpec{
 		{
@@ -57,6 +65,11 @@ func NewRepoViewTools(view RepoView) ([]llm.ToolSpec, llm.ToolExecutor) {
 			Description: "List the entries directly under a project directory. With recursive=true, returns all descendants of the directory instead of just direct children. Pass path=\"\" or path=\".\" to list the project root. Directory entries are returned with a trailing slash; file entries are bare basenames (non-recursive) or full relative paths (recursive). Use this to discover what is in a subsystem before deciding which files to read.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"repo-relative directory path; \"\" or \".\" means the project root"},"recursive":{"type":"boolean","description":"when true, return all descendants; default false"}}}`),
 		},
+		{
+			Name:        "check_ref",
+			Description: "Verify a single step.ref string against the project source — the same lint vv flowdoc verify runs. Returns {ok:true} when the ref resolves cleanly, or {ok:false, severity, kind, detail} when it does not. severity is \"error\" (blocking — verify would fail) or \"warning\" (weak-match — file pin is imprecise but the symbol exists in the package). Call this on every step.ref BEFORE the final flows.json emission. The cost is one tool call per ref; the savings is not emitting a flows.json that verify would reject.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"ref":{"type":"string","description":"a step.ref string, e.g. \"internal/inject:Build\" or \"src/main.cpp:run_pipeline\""}},"required":["ref"]}`),
+		},
 	}
 
 	exec := func(name string, input json.RawMessage) (json.RawMessage, bool) {
@@ -67,11 +80,52 @@ func NewRepoViewTools(view RepoView) ([]llm.ToolSpec, llm.ToolExecutor) {
 			return execGrep(view, input)
 		case "list_dir":
 			return execListDir(view, input)
+		case "check_ref":
+			return execCheckRef(view, input)
 		default:
 			return errorPayload(fmt.Sprintf("unknown tool: %q", name)), true
 		}
 	}
 	return tools, exec
+}
+
+// execCheckRef handles the check_ref tool: unmarshal the input, run
+// verifyStepRef against the RepoView's root, and return a structured
+// {ok, severity, kind, detail} JSON payload. The agent uses this to
+// catch its own ref mistakes inside the loop.
+func execCheckRef(view RepoView, input json.RawMessage) (json.RawMessage, bool) {
+	var args struct {
+		Ref string `json:"ref"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return errorPayload(fmt.Sprintf("invalid input: %v", err)), true
+	}
+	if args.Ref == "" {
+		return errorPayload("ref is required"), true
+	}
+	issue, hasIssue := verifyStepRef("<check_ref>", 0, args.Ref, view.Root)
+	if !hasIssue {
+		b, _ := json.Marshal(struct {
+			OK bool `json:"ok"`
+		}{OK: true})
+		return b, false
+	}
+	severity := "error"
+	if !issue.IsError() {
+		severity = "warning"
+	}
+	b, _ := json.Marshal(struct {
+		OK       bool   `json:"ok"`
+		Severity string `json:"severity"`
+		Kind     string `json:"kind"`
+		Detail   string `json:"detail"`
+	}{
+		OK:       false,
+		Severity: severity,
+		Kind:     string(issue.Kind),
+		Detail:   issue.Detail,
+	})
+	return b, false
 }
 
 // errorPayload marshals a uniform { "error": "<msg>" } JSON object. The

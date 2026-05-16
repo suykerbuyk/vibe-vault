@@ -722,8 +722,8 @@ func TestRunFlowdocGen_AgenticHappyPath(t *testing.T) {
 	if fake.lastReq.Model != "claude-haiku-4-5" {
 		t.Errorf("agentic model = %q, want claude-haiku-4-5", fake.lastReq.Model)
 	}
-	if len(fake.lastReq.Tools) != 3 {
-		t.Errorf("tool catalogue size = %d, want 3", len(fake.lastReq.Tools))
+	if len(fake.lastReq.Tools) != 4 {
+		t.Errorf("tool catalogue size = %d, want 4", len(fake.lastReq.Tools))
 	}
 	if fake.lastReq.ToolExecutor == nil {
 		t.Error("ToolExecutor should be set")
@@ -788,6 +788,7 @@ func TestRunFlowdocGen_AgenticDryRun(t *testing.T) {
 		"read_file",
 		"grep",
 		"list_dir",
+		"check_ref",
 		"Tool use",
 		"INITIAL USER PROMPT",
 		"list_dir(\"\")",
