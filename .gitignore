@@ -8,4 +8,6 @@
 !/.claude/agents/
 !/.claude/agents/**
 man/*.1
+/.vibe-palace/
+/flowgen-test-results.md
 

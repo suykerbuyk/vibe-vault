@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>flowdoc viewer</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f7f8fa;
+    --panel-2: #eef0f3;
+    --ink: #1f2937;
+    --ink-dim: #6b7280;
+    --border: #d1d5db;
+    --border-soft: #e5e7eb;
+    --accent: #2563eb;
+    --accent-bg: #dbeafe;
+    --edge: #9ca3af;
+    --edge-on: #2563eb;
+    --node-fill: #f3f4f6;
+    --node-fill-on: #dbeafe;
+    --node-stroke: #d1d5db;
+    --node-stroke-on: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    font-size: 13px; line-height: 1.45;
+  }
+  #layout {
+    display: grid;
+    grid-template-columns: 260px 1fr 340px;
+    height: 100vh;
+  }
+  #sidebar, #details {
+    background: var(--panel);
+    overflow-y: auto;
+    padding: 14px 16px;
+  }
+  #sidebar { border-right: 1px solid var(--border-soft); }
+  #details { border-left: 1px solid var(--border-soft); }
+  #viz {
+    position: relative;
+    overflow: auto;
+    background: var(--bg);
+  }
+  h1 { font-size: 14px; margin: 0 0 6px 0; font-weight: 600; }
+  h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--ink-dim); margin: 16px 0 6px 0; font-weight: 600;
+  }
+  p { margin: 0 0 8px 0; }
+  .subtle { color: var(--ink-dim); font-size: 11px; }
+  .meta { color: var(--ink-dim); font-size: 11px; margin: 2px 0 8px 0; }
+  ul.flows { list-style: none; margin: 0; padding: 0; }
+  ul.flows li {
+    padding: 8px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-bottom: 3px;
+    border: 1px solid transparent;
+    transition: background 0.08s, border-color 0.08s;
+  }
+  ul.flows li:hover { background: var(--panel-2); }
+  ul.flows li.active {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+  }
+  ul.flows li .label {
+    display: block;
+    color: var(--ink);
+  }
+  .chip {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    color: var(--ink-dim);
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    letter-spacing: 0.03em;
+    margin-right: 4px;
+  }
+  svg#graph {
+    width: 100%; height: 100%; display: block;
+    min-width: 600px; min-height: 400px;
+  }
+  svg .node rect {
+    fill: var(--node-fill);
+    stroke: var(--node-stroke);
+    stroke-width: 1.2;
+  }
+  svg .node text {
+    fill: var(--ink);
+    font-size: 11px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  svg .node .group {
+    fill: var(--ink-dim);
+    font-size: 9px;
+  }
+  svg .node.highlighted rect {
+    fill: var(--node-fill-on);
+    stroke: var(--node-stroke-on);
+    stroke-width: 1.8;
+  }
+  svg .edge path {
+    fill: none;
+    stroke: var(--edge-on);
+    stroke-width: 1.4;
+    opacity: 0.85;
+  }
+  svg .edge .op-label {
+    font-size: 9px;
+    fill: var(--ink);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  svg .edge .op-label-bg {
+    fill: var(--bg);
+    fill-opacity: 0.85;
+  }
+  ol.steps {
+    list-style: none; padding-left: 0; margin: 0;
+    counter-reset: step;
+  }
+  ol.steps li {
+    padding: 7px 9px 7px 30px;
+    margin-bottom: 4px;
+    border-radius: 3px;
+    background: var(--bg);
+    border: 1px solid var(--border-soft);
+    position: relative;
+  }
+  ol.steps li::before {
+    counter-increment: step;
+    content: counter(step);
+    position: absolute; left: 8px; top: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  ol.steps .pair {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--ink);
+  }
+  ol.steps .op { margin-top: 2px; color: var(--ink); }
+  ol.steps .passes {
+    color: var(--ink-dim); font-size: 10px; margin-top: 2px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  ol.steps .ref {
+    color: var(--ink-dim); font-size: 9.5px; margin-top: 2px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  #empty {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%;
+    color: var(--ink-dim);
+    font-size: 14px;
+  }
+  #d-hint {
+    color: var(--ink-dim);
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+<div id="layout">
+  <aside id="sidebar">
+    <h1 id="title">Flows</h1>
+    <p class="subtle" id="subtitle"></p>
+    <ul class="flows" id="flow-list"></ul>
+  </aside>
+
+  <main id="viz">
+    <svg id="graph" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+        </marker>
+      </defs>
+      <g id="g-edges"></g>
+      <g id="g-nodes"></g>
+    </svg>
+    <div id="empty" style="display:none">No flows in this document.</div>
+  </main>
+
+  <aside id="details">
+    <h1 id="d-label">Select a flow</h1>
+    <p id="d-hint">Click a flow on the left to see its description, entry point, and steps.</p>
+    <p class="meta" id="d-kind" style="display:none"></p>
+    <p id="d-desc" style="display:none"></p>
+    <p class="meta" id="d-entry" style="display:none"></p>
+    <h2 id="d-steps-h" style="display:none">Steps</h2>
+    <ol class="steps" id="d-steps"></ol>
+  </aside>
+</div>
+
+<script>const FLOWS = {"$schema_version":"1","project":"vibe-vault","generated_at":"2024-12-19T10:00:00Z","generator":"vv flowdoc gen","nodes":[{"id":"cmd/vv","label":"vv CLI","role":"Main entry point for all CLI commands","path":"cmd/vv","language":"go","layout_group":"entry-points","kind":"binary"},{"id":"internal/hook","label":"Hook Handler","role":"Processes Claude Code session end/stop events from stdin","path":"internal/hook","language":"go","layout_group":"capture","kind":"library"},{"id":"internal/session","label":"Session Capture","role":"Parses transcripts, detects projects, extracts narratives, writes notes","path":"internal/session","language":"go","layout_group":"capture","kind":"library"},{"id":"internal/transcript","label":"Transcript Parser","role":"Parses JSONL transcripts from Claude Code or Zed","path":"internal/transcript","language":"go","layout_group":"parsing","kind":"library"},{"id":"internal/narrative","label":"Narrative Extraction","role":"Segments tool activity and extracts intent-driven summaries","path":"internal/narrative","language":"go","layout_group":"enrichment","kind":"library"},{"id":"internal/prose","label":"Dialogue Extraction","role":"Extracts user/assistant conversation turns","path":"internal/prose","language":"go","layout_group":"enrichment","kind":"library"},{"id":"internal/friction","label":"Friction Analysis","role":"Detects user corrections and computes friction scores","path":"internal/friction","language":"go","layout_group":"analytics","kind":"library"},{"id":"internal/render","label":"Markdown Renderer","role":"Renders structured session data into Obsidian markdown notes","path":"internal/render","language":"go","layout_group":"output","kind":"library"},{"id":"internal/index","label":"Session Index","role":"Maintains in-memory session registry and cross-linking logic","path":"internal/index","language":"go","layout_group":"state","kind":"library"},{"id":"internal/llm","label":"LLM Enrichment","role":"Calls OpenAI-compatible APIs for summary, decisions, threads","path":"internal/llm","language":"go","layout_group":"enrichment","kind":"library"},{"id":"internal/enrichment","label":"Enrichment Prompt","role":"Builds LLM prompt from transcript data","path":"internal/enrichment","language":"go","layout_group":"enrichment","kind":"library"},{"id":"internal/synthesis","label":"Session Synthesis","role":"End-of-session judgment layer: learnings, stale detection, task updates","path":"internal/synthesis","language":"go","layout_group":"analytics","kind":"library"},{"id":"internal/stats","label":"Statistics","role":"Computes metrics, costs, and tool effectiveness","path":"internal/stats","language":"go","layout_group":"analytics","kind":"library"},{"id":"internal/trends","label":"Trend Analysis","role":"Computes weekly metric trends and anomaly detection","path":"internal/trends","language":"go","layout_group":"analytics","kind":"library"},{"id":"internal/discover","label":"Transcript Discovery","role":"Scans directories for historical JSONL transcripts","path":"internal/discover","language":"go","layout_group":"utility","kind":"library"},{"id":"internal/archive","label":"Transcript Archive","role":"Compresses transcripts with zstd (~10:1 ratio)","path":"internal/archive","language":"go","layout_group":"utility","kind":"library"},{"id":"internal/staging","label":"Staging Directory","role":"Routes session notes to host-local staging before vault sync","path":"internal/staging","language":"go","layout_group":"vault-sync","kind":"library"},{"id":"internal/vaultsync","label":"Vault Git Sync","role":"Pull/push/merge vault changes across machines","path":"internal/vaultsync","language":"go","layout_group":"vault-sync","kind":"library"},{"id":"internal/mcp","label":"MCP Server","role":"Model Context Protocol server for AI agent access to sessions and context","path":"internal/mcp","language":"go","layout_group":"agent-integration","kind":"library"},{"id":"internal/context","label":"Context Management","role":"Initialize and sync vault-resident AI context (resume, tasks, commands)","path":"internal/context","language":"go","layout_group":"vault-structure","kind":"library"},{"id":"internal/scaffold","label":"Vault Scaffold","role":"Creates vault directory structure and initial templates","path":"internal/scaffold","language":"go","layout_group":"vault-structure","kind":"library"},{"id":"internal/config","label":"Configuration","role":"Loads and manages config.toml settings","path":"internal/config","language":"go","layout_group":"utility","kind":"library"},{"id":"internal/identity","label":"Project Identity","role":"Detects project name from .vibe-vault.toml or git remote","path":"internal/identity","language":"go","layout_group":"utility","kind":"library"},{"id":"internal/sessionsource","label":"Session Source Registry","role":"Pluggable source registry for Claude Code, Zed, and other session inputs","path":"internal/sessionsource","language":"go","layout_group":"capture","kind":"library"},{"id":"internal/zed","label":"Zed Integration","role":"Parse Zed agent threads from threads.db, extract narrative and dialogue","path":"internal/zed","language":"go","layout_group":"agent-integration","kind":"library"},{"id":"internal/sessionclaim","label":"Session Claim","role":"Multi-host session coordination via project-root cache files","path":"internal/sessionclaim","language":"go","layout_group":"state","kind":"library"},{"id":"internal/effectiveness","label":"Effectiveness Analysis","role":"Analyzes context availability correlation with session outcomes","path":"internal/effectiveness","language":"go","layout_group":"analytics","kind":"library"},{"id":"internal/inject","label":"Context Injection","role":"Builds markdown or JSON context summaries for /restart payload","path":"internal/inject","language":"go","layout_group":"agent-integration","kind":"library"},{"id":"internal/check","label":"Diagnostics","role":"Validates config, vault, hooks, toolchain, and surface version","path":"internal/check","language":"go","layout_group":"utility","kind":"library"},{"id":"internal/memory","label":"Memory Symlink","role":"Links Claude Code auto-memory into vault","path":"internal/memory","language":"go","layout_group":"vault-structure","kind":"library"},{"id":"internal/atomicfile","label":"Atomic Write","role":"Writes notes atomically with vault surface-version stamping","path":"internal/atomicfile","language":"go","layout_group":"utility","kind":"library"},{"id":"internal/templates","label":"Template Management","role":"Manages vault template files with diff/reset/show operations","path":"internal/templates","language":"go","layout_group":"vault-structure","kind":"library"}],"flows":[{"slug":"session-end-hook","label":"SessionEnd Hook Capture","kind":"hook","description":"Claude Code fires SessionEnd when a session concludes. The hook reads JSON from stdin, parses the transcript, detects project and metadata, extracts narrative and prose, optionally enriches via LLM, computes friction, renders markdown, writes to vault (or staging), updates the session index, runs synthesis, and refreshes context docs.","entry_point":"SessionEnd","nodes":["cmd/vv","internal/hook","internal/session","internal/transcript","internal/narrative","internal/prose","internal/friction","internal/llm","internal/enrichment","internal/render","internal/index","internal/synthesis","internal/staging","internal/sessionclaim","internal/config","internal/identity","internal/stats"],"steps":[{"from":"cmd/vv","to":"internal/hook","op":"dispatch","ref":"cmd/vv/main.go:runHook"},{"from":"internal/hook","to":"internal/hook","op":"calls","ref":"internal/hook:Handle"},{"from":"internal/hook","to":"internal/session","op":"calls","passes":"TranscriptPath, CWD, SessionID","ref":"internal/session:Capture"},{"from":"internal/session","to":"internal/transcript","op":"calls","passes":"TranscriptPath","ref":"internal/transcript:ParseFile"},{"from":"internal/session","to":"internal/identity","op":"calls","passes":"CWD","ref":"internal/identity:FindMarker"},{"from":"internal/session","to":"internal/narrative","op":"calls","passes":"Transcript, CWD","ref":"internal/narrative:Extract"},{"from":"internal/session","to":"internal/prose","op":"calls","passes":"Transcript, CWD","ref":"internal/prose:Extract"},{"from":"internal/session","to":"internal/friction","op":"calls","passes":"Dialogue, Narrative, Stats","ref":"internal/friction:Analyze"},{"from":"internal/session","to":"internal/llm","op":"calls","passes":"Transcript metadata","ref":"internal/llm:NewProvider"},{"from":"internal/session","to":"internal/enrichment","op":"calls","passes":"Transcript, narrative context","ref":"internal/enrichment:Generate"},{"from":"internal/session","to":"internal/stats","op":"calls","passes":"Narrative segments","ref":"internal/stats:AnalyzeTools"},{"from":"internal/session","to":"internal/index","op":"calls","passes":"SessionID","ref":"internal/index:Load"},{"from":"internal/session","to":"internal/render","op":"calls","passes":"Transcript, narrative, prose, enrichment, friction","ref":"internal/render:SessionNote"},{"from":"internal/session","to":"internal/staging","op":"calls","passes":"StagingRoot, project name","ref":"internal/staging:EnsureInitAt"},{"from":"internal/session","to":"internal/atomicfile","op":"calls","passes":"Markdown, vault path","ref":"internal/atomicfile:Write"},{"from":"internal/session","to":"internal/sessionclaim","op":"calls","passes":"ProjectRoot, SessionID","ref":"internal/sessionclaim:UpdateHarnessSessionID"},{"from":"internal/session","to":"internal/index","op":"calls","passes":"SessionEntry","ref":"internal/index:Add"},{"from":"internal/hook","to":"internal/synthesis","op":"calls","passes":"NotePath, CWD, Project, Provider, Index","ref":"internal/synthesis:Run"},{"from":"internal/hook","to":"internal/index","op":"calls","passes":"Config, vault path","ref":"internal/index:GenerateContext"}]},{"slug":"stop-checkpoint-hook","label":"Stop/PreCompact Checkpoint Hook","kind":"hook","description":"Claude Code fires Stop (mid-session) or PreCompact (before context compression) to create provisional checkpoints. Unlike SessionEnd, these skip LLM enrichment and get overwritten by subsequent checkpoints or finalized by SessionEnd.","entry_point":"Stop","nodes":["cmd/vv","internal/hook","internal/session","internal/transcript","internal/narrative","internal/index","internal/staging"],"steps":[{"from":"cmd/vv","to":"internal/hook","op":"dispatch","ref":"cmd/vv/main.go:runHook"},{"from":"internal/hook","to":"internal/session","op":"calls","passes":"TranscriptPath, Checkpoint=true, SkipEnrichment=true","ref":"internal/session:Capture"},{"from":"internal/session","to":"internal/transcript","op":"calls","passes":"TranscriptPath","ref":"internal/transcript:ParseFile"},{"from":"internal/session","to":"internal/narrative","op":"calls","passes":"Transcript, CWD","ref":"internal/narrative:Extract"},{"from":"internal/session","to":"internal/index","op":"calls","passes":"SessionID","ref":"internal/index:Load"},{"from":"internal/session","to":"internal/staging","op":"calls","passes":"StagingRoot, project","ref":"internal/staging:Commit"}]},{"slug":"vv-init","label":"vv init [path]","kind":"cli-verb","description":"Scaffolds a new Obsidian vault or adopts an existing one, creates default config at ~/.config/vibe-vault/config.toml, and guides user through setup (hook install, MCP install, plugin installation).","entry_point":"vv init","nodes":["cmd/vv","internal/scaffold","internal/config"],"steps":[{"from":"cmd/vv","to":"internal/scaffold","op":"calls","passes":"target path, git flag","ref":"cmd/vv/main.go:runInit"},{"from":"internal/scaffold","to":"internal/scaffold","op":"calls","ref":"internal/scaffold:Init"},{"from":"cmd/vv","to":"internal/config","op":"calls","passes":"vault path","ref":"internal/config:WriteDefault"}]},{"slug":"vv-process","label":"vv process \u003cfile.jsonl\u003e","kind":"cli-verb","description":"Processes a single transcript file, routing through the same capture pipeline as the hook but under manual control (useful for backfilling or testing).","entry_point":"vv process","nodes":["cmd/vv","internal/session","internal/transcript","internal/narrative","internal/prose","internal/llm","internal/render","internal/index","internal/staging"],"steps":[{"from":"cmd/vv","to":"internal/config","op":"calls","ref":"cmd/vv/main.go:runProcess"},{"from":"cmd/vv","to":"internal/llm","op":"calls","ref":"internal/llm:NewProvider"},{"from":"cmd/vv","to":"internal/session","op":"calls","passes":"TranscriptPath, Config, Provider","ref":"internal/session:Capture"}]},{"slug":"vv-backfill","label":"vv backfill [path]","kind":"cli-verb","description":"Discovers historical transcripts in ~/.claude/projects/ (or custom path), deduplicates against the session index, processes each new transcript through the capture pipeline, and patches TranscriptPath on index entries that lack it.","entry_point":"vv backfill","nodes":["cmd/vv","internal/discover","internal/index","internal/session","internal/staging"],"steps":[{"from":"cmd/vv","to":"internal/discover","op":"calls","passes":"base path","ref":"cmd/vv/main.go:runBackfill"},{"from":"internal/discover","to":"internal/discover","op":"calls","ref":"internal/discover:Discover"},{"from":"cmd/vv","to":"internal/index","op":"calls","ref":"internal/index:Load"},{"from":"cmd/vv","to":"internal/session","op":"calls","passes":"each transcript path, StagingRoot","ref":"internal/session:Capture"}]},{"slug":"vv-archive","label":"vv archive","kind":"cli-verb","description":"Compresses unarchived transcripts using zstd (~10:1 ratio), stores in .vibe-vault/archive/, and tracks compression metadata. Enables long-term storage without disk overhead.","entry_point":"vv archive","nodes":["cmd/vv","internal/index","internal/archive"],"steps":[{"from":"cmd/vv","to":"internal/index","op":"calls","ref":"cmd/vv/main.go:runArchive"},{"from":"cmd/vv","to":"internal/archive","op":"calls","passes":"transcript path, archive dir","ref":"internal/archive:Archive"}]},{"slug":"vv-reprocess","label":"vv reprocess [--project X]","kind":"cli-verb","description":"Re-generates session notes from stored transcripts, applying current vv version and optionally new LLM enrichment. Supports dry-run, project filtering, and source filtering (Claude Code vs Zed). Gracefully handles archived transcripts via decompress.","entry_point":"vv reprocess","nodes":["cmd/vv","internal/index","internal/session","internal/archive","internal/llm","internal/zed"],"steps":[{"from":"cmd/vv","to":"internal/index","op":"calls","ref":"cmd/vv/main.go:runReprocess"},{"from":"cmd/vv","to":"internal/llm","op":"calls","ref":"internal/llm:NewProvider"},{"from":"cmd/vv","to":"internal/archive","op":"calls","passes":"session ID, archive dir","ref":"internal/archive:Decompress"},{"from":"cmd/vv","to":"internal/session","op":"calls","passes":"each transcript, Force=true, Provider","ref":"internal/session:Capture"},{"from":"cmd/vv","to":"internal/zed","op":"calls","passes":"zed entries","ref":"internal/zed:QueryThread"}]},{"slug":"vv-index","label":"vv index","kind":"cli-verb","description":"Rebuilds the session-index.json from scratch by scanning the vault Projects/ directory, reading frontmatter from all session notes, deduplicating by session_id, and regenerating context documents (history.md).","entry_point":"vv index","nodes":["cmd/vv","internal/index"],"steps":[{"from":"cmd/vv","to":"internal/index","op":"calls","ref":"cmd/vv/main.go:runIndex"},{"from":"internal/index","to":"internal/index","op":"calls","ref":"internal/index:Rebuild"},{"from":"internal/index","to":"internal/index","op":"calls","ref":"internal/index:GenerateContext"}]},{"slug":"vv-stats","label":"vv stats [--project X]","kind":"cli-verb","description":"Computes and displays session analytics: project count, model distribution, total sessions, activity timeline, token usage, tool usage, and session duration. Supports per-project filtering and source filtering.","entry_point":"vv stats","nodes":["cmd/vv","internal/index","internal/stats"],"steps":[{"from":"cmd/vv","to":"internal/index","op":"calls","ref":"cmd/vv/main.go:runStats"},{"from":"cmd/vv","to":"internal/stats","op":"calls","passes":"entries, project filter","ref":"internal/stats:Compute"}]},{"slug":"vv-friction","label":"vv friction [--project X]","kind":"cli-verb","description":"Analyzes correction patterns and friction signals: user negations, redirects, undo requests, quality complaints. Scores sessions on 0-100 scale and identifies high-friction sessions for investigation.","entry_point":"vv friction","nodes":["cmd/vv","internal/index","internal/friction"],"steps":[{"from":"cmd/vv","to":"internal/index","op":"calls","ref":"cmd/vv/main.go:runFriction"},{"from":"cmd/vv","to":"internal/friction","op":"calls","passes":"entries, project filter","ref":"internal/friction:ComputeProjectFriction"}]},{"slug":"vv-trends","label":"vv trends [--project X] [--weeks N]","kind":"cli-verb","description":"Computes weekly metric trends (friction, messages, tokens, tool uses, duration) with anomaly detection and direction indicators (↑ ↓ →). Tracks velocity and efficiency changes over time.","entry_point":"vv trends","nodes":["cmd/vv","internal/index","internal/trends"],"steps":[{"from":"cmd/vv","to":"internal/index","op":"calls","ref":"cmd/vv/main.go:runTrends"},{"from":"cmd/vv","to":"internal/trends","op":"calls","passes":"entries, project, weeks","ref":"internal/trends:Compute"}]},{"slug":"vv-inject","label":"vv inject [--project X] [--format md|json] [--max-tokens N]","kind":"cli-verb","description":"Builds condensed project context for /restart payload: recent sessions, open threads, key decisions, friction trends. Outputs markdown (default) or JSON. Respects token budgets for prompt injection.","entry_point":"vv inject","nodes":["cmd/vv","internal/index","internal/trends","internal/inject"],"steps":[{"from":"cmd/vv","to":"internal/index","op":"calls","ref":"cmd/vv/main.go:runInject"},{"from":"cmd/vv","to":"internal/trends","op":"calls","passes":"entries, project, weeks","ref":"internal/trends:Compute"},{"from":"cmd/vv","to":"internal/inject","op":"calls","passes":"entries, trends, options","ref":"internal/inject:Build"},{"from":"internal/inject","to":"internal/inject","op":"calls","ref":"internal/inject:Render"}]},{"slug":"vv-export","label":"vv export [--format json|csv] [--project X]","kind":"cli-verb","description":"Exports session data in JSON or CSV format for external analysis, dashboards, or data warehousing.","entry_point":"vv export","nodes":["cmd/vv","internal/index","internal/stats"],"steps":[{"from":"cmd/vv","to":"internal/index","op":"calls","ref":"cmd/vv/main.go:runExport"},{"from":"cmd/vv","to":"internal/stats","op":"calls","passes":"entries, project","ref":"internal/stats:ExportEntries"}]},{"slug":"vv-effectiveness","label":"vv effectiveness [--project X]","kind":"cli-verb","description":"Analyzes whether context availability correlates with better session outcomes (lower friction, fewer corrections). Requires vv reprocess --backfill-context to have been run first.","entry_point":"vv effectiveness","nodes":["cmd/vv","internal/index","internal/effectiveness"],"steps":[{"from":"cmd/vv","to":"internal/index","op":"calls","ref":"cmd/vv/main.go:runEffectiveness"},{"from":"cmd/vv","to":"internal/effectiveness","op":"calls","passes":"entries, project","ref":"internal/effectiveness:Analyze"}]},{"slug":"vv-check","label":"vv check [--json]","kind":"cli-verb","description":"Validates configuration, vault structure, hook installation, MCP registration, surface version consistency, project-local schemas, and development toolchain (go, git, zstd).","entry_point":"vv check","nodes":["cmd/vv","internal/check","internal/config","internal/mcp"],"steps":[{"from":"cmd/vv","to":"internal/check","op":"calls","ref":"cmd/vv/main.go:runCheck"},{"from":"internal/check","to":"internal/check","op":"calls","ref":"internal/check:Run"},{"from":"cmd/vv","to":"internal/mcp","op":"calls","passes":"config","ref":"internal/mcp:RegisterAllTools"}]},{"slug":"vv-hook-install","label":"vv hook install","kind":"cli-verb","description":"Registers SessionEnd, Stop, and PreCompact hooks in ~/.claude/settings.json, creating the file if needed and backing up existing settings. Idempotent.","entry_point":"vv hook install","nodes":["cmd/vv","internal/hook"],"steps":[{"from":"cmd/vv","to":"internal/hook","op":"calls","ref":"cmd/vv/main.go:runHook"},{"from":"internal/hook","to":"internal/hook","op":"calls","ref":"internal/hook:Install"}]},{"slug":"vv-mcp-install","label":"vv mcp install [--claude-only|--zed-only]","kind":"cli-verb","description":"Registers vibe-vault MCP server in Claude Code and/or Zed editor configs so AI agents can call vv tools on demand.","entry_point":"vv mcp install","nodes":["cmd/vv","internal/hook","internal/mcp"],"steps":[{"from":"cmd/vv","to":"internal/hook","op":"calls","ref":"cmd/vv/main.go:runMcp"},{"from":"internal/hook","to":"internal/hook","op":"calls","ref":"internal/hook:InstallMCPAll"}]},{"slug":"vv-mcp-server","label":"vv mcp","kind":"cli-verb","description":"Starts the MCP server, registering 20+ tools and accepting stdio-based tool invocations from Claude Code or Zed. Handles vv_bootstrap_context, vv_search_sessions, vv_capture_session, vv_get_project_context, and context manipulation tools.","entry_point":"vv mcp","nodes":["cmd/vv","internal/mcp","internal/index","internal/inject","internal/trends","internal/session","internal/sessionclaim"],"steps":[{"from":"cmd/vv","to":"internal/mcp","op":"calls","ref":"cmd/vv/main.go:runMcp"},{"from":"internal/mcp","to":"internal/mcp","op":"calls","ref":"internal/mcp:RegisterAllTools"},{"from":"internal/mcp","to":"internal/mcp","op":"calls","ref":"internal/mcp:Serve"}]},{"slug":"vv-context-init","label":"vv context init [--project X]","kind":"cli-verb","description":"Scaffolds vault-resident AI context (agentctx/) for a project: resume.md (state), history.md (auto-generated context doc), tasks/, commands/, rules/, skills/, agents/. Detects nesting and requires .vibe-vault.toml marker.","entry_point":"vv context init","nodes":["cmd/vv","internal/context","internal/identity"],"steps":[{"from":"cmd/vv","to":"internal/context","op":"calls","passes":"config, cwd, options","ref":"cmd/vv/main.go:runContext"},{"from":"internal/context","to":"internal/context","op":"calls","ref":"internal/context:Init"}]},{"slug":"vv-context-sync","label":"vv context sync [--project X] [--all] [--dry-run] [--force]","kind":"cli-verb","description":"Applies schema migrations, deploys shared files (CLAUDE.md, .claude/commands/) from vault to repo, resolves conflicts, and updates per-project context templates.","entry_point":"vv context sync","nodes":["cmd/vv","internal/context","internal/identity"],"steps":[{"from":"cmd/vv","to":"internal/context","op":"calls","passes":"config, cwd, options","ref":"cmd/vv/main.go:runContext"},{"from":"internal/context","to":"internal/context","op":"calls","ref":"internal/context:Sync"}]},{"slug":"vv-memory-link","label":"vv memory link [--force] [--dry-run]","kind":"cli-verb","description":"Symlinks Claude Code auto-memory directory (~/.claude/projects/{slug}/memory/) into the vault (Projects/{project}/agentctx/memory/) for centralized, version-controlled AI memory.","entry_point":"vv memory link","nodes":["cmd/vv","internal/memory","internal/identity"],"steps":[{"from":"cmd/vv","to":"internal/memory","op":"calls","passes":"vault path, cwd, options","ref":"cmd/vv/main.go:runMemory"},{"from":"internal/memory","to":"internal/memory","op":"calls","ref":"internal/memory:Link"}]},{"slug":"vv-vault-pull","label":"vv vault pull","kind":"cli-verb","description":"Fetches upstream vault changes and rebases local commits with automatic conflict resolution. Regenerates auto-generated files (history.md, session index) if needed.","entry_point":"vv vault pull","nodes":["cmd/vv","internal/vaultsync","internal/index"],"steps":[{"from":"cmd/vv","to":"internal/vaultsync","op":"calls","ref":"cmd/vv/main.go:runVault"},{"from":"internal/vaultsync","to":"internal/vaultsync","op":"calls","ref":"internal/vaultsync:Pull"},{"from":"cmd/vv","to":"internal/index","op":"calls","ref":"internal/index:Rebuild"}]},{"slug":"vv-vault-push","label":"vv vault push [--message TEXT] [--paths FILE...]","kind":"cli-verb","description":"Commits all vault changes (or specific paths) and pushes to remote. Retries via pull-rebase if rejected. Supports custom commit messages.","entry_point":"vv vault push","nodes":["cmd/vv","internal/vaultsync"],"steps":[{"from":"cmd/vv","to":"internal/vaultsync","op":"calls","passes":"vault path, message, paths","ref":"cmd/vv/main.go:runVault"},{"from":"internal/vaultsync","to":"internal/vaultsync","op":"calls","ref":"internal/vaultsync:CommitAndPush"}]},{"slug":"vv-zed-backfill","label":"vv zed backfill [--db PATH] [--project X] [--since DATE]","kind":"cli-verb","description":"Discovers Zed agent threads from threads.db, filters by date/project, extracts narrative and dialogue, and captures session notes via the shared capture pipeline.","entry_point":"vv zed backfill","nodes":["cmd/vv","internal/zed","internal/session","internal/narrative"],"steps":[{"from":"cmd/vv","to":"internal/zed","op":"calls","passes":"db path, project filter, since date","ref":"cmd/vv/main.go:runZedBackfill"},{"from":"internal/zed","to":"internal/zed","op":"calls","ref":"internal/zed:ParseDB"},{"from":"cmd/vv","to":"internal/session","op":"calls","passes":"threads","ref":"internal/zed:BatchCapture"}]},{"slug":"vv-zed-watch","label":"vv zed watch [--db PATH] [--debounce DURATION] [--project X]","kind":"cli-verb","description":"Watches threads.db for new Zed agent threads, debounces filesystem events, and auto-captures sessions via the session-source registry.","entry_point":"vv zed watch","nodes":["cmd/vv","internal/zed","internal/sessionsource","internal/session"],"steps":[{"from":"cmd/vv","to":"internal/sessionsource","op":"calls","ref":"cmd/vv/main.go:runZedWatch"},{"from":"internal/sessionsource","to":"internal/zed","op":"calls","passes":"db path, debounce, project filter","ref":"internal/zed:NewSource"},{"from":"internal/sessionsource","to":"internal/sessionsource","op":"calls","ref":"internal/sessionsource:Start"},{"from":"internal/zed","to":"internal/session","op":"calls","passes":"threads","ref":"internal/session:CaptureFromParsed"}]},{"slug":"mcp-tool-bootstrap-context","label":"MCP Tool: vv_bootstrap_context","kind":"slash-command","description":"Returns full session-start context in one call: recent sessions, open threads, key decisions, friction trends, effectiveness analysis. Used by /restart in Claude Code and agents.","entry_point":"vv_bootstrap_context","nodes":["internal/mcp","internal/index","internal/inject","internal/trends","internal/effectiveness","internal/sessionclaim"],"steps":[{"from":"internal/mcp","to":"internal/index","op":"calls","ref":"internal/mcp:NewBootstrapContextTool"},{"from":"internal/index","to":"internal/trends","op":"calls","passes":"entries, project, weeks","ref":"internal/trends:Compute"},{"from":"internal/index","to":"internal/effectiveness","op":"calls","passes":"entries, project","ref":"internal/effectiveness:Analyze"},{"from":"internal/index","to":"internal/sessionclaim","op":"calls","passes":"project root","ref":"internal/sessionclaim:AcquireOrRefresh"}]},{"slug":"mcp-tool-capture-session","label":"MCP Tool: vv_capture_session","kind":"slash-command","description":"Records a Zed or MCP agent session: summary, title, decisions, files changed, threads. Builds minimal transcript, runs project detection, sessionclaim integration, and captures into vault/staging.","entry_point":"vv_capture_session","nodes":["internal/mcp","internal/session","internal/narrative","internal/sessionclaim","internal/identity","internal/staging"],"steps":[{"from":"internal/mcp","to":"internal/session","op":"calls","passes":"summary, tag, decisions, files","ref":"internal/mcp:NewCaptureSessionTool"},{"from":"internal/session","to":"internal/identity","op":"calls","passes":"cwd","ref":"internal/session:DetectProject"},{"from":"internal/session","to":"internal/sessionclaim","op":"calls","passes":"project root","ref":"internal/sessionclaim:AcquireOrRefresh"},{"from":"internal/session","to":"internal/session","op":"calls","passes":"transcript, narrative, options, config","ref":"internal/session:CaptureFromParsed"}]}]};</script>
+<script>
+(() => {
+  const doc = FLOWS || {};
+  const nodes = Array.isArray(doc.nodes) ? doc.nodes : [];
+  const flows = Array.isArray(doc.flows) ? doc.flows : [];
+
+  // Title / subtitle
+  const title = document.getElementById('title');
+  const subtitle = document.getElementById('subtitle');
+  if (doc.project) title.textContent = doc.project + ' flows';
+  subtitle.textContent = flows.length + ' flow' + (flows.length === 1 ? '' : 's')
+                      + ' / ' + nodes.length + ' node' + (nodes.length === 1 ? '' : 's');
+
+  // Empty state when no flows are present.
+  const empty = document.getElementById('empty');
+  const svg = document.getElementById('graph');
+  if (flows.length === 0) {
+    empty.style.display = 'flex';
+    svg.style.display = 'none';
+  }
+
+  // ---------- Layout: assign columns by layout_group (first-seen order) ----------
+  const groupOrder = [];
+  const groupIndex = new Map();
+  nodes.forEach(n => {
+    const g = n.layout_group || 'default';
+    if (!groupIndex.has(g)) {
+      groupIndex.set(g, groupOrder.length);
+      groupOrder.push(g);
+    }
+  });
+
+  // Bucket nodes by group to compute per-column rows.
+  const byGroup = new Map();
+  groupOrder.forEach(g => byGroup.set(g, []));
+  nodes.forEach(n => {
+    const g = n.layout_group || 'default';
+    byGroup.get(g).push(n);
+  });
+
+  const NODE_W = 170, NODE_H = 44;
+  const COL_W = 220, ROW_H = 60;
+  const PAD_LEFT = 30, PAD_TOP = 40;
+
+  // node-id -> {x, y, w, h, col, row}
+  const nodePos = new Map();
+  groupOrder.forEach((g, ci) => {
+    byGroup.get(g).forEach((n, ri) => {
+      nodePos.set(n.id, {
+        x: PAD_LEFT + ci * COL_W,
+        y: PAD_TOP + ri * ROW_H,
+        w: NODE_W,
+        h: NODE_H,
+        col: ci,
+        row: ri,
+      });
+    });
+  });
+
+  // Compute SVG canvas size and set viewBox.
+  let maxCol = 0, maxRow = 0;
+  nodePos.forEach(p => {
+    if (p.col > maxCol) maxCol = p.col;
+    if (p.row > maxRow) maxRow = p.row;
+  });
+  const SVG_W = PAD_LEFT * 2 + (maxCol + 1) * COL_W;
+  const SVG_H = PAD_TOP * 2 + (maxRow + 1) * ROW_H + 20;
+  svg.setAttribute('viewBox', '0 0 ' + SVG_W + ' ' + SVG_H);
+
+  // ---------- Render nodes ----------
+  const nodesG = document.getElementById('g-nodes');
+  const edgesG = document.getElementById('g-edges');
+  const nodeEls = new Map();
+
+  function makeNode(n) {
+    const pos = nodePos.get(n.id);
+    if (!pos) return;
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'node');
+    g.setAttribute('data-id', n.id);
+    g.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('width', pos.w);
+    rect.setAttribute('height', pos.h);
+    rect.setAttribute('rx', 4);
+    g.appendChild(rect);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', 9);
+    label.setAttribute('y', 17);
+    label.textContent = n.label || n.id;
+    g.appendChild(label);
+
+    const groupText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    groupText.setAttribute('class', 'group');
+    groupText.setAttribute('x', 9);
+    groupText.setAttribute('y', 32);
+    const role = n.role ? n.role : (n.layout_group || '');
+    const trimmed = role.length > 28 ? role.slice(0, 26) + '...' : role;
+    groupText.textContent = trimmed;
+    g.appendChild(groupText);
+
+    const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    tip.textContent = n.id + (n.role ? ' - ' + n.role : '') + (n.path ? '\n' + n.path : '');
+    g.appendChild(tip);
+
+    nodesG.appendChild(g);
+    nodeEls.set(n.id, g);
+  }
+  nodes.forEach(makeNode);
+
+  // ---------- Edge routing ----------
+  function edgePath(fromId, toId) {
+    const a = nodePos.get(fromId);
+    const b = nodePos.get(toId);
+    if (!a || !b) return null;
+    if (fromId === toId) {
+      const sx = a.x + a.w, sy = a.y + a.h * 0.3;
+      const ex = a.x + a.w, ey = a.y + a.h * 0.7;
+      return 'M' + sx + ',' + sy +
+             ' C' + (sx + 40) + ',' + (sy - 10) +
+             ' ' + (ex + 40) + ',' + (ey + 10) +
+             ' ' + ex + ',' + ey;
+    }
+    let sx, sy, ex, ey;
+    if (b.col >= a.col) {
+      sx = a.x + a.w; sy = a.y + a.h / 2;
+      ex = b.x;       ey = b.y + b.h / 2;
+    } else {
+      sx = a.x;       sy = a.y + a.h / 2;
+      ex = b.x + b.w; ey = b.y + b.h / 2;
+    }
+    const dx = Math.abs(ex - sx);
+    const c = Math.max(40, dx * 0.35);
+    const sign = (b.col >= a.col) ? 1 : -1;
+    const c1x = sx + sign * c;
+    const c2x = ex - sign * c;
+    return 'M' + sx + ',' + sy +
+           ' C' + c1x + ',' + sy +
+           ' ' + c2x + ',' + ey +
+           ' ' + ex + ',' + ey;
+  }
+
+  // ---------- Sidebar list ----------
+  const list = document.getElementById('flow-list');
+  flows.forEach(f => {
+    const li = document.createElement('li');
+    li.dataset.slug = f.slug;
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = f.kind || 'flow';
+    const lbl = document.createElement('span');
+    lbl.className = 'label';
+    lbl.textContent = f.label || f.slug;
+    li.appendChild(chip);
+    li.appendChild(lbl);
+    li.addEventListener('click', () => selectFlow(f.slug));
+    list.appendChild(li);
+  });
+
+  // ---------- Selection state ----------
+  let currentSlug = null;
+
+  function clearGraph() {
+    while (edgesG.firstChild) edgesG.removeChild(edgesG.firstChild);
+    nodeEls.forEach(el => el.classList.remove('highlighted'));
+  }
+
+  function escapeText(s) {
+    return String(s == null ? '' : s);
+  }
+
+  function selectFlow(slug) {
+    const f = flows.find(x => x.slug === slug);
+    if (!f) return;
+    currentSlug = slug;
+
+    // Sidebar active state
+    Array.prototype.forEach.call(list.querySelectorAll('li'), li => {
+      li.classList.toggle('active', li.dataset.slug === slug);
+    });
+
+    // Details pane visibility
+    document.getElementById('d-hint').style.display = 'none';
+    document.getElementById('d-label').textContent = f.label || f.slug;
+    const dKind = document.getElementById('d-kind');
+    dKind.textContent = f.kind || '';
+    dKind.style.display = '';
+    const dDesc = document.getElementById('d-desc');
+    dDesc.textContent = f.description || '';
+    dDesc.style.display = '';
+    const dEntry = document.getElementById('d-entry');
+    dEntry.textContent = 'entry: ' + (f.entry_point || '(none)');
+    dEntry.style.display = '';
+    document.getElementById('d-steps-h').style.display = '';
+
+    // Steps list (numbered)
+    const stepsOl = document.getElementById('d-steps');
+    while (stepsOl.firstChild) stepsOl.removeChild(stepsOl.firstChild);
+    const steps = Array.isArray(f.steps) ? f.steps : [];
+    steps.forEach(s => {
+      const li = document.createElement('li');
+
+      const pair = document.createElement('div');
+      pair.className = 'pair';
+      pair.textContent = escapeText(s.from) + ' → ' + escapeText(s.to);
+      li.appendChild(pair);
+
+      const op = document.createElement('div');
+      op.className = 'op';
+      op.textContent = escapeText(s.op);
+      li.appendChild(op);
+
+      if (s.passes) {
+        const p = document.createElement('div');
+        p.className = 'passes';
+        p.textContent = 'passes: ' + s.passes;
+        li.appendChild(p);
+      }
+      if (s.ref) {
+        const r = document.createElement('div');
+        r.className = 'ref';
+        r.textContent = s.ref;
+        li.appendChild(r);
+      }
+      stepsOl.appendChild(li);
+    });
+
+    // Graph: highlight involved nodes, draw step edges
+    clearGraph();
+    const involved = new Set();
+    if (Array.isArray(f.nodes)) f.nodes.forEach(id => involved.add(id));
+    steps.forEach(s => { involved.add(s.from); involved.add(s.to); });
+    nodeEls.forEach((el, id) => {
+      if (involved.has(id)) el.classList.add('highlighted');
+    });
+
+    // Render edges, fanning out duplicate (from,to) pairs to avoid overdraw.
+    const seen = new Map();
+    steps.forEach(s => {
+      const key = s.from + '|' + s.to;
+      const nth = seen.get(key) || 0;
+      seen.set(key, nth + 1);
+
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('class', 'edge');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      let d = edgePath(s.from, s.to);
+      if (!d) return;
+
+      if (nth > 0 && s.from !== s.to) {
+        // Offset duplicate edges so the labels don't stack.
+        const a = nodePos.get(s.from), b = nodePos.get(s.to);
+        const sx = (b.col >= a.col ? a.x + a.w : a.x);
+        const sy = a.y + a.h / 2 + nth * 6 * ((nth % 2) ? 1 : -1);
+        const ex = (b.col >= a.col ? b.x : b.x + b.w);
+        const ey = b.y + b.h / 2 + nth * 6 * ((nth % 2) ? -1 : 1);
+        const c = Math.max(40, Math.abs(ex - sx) * 0.35);
+        const sign = (b.col >= a.col) ? 1 : -1;
+        d = 'M' + sx + ',' + sy +
+            ' C' + (sx + sign * c) + ',' + sy +
+            ' ' + (ex - sign * c) + ',' + ey +
+            ' ' + ex + ',' + ey;
+      }
+      path.setAttribute('d', d);
+      path.setAttribute('marker-end', 'url(#arrow)');
+      g.appendChild(path);
+
+      // Op annotation near the midpoint of the path.
+      const m = d.match(/M(-?\d+\.?\d*),(-?\d+\.?\d*).*?(-?\d+\.?\d*),(-?\d+\.?\d*)$/);
+      if (m && s.op) {
+        const mx = (parseFloat(m[1]) + parseFloat(m[3])) / 2;
+        const my = (parseFloat(m[2]) + parseFloat(m[4])) / 2 - 3;
+        const opText = s.op.length > 28 ? s.op.slice(0, 26) + '...' : s.op;
+        // Background rect for legibility over edges.
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        const approxW = opText.length * 6 + 6;
+        bg.setAttribute('class', 'op-label-bg');
+        bg.setAttribute('x', mx - approxW / 2);
+        bg.setAttribute('y', my - 9);
+        bg.setAttribute('width', approxW);
+        bg.setAttribute('height', 11);
+        bg.setAttribute('rx', 2);
+        g.appendChild(bg);
+
+        const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        t.setAttribute('class', 'op-label');
+        t.setAttribute('x', mx);
+        t.setAttribute('y', my);
+        t.setAttribute('text-anchor', 'middle');
+        t.textContent = opText;
+        g.appendChild(t);
+      }
+      edgesG.appendChild(g);
+    });
+  }
+
+  // No auto-select: leave the details pane in its hint state until the user
+  // clicks. (The graph already shows all nodes grouped by layout_group.)
+})();
+</script>
+</body>
+</html>
