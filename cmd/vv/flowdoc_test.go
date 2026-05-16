@@ -40,6 +40,31 @@ func (f *fakeFlowdocProvider) ChatCompletion(_ context.Context, req llm.Request)
 
 func (f *fakeFlowdocProvider) Name() string { return "fake-flowdoc" }
 
+// fakeAgenticProvider is the AgenticProvider counterpart to
+// fakeFlowdocProvider: returns a canned ToolsResponse on RunTools so
+// the agentic gen path can be exercised offline.
+type fakeAgenticProvider struct {
+	response *llm.ToolsResponse
+	err      error
+	calls    int
+	lastReq  llm.ToolsRequest
+}
+
+func (f *fakeAgenticProvider) ChatCompletion(_ context.Context, _ llm.Request) (*llm.Response, error) {
+	return &llm.Response{Content: ""}, nil
+}
+
+func (f *fakeAgenticProvider) Name() string { return "fake-agentic" }
+
+func (f *fakeAgenticProvider) RunTools(_ context.Context, req llm.ToolsRequest) (*llm.ToolsResponse, error) {
+	f.calls++
+	f.lastReq = req
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.response, nil
+}
+
 func TestRunFlowdocUsage(t *testing.T) {
 	stderr, restore := captureStderr(t)
 
@@ -145,6 +170,142 @@ func TestParseFlowdocGenArgs_Help(t *testing.T) {
 	}
 }
 
+func TestParseFlowdocGenArgs_DryRun(t *testing.T) {
+	// --dry-run and its --show-context alias both set the dryRun flag.
+	for _, flag := range []string{"--dry-run", "--show-context"} {
+		opts, err := parseFlowdocGenArgs([]string{flag})
+		if err != nil {
+			t.Fatalf("%s: parse error: %v", flag, err)
+		}
+		if !opts.dryRun {
+			t.Errorf("%s: dryRun = false, want true", flag)
+		}
+	}
+}
+
+func TestParseFlowdocGenArgs_StrategyFlag(t *testing.T) {
+	for _, s := range []string{"auto", "agentic", "single-shot"} {
+		opts, err := parseFlowdocGenArgs([]string{"--strategy", s})
+		if err != nil {
+			t.Fatalf("%s: parse error: %v", s, err)
+		}
+		if opts.strategy != s {
+			t.Errorf("%s: strategy = %q, want %q", s, opts.strategy, s)
+		}
+	}
+	opts, err := parseFlowdocGenArgs([]string{"--strategy=agentic"})
+	if err != nil {
+		t.Fatalf("equals form: %v", err)
+	}
+	if opts.strategy != "agentic" {
+		t.Errorf("equals form: got %q, want agentic", opts.strategy)
+	}
+	if _, err := parseFlowdocGenArgs([]string{"--strategy"}); err == nil {
+		t.Error("expected error for --strategy with no value")
+	}
+}
+
+func TestParseFlowdocGenArgs_MaxIterationsFlag(t *testing.T) {
+	opts, err := parseFlowdocGenArgs([]string{"--max-iterations", "50"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.maxIterations != 50 {
+		t.Errorf("got %d, want 50", opts.maxIterations)
+	}
+	opts, err = parseFlowdocGenArgs([]string{"--max-iterations=100"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.maxIterations != 100 {
+		t.Errorf("equals form: got %d, want 100", opts.maxIterations)
+	}
+	if _, err := parseFlowdocGenArgs([]string{"--max-iterations", "many"}); err == nil {
+		t.Error("expected error for non-numeric --max-iterations")
+	}
+	if _, err := parseFlowdocGenArgs([]string{"--max-iterations"}); err == nil {
+		t.Error("expected error for --max-iterations with no value")
+	}
+}
+
+func TestChooseStrategy(t *testing.T) {
+	// Explicit strategies pass through unchanged.
+	for _, s := range []string{"agentic", "single-shot"} {
+		got, err := chooseStrategy(flowdocGenOpts{strategy: s}, config.Config{})
+		if err != nil || got != s {
+			t.Errorf("explicit %q: got (%q, %v); want (%q, nil)", s, got, err, s)
+		}
+	}
+	// Auto with no Anthropic key (config or env) → single-shot.
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	got, err := chooseStrategy(flowdocGenOpts{strategy: "auto"}, config.Config{})
+	if err != nil || got != "single-shot" {
+		t.Errorf("auto + no key: got (%q, %v); want (single-shot, nil)", got, err)
+	}
+	// Auto with Anthropic key in config → agentic.
+	cfgWithKey := config.Config{
+		Providers: config.ProvidersConfig{
+			Anthropic: config.ProviderConfig{APIKey: "sk-ant-test"},
+		},
+	}
+	got, err = chooseStrategy(flowdocGenOpts{strategy: "auto"}, cfgWithKey)
+	if err != nil || got != "agentic" {
+		t.Errorf("auto + config key: got (%q, %v); want (agentic, nil)", got, err)
+	}
+	// Empty strategy == auto.
+	got, err = chooseStrategy(flowdocGenOpts{strategy: ""}, cfgWithKey)
+	if err != nil || got != "agentic" {
+		t.Errorf("empty strategy + config key: got (%q, %v); want (agentic, nil)", got, err)
+	}
+	// Unknown strategy → error.
+	if _, err := chooseStrategy(flowdocGenOpts{strategy: "weird"}, config.Config{}); err == nil {
+		t.Error("expected error for unknown strategy")
+	}
+}
+
+func TestResolveAgenticModel(t *testing.T) {
+	if got := resolveAgenticModel("claude-opus-4-7", "grok-4-fast"); got != "claude-opus-4-7" {
+		t.Errorf("flag wins: got %q", got)
+	}
+	if got := resolveAgenticModel("", "claude-sonnet-4-6"); got != "claude-sonnet-4-6" {
+		t.Errorf("anthropic config: got %q", got)
+	}
+	if got := resolveAgenticModel("", "grok-4-fast"); got != defaultAgenticModel {
+		t.Errorf("non-anthropic config: got %q, want %q", got, defaultAgenticModel)
+	}
+	if got := resolveAgenticModel("", ""); got != defaultAgenticModel {
+		t.Errorf("empty config: got %q, want %q", got, defaultAgenticModel)
+	}
+}
+
+func TestParseFlowdocGenArgs_BudgetFlags(t *testing.T) {
+	opts, err := parseFlowdocGenArgs([]string{"--max-context-bytes", "1024", "--max-output-tokens", "8000"})
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if opts.maxContextBytes != 1024 {
+		t.Errorf("maxContextBytes = %d, want 1024", opts.maxContextBytes)
+	}
+	if opts.maxOutputTokens != 8000 {
+		t.Errorf("maxOutputTokens = %d, want 8000", opts.maxOutputTokens)
+	}
+	// Equals form.
+	opts, err = parseFlowdocGenArgs([]string{"--max-context-bytes=2048", "--max-output-tokens=4096"})
+	if err != nil {
+		t.Fatalf("parse error (equals form): %v", err)
+	}
+	if opts.maxContextBytes != 2048 || opts.maxOutputTokens != 4096 {
+		t.Errorf("equals form: got context=%d output=%d, want 2048/4096", opts.maxContextBytes, opts.maxOutputTokens)
+	}
+	// A non-numeric value or a missing value is an error.
+	if _, err := parseFlowdocGenArgs([]string{"--max-context-bytes", "lots"}); err == nil {
+		t.Error("expected error for non-numeric --max-context-bytes")
+	}
+	if _, err := parseFlowdocGenArgs([]string{"--max-output-tokens"}); err == nil {
+		t.Error("expected error for --max-output-tokens with no value")
+	}
+}
+
 func TestStripJSONFence(t *testing.T) {
 	cases := []struct {
 		in, want string
@@ -207,7 +368,7 @@ func TestRunFlowdocGen_HappyPath(t *testing.T) {
 	stdout, restoreOut := captureStdout(t)
 	_, restoreErr := captureStderr(t)
 
-	code := runFlowdocGen([]string{"--project", "test-project", "--model", "fake-model"})
+	code := runFlowdocGen([]string{"--strategy", "single-shot", "--project", "test-project", "--model", "fake-model"})
 	restoreOut()
 	restoreErr()
 	if code != 0 {
@@ -276,7 +437,7 @@ func TestRunFlowdocGen_FencedJSON(t *testing.T) {
 	_, restoreOut := captureStdout(t)
 	_, restoreErr := captureStderr(t)
 
-	code := runFlowdocGen([]string{"--project", "test-project"})
+	code := runFlowdocGen([]string{"--strategy", "single-shot", "--project", "test-project"})
 	restoreOut()
 	restoreErr()
 	if code != 0 {
@@ -299,7 +460,7 @@ func TestRunFlowdocGen_InvalidJSON(t *testing.T) {
 	stderr, restoreErr := captureStderr(t)
 	_, restoreOut := captureStdout(t)
 
-	code := runFlowdocGen([]string{"--project", "test-project"})
+	code := runFlowdocGen([]string{"--strategy", "single-shot", "--project", "test-project"})
 	restoreOut()
 	restoreErr()
 	if code == 0 {
@@ -327,7 +488,7 @@ func TestRunFlowdocGen_ValidationFailure(t *testing.T) {
 	stderr, restoreErr := captureStderr(t)
 	_, restoreOut := captureStdout(t)
 
-	code := runFlowdocGen([]string{"--project", "x"})
+	code := runFlowdocGen([]string{"--strategy", "single-shot", "--project", "x"})
 	restoreOut()
 	restoreErr()
 	if code == 0 {
@@ -351,6 +512,294 @@ func TestRunFlowdocGen_UnknownFlag(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unknown flag") {
 		t.Errorf("stderr missing unknown-flag error: %q", stderr.String())
+	}
+}
+
+func TestRunFlowdocGen_DryRun(t *testing.T) {
+	tmp := t.TempDir()
+	withChdir(t, tmp)
+
+	// A small project tree: go.mod (manifest) + cmd/app/main.go (entry
+	// point) are key files; helper.go is ordinary source and must not be
+	// selected. No .git, so WalkRepo takes the WalkDir-fallback path and
+	// DetectProjectRoot falls back to cwd.
+	if err := os.WriteFile(filepath.Join(tmp, "go.mod"), []byte("module example.com/app\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "cmd", "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "cmd", "app", "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "helper.go"), []byte("package app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, restoreOut := captureStdout(t)
+	stderr, restoreErr := captureStderr(t)
+	// No provider is swapped in: a dry run must short-circuit before any
+	// config load or LLM provider construction. If it did not, this call
+	// would attempt a real provider and fail (or hang).
+	code := runFlowdocGen([]string{"--dry-run"})
+	restoreOut()
+	restoreErr()
+
+	if code != 0 {
+		t.Fatalf("runFlowdocGen --dry-run exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "dry-run (no LLM call)") {
+		t.Errorf("stdout missing dry-run banner: %q", out)
+	}
+	// Key files (manifest + entry point) are inlined; ordinary source is
+	// listed in the tree but never inlined as a key file.
+	if !strings.Contains(out, "+ go.mod") || !strings.Contains(out, "+ cmd/app/main.go") {
+		t.Errorf("stdout missing inlined key files: %q", out)
+	}
+	if strings.Contains(out, "+ helper.go") || strings.Contains(out, "===== FILE: helper.go") {
+		t.Errorf("ordinary source helper.go should not be inlined as a key file: %q", out)
+	}
+	// The assembled prompt is printed in full: the tree listing (which
+	// DOES name helper.go) and the inlined key-file contents.
+	if !strings.Contains(out, "===== USER PROMPT =====") {
+		t.Errorf("stdout missing assembled user prompt: %q", out)
+	}
+	if !strings.Contains(out, "# Project file tree") || !strings.Contains(out, "helper.go") {
+		t.Errorf("stdout missing tree listing (should name every file): %q", out)
+	}
+	if !strings.Contains(out, "===== FILE: go.mod =====") || !strings.Contains(out, "module example.com/app") {
+		t.Errorf("stdout missing inlined go.mod content: %q", out)
+	}
+}
+
+func TestRunFlowdocGen_FeedsSource(t *testing.T) {
+	tmp := t.TempDir()
+	withChdir(t, tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "go.mod"), []byte("module example.com/fed\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "cmd", "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "cmd", "app", "main.go"), []byte("package main\n\nfunc main() { println(\"fed\") }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeFlowdocProvider{content: minimalFlowDocJSON}
+	restore := swapFlowdocProvider(t, func(cfg config.Config) (llm.Provider, error) {
+		return fake, nil
+	})
+	defer restore()
+
+	_, restoreOut := captureStdout(t)
+	_, restoreErr := captureStderr(t)
+	code := runFlowdocGen([]string{"--strategy", "single-shot", "--project", "fed-project"})
+	restoreOut()
+	restoreErr()
+	if code != 0 {
+		t.Fatalf("runFlowdocGen exit code = %d, want 0", code)
+	}
+
+	// The core fix (flowdoc-gen-source-ingestion): the user prompt now
+	// carries the actual repo — the tree listing and the inlined
+	// contents of the key files — instead of a one-line "walk the source
+	// tree" instruction the model could not act on.
+	up := fake.lastReq.UserPrompt
+	if !strings.Contains(up, "# Project file tree") {
+		t.Errorf("user prompt missing tree listing: %q", up)
+	}
+	if !strings.Contains(up, "===== FILE: go.mod =====") || !strings.Contains(up, "module example.com/fed") {
+		t.Errorf("user prompt missing inlined go.mod content: %q", up)
+	}
+	if !strings.Contains(up, "cmd/app/main.go") {
+		t.Errorf("user prompt missing entry-point file: %q", up)
+	}
+}
+
+func TestRunFlowdocGen_ProseWrappedJSONStillParses(t *testing.T) {
+	// The operator's iter-241 agentic run on vibe-vault failed with
+	// `invalid character 'N' looking for beginning of value` — haiku-4-5
+	// emitted "Now I will..." prose before the JSON. finalizeFlowdoc now
+	// finds the first `{`, slices from there, and uses a streaming
+	// decoder so trailing commentary is ignored too.
+	tmp := t.TempDir()
+	withChdir(t, tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	wrapped := "Now I will produce flows.json based on my exploration:\n\n" +
+		minimalFlowDocJSON +
+		"\n\nLet me know if you need any adjustments."
+	fake := &fakeFlowdocProvider{content: wrapped}
+	swapFlowdocProvider(t, func(cfg config.Config) (llm.Provider, error) { return fake, nil })
+
+	_, restoreOut := captureStdout(t)
+	stderr, restoreErr := captureStderr(t)
+	code := runFlowdocGen([]string{"--strategy", "single-shot", "--project", "wrapped"})
+	restoreOut()
+	restoreErr()
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (prose-wrapped JSON should parse); stderr=%q", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "doc", "flows.json")); err != nil {
+		t.Errorf("expected doc/flows.json to be written: %v", err)
+	}
+}
+
+func TestRunFlowdocGen_ParseFailureWritesBrokenFile(t *testing.T) {
+	tmp := t.TempDir()
+	withChdir(t, tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	garbage := "This is not JSON at all and has no opening brace to find."
+	fake := &fakeFlowdocProvider{content: garbage}
+	swapFlowdocProvider(t, func(cfg config.Config) (llm.Provider, error) { return fake, nil })
+
+	_, restoreOut := captureStdout(t)
+	stderr, restoreErr := captureStderr(t)
+	code := runFlowdocGen([]string{"--strategy", "single-shot", "--project", "broken"})
+	restoreOut()
+	restoreErr()
+
+	if code == 0 {
+		t.Fatal("expected non-zero exit on parse failure")
+	}
+	// The raw response is preserved at doc/flows.json.broken so the
+	// operator can inspect what the model actually returned.
+	brokenPath := filepath.Join(tmp, "doc", "flows.json.broken")
+	data, err := os.ReadFile(brokenPath)
+	if err != nil {
+		t.Fatalf("expected %s to exist: %v", brokenPath, err)
+	}
+	if string(data) != garbage {
+		t.Errorf("broken file content = %q, want %q", data, garbage)
+	}
+	if !strings.Contains(stderr.String(), "raw response saved") {
+		t.Errorf("stderr should mention raw-response preservation, got: %q", stderr.String())
+	}
+}
+
+func TestRunFlowdocGen_AgenticHappyPath(t *testing.T) {
+	tmp := t.TempDir()
+	withChdir(t, tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "go.mod"), []byte("module example.com/a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeAgenticProvider{
+		response: &llm.ToolsResponse{
+			StopReason: "stop",
+			Content:    []llm.ContentBlock{{Type: "text", Text: minimalFlowDocJSON}},
+		},
+	}
+	swapAgenticProvider(t, func(model string, cfg config.Config) (llm.AgenticProvider, error) {
+		return fake, nil
+	})
+
+	_, restoreOut := captureStdout(t)
+	stderr, restoreErr := captureStderr(t)
+	code := runFlowdocGen([]string{"--strategy", "agentic", "--project", "agentic-test", "--model", "claude-haiku-4-5"})
+	restoreOut()
+	restoreErr()
+
+	if code != 0 {
+		t.Fatalf("agentic gen exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if fake.calls != 1 {
+		t.Errorf("RunTools called %d times, want 1", fake.calls)
+	}
+	if fake.lastReq.Model != "claude-haiku-4-5" {
+		t.Errorf("agentic model = %q, want claude-haiku-4-5", fake.lastReq.Model)
+	}
+	if len(fake.lastReq.Tools) != 3 {
+		t.Errorf("tool catalogue size = %d, want 3", len(fake.lastReq.Tools))
+	}
+	if fake.lastReq.ToolExecutor == nil {
+		t.Error("ToolExecutor should be set")
+	}
+	if fake.lastReq.MaxIterations != defaultAgenticMaxIterations {
+		t.Errorf("MaxIterations = %d, want %d", fake.lastReq.MaxIterations, defaultAgenticMaxIterations)
+	}
+	if fake.lastReq.MaxTokens != defaultFlowdocOutputTokens {
+		t.Errorf("MaxTokens = %d, want %d", fake.lastReq.MaxTokens, defaultFlowdocOutputTokens)
+	}
+	if !strings.Contains(fake.lastReq.System, "Tool use") {
+		t.Errorf("system prompt missing agentic addendum (looking for 'Tool use'): %q", fake.lastReq.System)
+	}
+	// Initial user prompt should orient the model toward tool use, no
+	// pre-baked tree listing.
+	if len(fake.lastReq.Messages) != 1 {
+		t.Fatalf("expected 1 initial message, got %d", len(fake.lastReq.Messages))
+	}
+	if fake.lastReq.Messages[0].Role != "user" {
+		t.Errorf("initial message role = %q, want user", fake.lastReq.Messages[0].Role)
+	}
+	initial := ""
+	for _, b := range fake.lastReq.Messages[0].Content {
+		if b.Type == "text" {
+			initial += b.Text
+		}
+	}
+	if !strings.Contains(initial, "list_dir") {
+		t.Errorf("initial user prompt should mention list_dir: %q", initial)
+	}
+	if strings.Contains(initial, "# Project file tree") {
+		t.Errorf("agentic initial prompt should NOT carry a pre-baked tree listing")
+	}
+
+	// doc/flows.json + FLOWS.html were written by finalizeFlowdoc.
+	if _, err := os.Stat(filepath.Join(tmp, "doc", "flows.json")); err != nil {
+		t.Errorf("expected doc/flows.json to exist: %v", err)
+	}
+}
+
+func TestRunFlowdocGen_AgenticDryRun(t *testing.T) {
+	tmp := t.TempDir()
+	withChdir(t, tmp)
+	if err := os.WriteFile(filepath.Join(tmp, "go.mod"), []byte("module a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, restoreOut := captureStdout(t)
+	stderr, restoreErr := captureStderr(t)
+	code := runFlowdocGen([]string{"--dry-run", "--strategy", "agentic"})
+	restoreOut()
+	restoreErr()
+
+	if code != 0 {
+		t.Fatalf("agentic dry-run exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"--strategy agentic",
+		"agentic model:",
+		"max iterations:",
+		"read_file",
+		"grep",
+		"list_dir",
+		"Tool use",
+		"INITIAL USER PROMPT",
+		"list_dir(\"\")",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("agentic dry-run output missing %q", want)
+		}
+	}
+	// Agentic dry-run must NOT print the single-shot "context:" / inlined
+	// file-content section — those belong to the single-shot path.
+	if strings.Contains(out, "===== FILE: go.mod =====") {
+		t.Errorf("agentic dry-run should not inline file contents; got: %q", out)
 	}
 }
 
@@ -678,6 +1127,15 @@ func swapFlowdocProvider(t *testing.T, fn func(config.Config) (llm.Provider, err
 	restore := func() { newProviderForFlowdoc = prev }
 	t.Cleanup(restore)
 	return restore
+}
+
+// swapAgenticProvider mirrors swapFlowdocProvider for the agentic
+// constructor. Tests use this when exercising --strategy agentic.
+func swapAgenticProvider(t *testing.T, fn func(model string, cfg config.Config) (llm.AgenticProvider, error)) {
+	t.Helper()
+	prev := newAgenticProviderForFlowdoc
+	newAgenticProviderForFlowdoc = fn
+	t.Cleanup(func() { newAgenticProviderForFlowdoc = prev })
 }
 
 // withChdir cd's into dir for the duration of the test, restoring the

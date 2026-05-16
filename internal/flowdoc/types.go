@@ -39,9 +39,10 @@ var (
 	validNodeKinds = map[string]struct{}{
 		"subsystem": {},
 		"binary":    {},
-		"service":   {},
-		"template":  {},
-		"stage":     {},
+		"library":   {}, // added 2026-05-16: Rust workspaces and other multi-crate
+		"service":   {}, // languages legitimately have library nodes; cando-rs measurement
+		"template":  {}, // (flowdoc-gen-source-ingestion Phase 3) emitted kind="library"
+		"stage":     {}, // and the old enum aborted gen entirely.
 		"external":  {},
 	}
 

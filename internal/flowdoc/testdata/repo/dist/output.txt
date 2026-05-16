@@ -1,0 +1,1 @@
+Committed build output — WalkRepo must filter this as noise.

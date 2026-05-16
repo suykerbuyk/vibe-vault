@@ -65,6 +65,32 @@ func NewProvider(enrich config.EnrichmentConfig, providers config.ProvidersConfi
 	return WithRetry(base), nil
 }
 
+// NewAgenticProvider creates an AgenticProvider (multi-turn tool-use)
+// from the providers config block. Today this is Anthropic-only; OpenAI-
+// compatible RunTools is deferred per the flowdoc-gen-source-ingestion
+// task anti-scope.
+//
+// The Anthropic API key is resolved regardless of enrich.Provider so an
+// operator with a grok-configured single-shot enrichment can still take
+// the agentic path for `vv flowdoc gen` by configuring an Anthropic key
+// — the auto-strategy in cmd/vv/flowdoc.go preflights with this same
+// lookup. A missing key returns the same actionable error as the
+// single-shot path.
+//
+// The model argument is the per-call model (typically picked by the
+// caller — `vv flowdoc gen` uses defaultAgenticModel when no --model is
+// passed) rather than enrich.Model, because the agentic mode needs an
+// Anthropic model name that may differ from the operator's default
+// single-shot model.
+func NewAgenticProvider(model string, providers config.ProvidersConfig) (AgenticProvider, error) {
+	apiKey, err := ResolveAPIKey("anthropic", providers)
+	if err != nil {
+		return nil, fmt.Errorf("agentic mode requires an Anthropic API key: %w", err)
+	}
+	baseURL := resolveBaseURL("anthropic", "", providers)
+	return NewAnthropicAgentic(baseURL, apiKey, model)
+}
+
 // resolveBaseURL implements the Decision C precedence rule:
 // providers.<P>.base_url > enrichment.base_url > "" (let each NewX
 // constructor fall back to its own canonical URL).

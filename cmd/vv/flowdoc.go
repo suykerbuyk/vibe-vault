@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,28 @@ import (
 	"github.com/suykerbuyk/vibe-vault/internal/llm"
 	"github.com/suykerbuyk/vibe-vault/internal/session"
 )
+
+// defaultFlowdocOutputTokens is the LLM response MaxTokens for a
+// generation run when --max-output-tokens is not given. The
+// flowdoc-gen-source-ingestion task (finding M3) flags the safe ceiling
+// as model-dependent and to-be-discovered during the Phase-3
+// measurement; the flag exists so that discovery does not need a
+// rebuild.
+const defaultFlowdocOutputTokens = 16384
+
+// defaultAgenticModel is the Anthropic model used by the agentic
+// strategy when --model is not given. Per the Phase-4 plan: haiku is
+// the cheapest tool-use-capable Anthropic model; sonnet/opus are
+// available via --model. (Grok / OpenAI cannot do agentic today —
+// flowdoc-gen-source-ingestion anti-scope.)
+const defaultAgenticModel = "claude-haiku-4-5"
+
+// defaultAgenticMaxIterations bounds the agentic tool-use loop. The
+// pre-retirement default was 10 (sized for wrap-dispatch); repo
+// exploration is heavier — the iter-236 spike that motivated this work
+// used Read/Glob/Grep tens of times. 30 leaves headroom over typical
+// runs without letting a runaway loop burn unbounded money.
+const defaultAgenticMaxIterations = 30
 
 // defaultFlowdocModel is the hard fallback when neither --model nor
 // the configured enrichment.model is set. Per the flowdoc-command v2
@@ -34,6 +57,13 @@ const defaultFlowdocModel = "grok-4-fast"
 // re-constructing the provider per model.
 var newProviderForFlowdoc = func(cfg config.Config) (llm.Provider, error) {
 	return llm.NewProvider(cfg.Enrichment, cfg.Providers)
+}
+
+// newAgenticProviderForFlowdoc constructs the agentic (Anthropic
+// multi-turn tool-use) provider. Mirrors newProviderForFlowdoc so tests
+// can swap in a fake AgenticProvider without real credentials.
+var newAgenticProviderForFlowdoc = func(model string, cfg config.Config) (llm.AgenticProvider, error) {
+	return llm.NewAgenticProvider(model, cfg.Providers)
 }
 
 // runFlowdoc dispatches `vv flowdoc <verb>`. Returns the process exit
@@ -61,13 +91,18 @@ func runFlowdoc(args []string) int {
 	}
 }
 
-// flowdocGenOpts holds parsed --project / --model / --open flag values.
+// flowdocGenOpts holds parsed flag values for `vv flowdoc gen`.
 // Extracted as a struct so tests can assert parse outcomes without
 // driving the full LLM happy path.
 type flowdocGenOpts struct {
-	project string
-	model   string
-	open    bool
+	project         string
+	model           string
+	open            bool
+	dryRun          bool   // --dry-run / --show-context: inspect the context, no LLM call
+	maxContextBytes int    // --max-context-bytes: file-content budget; 0 → DefaultContextBudgetBytes
+	maxOutputTokens int    // --max-output-tokens: LLM response cap; 0 → defaultFlowdocOutputTokens
+	strategy        string // --strategy: auto|agentic|single-shot; "" → auto
+	maxIterations   int    // --max-iterations: agentic tool-use cap; 0 → defaultAgenticMaxIterations
 }
 
 // parseFlowdocGenArgs parses the flag set for `vv flowdoc gen`. Unknown
@@ -83,6 +118,64 @@ func parseFlowdocGenArgs(args []string) (flowdocGenOpts, error) {
 			return opts, fmt.Errorf("help requested")
 		case a == "--open":
 			opts.open = true
+		case a == "--dry-run", a == "--show-context":
+			opts.dryRun = true
+		case a == "--max-context-bytes":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("--max-context-bytes requires a value")
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				return opts, fmt.Errorf("--max-context-bytes: %v", err)
+			}
+			opts.maxContextBytes = n
+			i++
+		case strings.HasPrefix(a, "--max-context-bytes="):
+			n, err := strconv.Atoi(strings.TrimPrefix(a, "--max-context-bytes="))
+			if err != nil {
+				return opts, fmt.Errorf("--max-context-bytes: %v", err)
+			}
+			opts.maxContextBytes = n
+		case a == "--max-output-tokens":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("--max-output-tokens requires a value")
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				return opts, fmt.Errorf("--max-output-tokens: %v", err)
+			}
+			opts.maxOutputTokens = n
+			i++
+		case strings.HasPrefix(a, "--max-output-tokens="):
+			n, err := strconv.Atoi(strings.TrimPrefix(a, "--max-output-tokens="))
+			if err != nil {
+				return opts, fmt.Errorf("--max-output-tokens: %v", err)
+			}
+			opts.maxOutputTokens = n
+		case a == "--strategy":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("--strategy requires a value (auto|agentic|single-shot)")
+			}
+			opts.strategy = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--strategy="):
+			opts.strategy = strings.TrimPrefix(a, "--strategy=")
+		case a == "--max-iterations":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("--max-iterations requires a value")
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				return opts, fmt.Errorf("--max-iterations: %v", err)
+			}
+			opts.maxIterations = n
+			i++
+		case strings.HasPrefix(a, "--max-iterations="):
+			n, err := strconv.Atoi(strings.TrimPrefix(a, "--max-iterations="))
+			if err != nil {
+				return opts, fmt.Errorf("--max-iterations: %v", err)
+			}
+			opts.maxIterations = n
 		case a == "--project":
 			if i+1 >= len(args) {
 				return opts, fmt.Errorf("--project requires a value")
@@ -123,11 +216,11 @@ func runFlowdocGen(args []string) int {
 	opts, err := parseFlowdocGenArgs(args)
 	if err != nil {
 		if err.Error() == "help requested" {
-			fmt.Fprintln(os.Stderr, "usage: vv flowdoc gen [--project <name>] [--model <name>] [--open]")
+			fmt.Fprintln(os.Stderr, "usage: vv flowdoc gen [--project <name>] [--model <name>] [--strategy auto|agentic|single-shot] [--max-iterations <n>] [--max-context-bytes <n>] [--max-output-tokens <n>] [--dry-run] [--open]")
 			return 0
 		}
 		fmt.Fprintf(os.Stderr, "flowdoc gen: %v\n", err)
-		fmt.Fprintln(os.Stderr, "usage: vv flowdoc gen [--project <name>] [--model <name>] [--open]")
+		fmt.Fprintln(os.Stderr, "usage: vv flowdoc gen [--project <name>] [--model <name>] [--strategy auto|agentic|single-shot] [--max-iterations <n>] [--max-context-bytes <n>] [--max-output-tokens <n>] [--dry-run] [--open]")
 		return 2
 	}
 
@@ -157,16 +250,95 @@ func runFlowdocGen(args []string) int {
 		projectRoot = cwd
 	}
 
+	// Repo introspection: enumerate the source tree and pick the key
+	// files whose contents will be inlined into the prompt. This is the
+	// input-gathering step the shipped single-shot command never had
+	// (flowdoc-gen-source-ingestion); without it the model receives no
+	// repo bytes and hallucinates a plausible project.
+	view, err := flowdoc.WalkRepo(projectRoot)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "flowdoc gen: walk repo: %v\n", err)
+		return 1
+	}
+	keyFiles := flowdoc.SelectKeyFiles(view)
+
+	maxContextBytes := opts.maxContextBytes
+	if maxContextBytes == 0 {
+		maxContextBytes = flowdoc.DefaultContextBudgetBytes
+	}
+
+	// --dry-run / --show-context: print the would-be prompt without an
+	// LLM call. Auto/blank strategy defaults to single-shot so dry-run
+	// stays config-free; explicit --strategy agentic shows the tool
+	// catalogue + the agentic initial prompt instead.
+	if opts.dryRun {
+		s := opts.strategy
+		if s == "" || s == "auto" {
+			s = "single-shot"
+		}
+		switch s {
+		case "agentic":
+			return runFlowdocDryRunAgentic(project, projectRoot, view, opts)
+		case "single-shot":
+			return runFlowdocDryRunSingleShot(project, projectRoot, view, keyFiles, maxContextBytes)
+		default:
+			fmt.Fprintf(os.Stderr, "flowdoc gen: unknown --strategy %q (want auto|agentic|single-shot)\n", s)
+			return 2
+		}
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "flowdoc gen: load config: %v\n", err)
 		return 1
 	}
 
-	// Model resolution: flag > config > hard default. Override
-	// cfg.Enrichment.Model so the provider's NewX constructor sees the
-	// caller-selected model without needing per-request plumbing —
-	// matches what every other vv subcommand does.
+	strategy, err := chooseStrategy(opts, cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "flowdoc gen: %v\n", err)
+		return 1
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	var rawJSON string
+	switch strategy {
+	case "agentic":
+		rawJSON, err = runFlowdocAgenticLLM(ctx, project, view, opts, cfg)
+	case "single-shot":
+		rawJSON, err = runFlowdocSingleShotLLM(ctx, project, view, keyFiles, maxContextBytes, opts, cfg)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "flowdoc gen: %v\n", err)
+		return 1
+	}
+
+	return finalizeFlowdoc(rawJSON, project, projectRoot, opts)
+}
+
+// chooseStrategy resolves the effective strategy for a real (non-dry-run)
+// gen, applying the auto policy: agentic if an Anthropic API key is
+// configured (config or env), single-shot otherwise. Explicit
+// --strategy agentic|single-shot is passed through unchanged.
+func chooseStrategy(opts flowdocGenOpts, cfg config.Config) (string, error) {
+	switch opts.strategy {
+	case "agentic", "single-shot":
+		return opts.strategy, nil
+	case "", "auto":
+		if _, err := llm.ResolveAPIKey("anthropic", cfg.Providers); err == nil {
+			return "agentic", nil
+		}
+		return "single-shot", nil
+	default:
+		return "", fmt.Errorf("unknown --strategy %q (want auto|agentic|single-shot)", opts.strategy)
+	}
+}
+
+// runFlowdocSingleShotLLM is the Phase-3 single-shot path: assemble the
+// tree listing + curated key-file contents into one user prompt, send a
+// single ChatCompletion, return the raw text response.
+func runFlowdocSingleShotLLM(ctx context.Context, project string, view flowdoc.RepoView, keyFiles []string, maxContextBytes int, opts flowdocGenOpts, cfg config.Config) (string, error) {
 	model := opts.model
 	if model == "" {
 		model = cfg.Enrichment.Model
@@ -175,30 +347,26 @@ func runFlowdocGen(args []string) int {
 		model = defaultFlowdocModel
 	}
 	cfg.Enrichment.Model = model
-	// Force enrichment on for this invocation — `vv flowdoc gen` is a
-	// direct LLM action; the operator wouldn't invoke it without
-	// expecting an LLM call. Keeping the original config's API key /
-	// provider selection intact, we only flip the enabled bit.
 	cfg.Enrichment.Enabled = true
 
 	provider, err := newProviderForFlowdoc(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "flowdoc gen: provider init: %v\n", err)
-		return 1
+		return "", fmt.Errorf("provider init: %w", err)
 	}
 	if provider == nil {
-		fmt.Fprintln(os.Stderr, "flowdoc gen: no LLM provider available (check enrichment config)")
-		return 1
+		return "", fmt.Errorf("no LLM provider available (check enrichment config)")
 	}
 
-	userPrompt := fmt.Sprintf(
-		"Produce flows.json for the %q project at %s. Walk the source "+
-			"tree, templates, and MCP prompts. Return ONLY the JSON object.",
-		project, projectRoot,
-	)
+	contextBlock, stats := flowdoc.BuildContext(view, keyFiles, maxContextBytes)
+	userPrompt := buildUserPrompt(project, contextBlock)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
+	maxOutputTokens := opts.maxOutputTokens
+	if maxOutputTokens == 0 {
+		maxOutputTokens = defaultFlowdocOutputTokens
+	}
+
+	fmt.Printf("flowdoc gen: single-shot, %s walk, %d key files inlined (%d dropped), %d-byte context, model %s\n",
+		view.Source, len(stats.Included), len(stats.Dropped), stats.TotalBytes, model)
 
 	resp, err := provider.ChatCompletion(ctx, llm.Request{
 		Model:       model,
@@ -206,23 +374,140 @@ func runFlowdocGen(args []string) int {
 		UserPrompt:  userPrompt,
 		Temperature: 0.0,
 		JSONMode:    true,
-		MaxTokens:   16384,
+		MaxTokens:   maxOutputTokens,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "flowdoc gen: LLM call: %v\n", err)
-		return 1
+		return "", fmt.Errorf("LLM call: %w", err)
+	}
+	return resp.Content, nil
+}
+
+// runFlowdocAgenticLLM is the Phase-4 agentic path: construct an
+// AnthropicAgentic provider + a RepoView tool backend, hand the model
+// the orienting prompt, and let it explore via read_file / grep /
+// list_dir until it emits a terminal flows.json message. Returns the
+// final assistant turn's text content.
+func runFlowdocAgenticLLM(ctx context.Context, project string, view flowdoc.RepoView, opts flowdocGenOpts, cfg config.Config) (string, error) {
+	model := resolveAgenticModel(opts.model, cfg.Enrichment.Model)
+
+	provider, err := newAgenticProviderForFlowdoc(model, cfg)
+	if err != nil {
+		return "", fmt.Errorf("agentic provider init: %w", err)
+	}
+	if provider == nil {
+		return "", fmt.Errorf("no agentic provider available")
 	}
 
-	raw := stripJSONFence(resp.Content)
+	tools, exec := flowdoc.NewRepoViewTools(view)
 
+	maxIter := opts.maxIterations
+	if maxIter == 0 {
+		maxIter = defaultAgenticMaxIterations
+	}
+	maxOutputTokens := opts.maxOutputTokens
+	if maxOutputTokens == 0 {
+		maxOutputTokens = defaultFlowdocOutputTokens
+	}
+
+	fmt.Printf("flowdoc gen: agentic, %s walk, %d files enumerated, %d tools, max-iter %d, model %s\n",
+		view.Source, view.Budget.FileCount, len(tools), maxIter, model)
+
+	resp, err := provider.RunTools(ctx, llm.ToolsRequest{
+		Model:  model,
+		System: flowdoc.Brief + flowdoc.BriefAgenticAddendum,
+		Messages: []llm.ToolsMessage{
+			{Role: "user", Content: []llm.ContentBlock{{Type: "text", Text: buildAgenticUserPrompt(project)}}},
+		},
+		Tools:         tools,
+		MaxIterations: maxIter,
+		MaxTokens:     maxOutputTokens,
+		ToolExecutor:  exec,
+	})
+	if err != nil {
+		return "", fmt.Errorf("RunTools: %w", err)
+	}
+	if resp.StopReason == "max_tokens" {
+		fmt.Fprintf(os.Stderr, "flowdoc gen: warning — agentic loop hit max-iterations (%d) cap; output may be incomplete; raise --max-iterations\n", maxIter)
+	}
+	return extractAgenticText(resp.Content), nil
+}
+
+// resolveAgenticModel picks the model for an agentic run: explicit
+// --model wins, then the config's enrichment.model if it is an
+// Anthropic ("claude-*") model, finally defaultAgenticModel.
+func resolveAgenticModel(flagModel, cfgModel string) string {
+	if flagModel != "" {
+		return flagModel
+	}
+	if strings.HasPrefix(strings.ToLower(cfgModel), "claude") {
+		return cfgModel
+	}
+	return defaultAgenticModel
+}
+
+// extractAgenticText concatenates the text content of an agentic
+// response's final assistant turn. tool_use and other block types are
+// ignored — the final flows.json should be in a text block.
+func extractAgenticText(blocks []llm.ContentBlock) string {
+	var sb strings.Builder
+	for _, b := range blocks {
+		if b.Type == "text" {
+			sb.WriteString(b.Text)
+		}
+	}
+	return sb.String()
+}
+
+// buildAgenticUserPrompt assembles the initial user message for an
+// agentic run. Unlike the single-shot prompt, this carries no tree
+// listing or file contents — the model is expected to discover them via
+// list_dir / read_file / grep.
+func buildAgenticUserPrompt(project string) string {
+	return fmt.Sprintf(
+		"Produce flows.json for the %q project. Use the read_file, grep, "+
+			"and list_dir tools to explore the project — start with "+
+			"list_dir(\"\") to see the repository root, then drill into "+
+			"the directories and files that describe its workflows. Base "+
+			"every node, path, and ref strictly on what the tools reveal; "+
+			"do not invent paths or describe behavior you have not "+
+			"verified. When you have enough to produce a complete "+
+			"flows.json, return ONLY the JSON object as your final message.",
+		project,
+	)
+}
+
+// finalizeFlowdoc parses the raw LLM response, stamps required metadata,
+// validates the FlowDoc, and writes doc/flows.json + doc/FLOWS.html.
+// Shared by both strategies. Returns the process exit code.
+func finalizeFlowdoc(rawJSON, project, projectRoot string, opts flowdocGenOpts) int {
+	// Extract the first {...} object: strip a markdown fence; skip any
+	// leading prose the model emits before the JSON ("Now I will produce
+	// flows.json:"); use a streaming decoder so trailing commentary is
+	// ignored. This is the agentic-mode "model wraps its output in
+	// prose" failure mode the operator hit with haiku-4-5 on vibe-vault.
+	candidate := stripJSONFence(rawJSON)
+	if open := strings.IndexByte(candidate, '{'); open > 0 {
+		candidate = candidate[open:]
+	}
 	var doc flowdoc.FlowDoc
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+	if err := json.NewDecoder(strings.NewReader(candidate)).Decode(&doc); err != nil {
 		fmt.Fprintf(os.Stderr, "flowdoc gen: parse LLM response: %v\n", err)
+		// A response that does not close its top-level object is the
+		// signature of an output-token truncation (finding M3).
+		if !strings.HasSuffix(strings.TrimSpace(candidate), "}") {
+			fmt.Fprintln(os.Stderr, "flowdoc gen: response does not end with '}' — likely truncated; raise --max-output-tokens")
+		}
+		// Preserve the raw response for inspection — the operator
+		// otherwise loses everything on a parse failure.
+		brokenPath := filepath.Join(projectRoot, "doc", "flows.json.broken")
+		if err := os.MkdirAll(filepath.Dir(brokenPath), 0o755); err == nil {
+			if err := os.WriteFile(brokenPath, []byte(rawJSON), 0o644); err == nil {
+				fmt.Fprintf(os.Stderr, "flowdoc gen: raw response saved to %s for inspection (%d bytes)\n", brokenPath, len(rawJSON))
+			}
+		}
 		return 1
 	}
 
-	// Stamp metadata the LLM may have missed or stubbed. Generator string
-	// is canonical so downstream tooling can recognize provenance.
 	if doc.SchemaVersion == "" {
 		doc.SchemaVersion = flowdoc.SchemaVersion
 	}
@@ -266,6 +551,91 @@ func runFlowdocGen(args []string) int {
 		openInBrowser(htmlPath)
 	}
 
+	return 0
+}
+
+// runFlowdocDryRunSingleShot is the dry-run for the single-shot
+// strategy: assembles the same context the real single-shot path would
+// send (tree listing + inlined key files) and prints it plus the full
+// system + user prompts. Default for --dry-run unless --strategy is
+// explicitly set.
+func runFlowdocDryRunSingleShot(project, projectRoot string, view flowdoc.RepoView, keyFiles []string, maxContextBytes int) int {
+	contextBlock, stats := flowdoc.BuildContext(view, keyFiles, maxContextBytes)
+
+	fmt.Println("flowdoc gen --dry-run (no LLM call)")
+	fmt.Printf("  project:      %s\n", project)
+	fmt.Printf("  root:         %s\n", projectRoot)
+	fmt.Printf("  walk source:  %s\n", view.Source)
+	fmt.Printf("  enumerated:   %d files, %d bytes (~%d est. tokens)\n",
+		view.Budget.FileCount, view.Budget.TotalBytes, view.Budget.EstimatedTokens)
+	fmt.Printf("  key files:    %d selected, %d inlined, %d dropped\n",
+		len(keyFiles), len(stats.Included), len(stats.Dropped))
+	fmt.Printf("  context:      %d bytes total, %d of file content (budget %d)\n",
+		stats.TotalBytes, stats.ContentBytes, maxContextBytes)
+	for _, p := range stats.Included {
+		fmt.Printf("    + %s\n", p)
+	}
+	for _, p := range stats.Dropped {
+		fmt.Printf("    - %s (dropped: over budget or unreadable)\n", p)
+	}
+
+	fmt.Println()
+	fmt.Println("===== SYSTEM PROMPT (flowdoc.Brief) =====")
+	fmt.Print(flowdoc.Brief) // Brief is newline-terminated already
+	fmt.Println("===== USER PROMPT =====")
+	fmt.Println(buildUserPrompt(project, contextBlock))
+	return 0
+}
+
+// buildUserPrompt assembles the user message for `vv flowdoc gen`: the
+// generation instruction followed by the repo context block produced by
+// flowdoc.BuildContext. Shared by the real single-shot path and the
+// single-shot dry-run so the inspection handle shows exactly what the
+// LLM would receive.
+func buildUserPrompt(project, contextBlock string) string {
+	return fmt.Sprintf(
+		"Produce flows.json for the %q project. The project's file tree "+
+			"and the contents of its key files follow. Base every node, "+
+			"path, and ref strictly on what you see below — do not invent "+
+			"paths or describe behavior not present in the provided "+
+			"sources. Return ONLY the JSON object.\n\n%s",
+		project, contextBlock,
+	)
+}
+
+// runFlowdocDryRunAgentic is the dry-run for the agentic strategy: it
+// shows the tool catalogue, the operative model + iteration cap, and
+// the system + initial-user prompt that would seed the RunTools loop —
+// without making any LLM call. The multi-turn exploration itself is
+// opaque without running the model, but the setup is fully inspectable.
+func runFlowdocDryRunAgentic(project, projectRoot string, view flowdoc.RepoView, opts flowdocGenOpts) int {
+	tools, _ := flowdoc.NewRepoViewTools(view)
+
+	maxIter := opts.maxIterations
+	if maxIter == 0 {
+		maxIter = defaultAgenticMaxIterations
+	}
+	model := resolveAgenticModel(opts.model, "")
+
+	fmt.Println("flowdoc gen --dry-run --strategy agentic (no LLM call)")
+	fmt.Printf("  project:        %s\n", project)
+	fmt.Printf("  root:           %s\n", projectRoot)
+	fmt.Printf("  walk source:    %s\n", view.Source)
+	fmt.Printf("  enumerated:     %d files, %d bytes (~%d est. tokens)\n",
+		view.Budget.FileCount, view.Budget.TotalBytes, view.Budget.EstimatedTokens)
+	fmt.Printf("  agentic model:  %s (override with --model)\n", model)
+	fmt.Printf("  max iterations: %d (override with --max-iterations)\n", maxIter)
+	fmt.Printf("  tools:          %d\n", len(tools))
+	for _, t := range tools {
+		fmt.Printf("    %s\n", t.Name)
+	}
+
+	fmt.Println()
+	fmt.Println("===== SYSTEM PROMPT (Brief + agentic addendum) =====")
+	fmt.Print(flowdoc.Brief) // Brief is newline-terminated
+	fmt.Print(flowdoc.BriefAgenticAddendum)
+	fmt.Println("===== INITIAL USER PROMPT =====")
+	fmt.Println(buildAgenticUserPrompt(project))
 	return 0
 }
 
