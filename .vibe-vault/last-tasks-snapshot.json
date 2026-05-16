@@ -1,10 +1,9 @@
 {
-  "iter_n": 238,
-  "anchor_sha": "1428fb11b647d991690d3d0e79b9292009568b86",
+  "iter_n": 239,
+  "anchor_sha": "f2d654583c1f5ca8ca807d3adb7972a00b81680f",
   "active": [
     "claude-code-tool-selection-telemetry",
     "flowdoc-command",
-    "flowdoc-completeness-audit",
     "flowdoc-gen-source-ingestion",
     "flowdoc-verify-lint",
     "flowdoc-verify-multi-language-symbol-grammar",
@@ -42,6 +41,7 @@
     "file-history-snapshots",
     "fix-claude-plugin-mode",
     "floating-floating-otter",
+    "flowdoc-completeness-audit",
     "foamy-hugging-ripple",
     "force-sync-template-propagation",
     "friction-threshold-alerts",
