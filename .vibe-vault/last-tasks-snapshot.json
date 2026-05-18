@@ -1,12 +1,8 @@
 {
-  "iter_n": 239,
-  "anchor_sha": "f2d654583c1f5ca8ca807d3adb7972a00b81680f",
+  "iter_n": 241,
+  "anchor_sha": "9a781d79b7e5cf171aabf420043ecf7c59cd9d97",
   "active": [
     "claude-code-tool-selection-telemetry",
-    "flowdoc-command",
-    "flowdoc-gen-source-ingestion",
-    "flowdoc-verify-lint",
-    "flowdoc-verify-multi-language-symbol-grammar",
     "mcp-call-tracing",
     "worktree-gc-default-candidate-parents-drops-current-branch",
     "wrap-integration-spike"
@@ -41,7 +37,11 @@
     "file-history-snapshots",
     "fix-claude-plugin-mode",
     "floating-floating-otter",
+    "flowdoc-command",
     "flowdoc-completeness-audit",
+    "flowdoc-gen-source-ingestion",
+    "flowdoc-verify-lint",
+    "flowdoc-verify-multi-language-symbol-grammar",
     "foamy-hugging-ripple",
     "force-sync-template-propagation",
     "friction-threshold-alerts",
