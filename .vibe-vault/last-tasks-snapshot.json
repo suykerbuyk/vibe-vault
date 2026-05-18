@@ -1,6 +1,6 @@
 {
-  "iter_n": 241,
-  "anchor_sha": "9a781d79b7e5cf171aabf420043ecf7c59cd9d97",
+  "iter_n": 242,
+  "anchor_sha": "8b8e9483014de3f9b6c8c7454a3a87b5867628e1",
   "active": [
     "claude-code-tool-selection-telemetry",
     "mcp-call-tracing",
